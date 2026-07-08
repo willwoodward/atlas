@@ -16,10 +16,11 @@ export default defineConfig({
         theme_color: '#efeae0',
         background_color: '#efeae0',
         display: 'standalone',
-        start_url: '/',
+        start_url: '/atlas/',
+        scope: '/atlas/',
         icons: [
-          { src: '/icons/192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icons/512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          { src: '/atlas/icons/192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/atlas/icons/512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
         ],
       },
       workbox: {
