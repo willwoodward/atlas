@@ -14,17 +14,29 @@ import { useIntegrations }       from './context/IntegrationsContext.jsx'
 import { useLocalCalendar }      from './context/LocalCalendarContext.jsx'
 import DesktopLayout from './desktop/DesktopLayout.jsx'
 import TabletLayout  from './tablet/TabletLayout.jsx'
+import MobileLayout  from './mobile/MobileLayout.jsx'
 import LoginPage     from './desktop/LoginPage.jsx'
 
-const BREAKPOINT = 1280
+const BP_MOBILE  = 768
+const BP_DESKTOP = 1280
 
 function useLayout() {
-  const [layout, setLayout] = useState(() => window.innerWidth < BREAKPOINT ? 'tablet' : 'desktop')
+  const [layout, setLayout] = useState(() => {
+    if (window.innerWidth < BP_MOBILE) return 'mobile'
+    if (window.innerWidth < BP_DESKTOP) return 'tablet'
+    return 'desktop'
+  })
   useEffect(() => {
-    const mq = window.matchMedia(`(max-width: ${BREAKPOINT - 1}px)`)
-    const handler = (e) => setLayout(e.matches ? 'tablet' : 'desktop')
-    mq.addEventListener('change', handler)
-    return () => mq.removeEventListener('change', handler)
+    const mqMobile  = window.matchMedia(`(max-width: ${BP_MOBILE - 1}px)`)
+    const mqDesktop = window.matchMedia(`(min-width: ${BP_DESKTOP}px)`)
+    const update = () => {
+      if (mqMobile.matches) setLayout('mobile')
+      else if (mqDesktop.matches) setLayout('desktop')
+      else setLayout('tablet')
+    }
+    mqMobile.addEventListener('change', update)
+    mqDesktop.addEventListener('change', update)
+    return () => { mqMobile.removeEventListener('change', update); mqDesktop.removeEventListener('change', update) }
   }, [])
   return layout
 }
@@ -58,7 +70,7 @@ function Dashboard() {
                   <GitHubProvider>
                     <NotesProvider>
                       <SyncManager />
-                      {layout === 'desktop' ? <DesktopLayout /> : <TabletLayout />}
+                      {layout === 'desktop' ? <DesktopLayout /> : layout === 'tablet' ? <TabletLayout /> : <MobileLayout />}
                     </NotesProvider>
                   </GitHubProvider>
                 </TodosProvider>
