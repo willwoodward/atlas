@@ -1,0 +1,25 @@
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env.*.local
+
+# Backend
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+*.db
+
+# Env / secrets — never commit these
+.env
+.env.production
+backend/.env.production
+
+# Local SQLite data volume
+data/
+
+# Tooling
+.vite/
+.claude/
+design-handoff/
+*.zip

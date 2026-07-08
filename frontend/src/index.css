@@ -1,0 +1,104 @@
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+
+/* ─── Design tokens ──────────────────────────────────────────────────────── */
+:root {
+  --bg:        #efeae0;
+  --surface:   #fffdf9;
+  --surface-2: #f6f2ea;
+  --surface-3: #ece7dc;
+  --ink:       #2b2820;
+  --ink-2:     #4a463c;
+  --mid:       #6b665a;
+  --muted:     #9a9488;
+  --faint:     #b2ab9d;
+
+  --bd-xl:  rgba(43,40,32,.14);
+  --bd-lg:  rgba(43,40,32,.12);
+  --bd-md:  rgba(43,40,32,.11);
+  --bd:     rgba(43,40,32,.09);
+  --bd-sm:  rgba(43,40,32,.07);
+  --bd-xs:  rgba(43,40,32,.06);
+  --bd-2xs: rgba(43,40,32,.05);
+
+  --bg-blur: rgba(239,234,224,.82);
+}
+
+[data-theme="dark"] {
+  --bg:        #131211;
+  --surface:   #1e1c1a;
+  --surface-2: #191715;
+  --surface-3: #252320;
+  --ink:       #f0ece2;
+  --ink-2:     #d4cfc6;
+  --mid:       #a09880;
+  --muted:     #7a7268;
+  --faint:     #4a4540;
+
+  --bd-xl:  rgba(240,236,226,.20);
+  --bd-lg:  rgba(240,236,226,.16);
+  --bd-md:  rgba(240,236,226,.14);
+  --bd:     rgba(240,236,226,.11);
+  --bd-sm:  rgba(240,236,226,.08);
+  --bd-xs:  rgba(240,236,226,.06);
+  --bd-2xs: rgba(240,236,226,.04);
+
+  --bg-blur: rgba(18,16,14,.88);
+}
+
+body {
+  font-family: 'Hanken Grotesk', system-ui, sans-serif;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  background: var(--bg);
+}
+#root { height: 100%; }
+
+/* ─── Inputs ──────────────────────────────────────────────────────────────── */
+input, textarea, select {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+input::placeholder, textarea::placeholder { color: var(--muted); }
+
+/* ─── Scrollbars ─────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: rgba(128,118,100,.18);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(128,118,100,.32);
+  background-clip: padding-box;
+}
+.no-scrollbar::-webkit-scrollbar { width: 0; height: 0; }
+
+/* ─── Markdown prose ─────────────────────────────────────────────────────── */
+.md-prose { max-width: 700px; line-height: 1.8; font-size: 15px; color: var(--ink); }
+.md-prose h1 { font-family: 'Newsreader', serif; font-size: 28px; font-weight: 600; margin: 0 0 18px; }
+.md-prose h2 { font-family: 'Newsreader', serif; font-size: 22px; font-weight: 600; margin: 32px 0 12px; }
+.md-prose h3 { font-size: 16px; font-weight: 700; margin: 24px 0 8px; }
+.md-prose h4, .md-prose h5, .md-prose h6 { font-size: 14px; font-weight: 700; margin: 18px 0 6px; }
+.md-prose p  { margin: 0 0 14px; }
+.md-prose ul, .md-prose ol { margin: 0 0 14px; padding-left: 22px; }
+.md-prose li { margin-bottom: 5px; }
+.md-prose a  { color: #5f7591; text-underline-offset: 3px; }
+.md-prose code { font-family: 'Courier New', monospace; font-size: 13px; background: var(--surface-3); padding: 2px 6px; border-radius: 5px; }
+.md-prose pre { background: var(--surface-3); border-radius: 10px; padding: 16px 18px; overflow-x: auto; margin: 0 0 18px; }
+.md-prose pre code { background: none; padding: 0; font-size: 13px; }
+.md-prose blockquote { border-left: 3px solid var(--bd-xl); margin: 0 0 14px; padding: 4px 0 4px 16px; color: var(--mid); }
+.md-prose hr { border: none; border-top: 1px solid var(--bd); margin: 28px 0; }
+.md-prose table { border-collapse: collapse; margin-bottom: 14px; font-size: 14px; }
+.md-prose th, .md-prose td { border: 1px solid var(--bd); padding: 7px 12px; text-align: left; }
+.md-prose th { background: var(--surface-3); font-weight: 600; }
+.md-prose img { max-width: 100%; border-radius: 8px; }
+
+/* ─── Keyframes ──────────────────────────────────────────────────────────── */
+@keyframes floaty   { 0%,100%{transform:translateY(0)}           50%{transform:translateY(-16px)} }
+@keyframes pulsering{ 0%,100%{transform:scale(1);opacity:.55}    50%{transform:scale(1.16);opacity:.12} }
+@keyframes blobA    { 0%,100%{transform:translate(-14px,-8px) scale(1)}   50%{transform:translate(16px,12px) scale(1.18)} }
+@keyframes blobB    { 0%,100%{transform:translate(12px,14px) scale(1.12)} 50%{transform:translate(-14px,-10px) scale(.88)} }
+@keyframes blobC    { 0%,100%{transform:translate(6px,-14px) scale(.95)}  50%{transform:translate(-10px,14px) scale(1.1)} }
+@keyframes eq       { 0%,100%{transform:scaleY(.35)} 50%{transform:scaleY(1)} }

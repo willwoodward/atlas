@@ -1,0 +1,27 @@
+name: Deploy backend to DigitalOcean
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'docker-compose.yml'
+      - 'Caddyfile'
+      - '.github/workflows/deploy-backend.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          script: |
+            cd ~/personal-os
+            git pull origin main
+            docker compose up -d --build api
+            docker compose up -d caddy

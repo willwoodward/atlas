@@ -1,0 +1,36 @@
+# Local development — full stack in Docker.
+# Start with: docker compose -f docker-compose.dev.yml up --build
+#
+# Frontend: http://localhost:5173  (Vite dev server with HMR)
+# Backend:  http://localhost:8000  (FastAPI with --reload)
+# API docs: http://localhost:8000/docs
+
+services:
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - ./data:/data
+      - ./backend:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+
+  web:
+    image: node:20-alpine
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+    volumes:
+      - ./frontend:/app
+      - frontend_modules:/app/node_modules
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      - api
+
+volumes:
+  frontend_modules:
