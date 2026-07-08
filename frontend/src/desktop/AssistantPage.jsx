@@ -1,10 +1,12 @@
 import AtlasOrb from '../components/AtlasOrb.jsx'
 import { assistantPrompts } from '../data.js'
+import { useIsMobile } from '../hooks/useIsMobile.js'
 
 export default function AssistantPage() {
+  const isMobile = useIsMobile()
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 73px)', textAlign: 'center' }}>
-      <AtlasOrb orbSize={200} ring1={300} ring2={240} />
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: isMobile ? '60vh' : 'calc(100vh - 73px)', textAlign: 'center', padding: isMobile ? '24px 20px' : 0 }}>
+      <AtlasOrb orbSize={isMobile ? 130 : 200} ring1={isMobile ? 200 : 300} ring2={isMobile ? 160 : 240} />
 
       <h1 style={{ margin: '14px 0 6px', fontFamily: "'Newsreader', serif", fontSize: 30, fontWeight: 500, color: 'var(--ink)' }}>
         How can I help you plan today?

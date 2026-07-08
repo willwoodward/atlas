@@ -4,6 +4,7 @@ import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import { useHabits, HABIT_PERIODS } from '../context/HabitsContext.jsx'
 import { getWeekRange } from '../integrations/googleCalendar.js'
 import { stats, goals, todos, user } from '../data.js'
+import { useIsMobile } from '../hooks/useIsMobile.js'
 
 function getCurrentPeriod() {
   const h = new Date().getHours()
@@ -81,6 +82,7 @@ function TodoItem({ t }) {
 }
 
 export default function HomePage() {
+  const isMobile = useIsMobile()
   const { gcal, refetchEvents, connectGoogle } = useIntegrations()
   const { habits } = useHabits()
   const { weekStart, weekEnd, todayStr } = getWeekRange()
@@ -110,22 +112,22 @@ export default function HomePage() {
   return (
     <div>
       <div style={{ marginBottom: 26 }}>
-        <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 38, fontWeight: 500, letterSpacing: '-.01em' }}>Good morning{name}.</h1>
-        <p style={{ margin: '8px 0 0', fontSize: 15, color: 'var(--mid)' }}>Your day is ready when you are.</p>
+        <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 28 : 38, fontWeight: 500, letterSpacing: '-.01em' }}>Good morning{name}.</h1>
+        <p style={{ margin: '8px 0 0', fontSize: isMobile ? 13.5 : 15, color: 'var(--mid)' }}>Your day is ready when you are.</p>
       </div>
 
       {/* Stats strip */}
       <div style={{ display: 'flex', marginBottom: 38, borderTop: '1px solid var(--bd-md)', borderBottom: '1px solid var(--bd-md)' }}>
         {liveStats.map((s, i) => (
-          <div key={s.label} style={{ flex: 1, padding: '14px 22px 16px', borderLeft: i > 0 ? '1px solid var(--bd-md)' : 'none' }}>
-            <div style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>{s.label}</div>
-            <div style={{ marginTop: 7, fontFamily: "'Newsreader', serif", fontSize: 28, fontWeight: 500 }}>{s.value}</div>
-            <div style={{ marginTop: 2, fontSize: 12, color: s.tone }}>{s.sub}</div>
+          <div key={s.label} style={{ flex: 1, padding: isMobile ? '10px 10px 12px' : '14px 22px 16px', borderLeft: i > 0 ? '1px solid var(--bd-md)' : 'none' }}>
+            <div style={{ fontSize: isMobile ? 9.5 : 11.5, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>{s.label}</div>
+            <div style={{ marginTop: 7, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 20 : 28, fontWeight: 500 }}>{s.value}</div>
+            <div style={{ marginTop: 2, fontSize: isMobile ? 11 : 12, color: s.tone }}>{s.sub}</div>
           </div>
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 52, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.35fr 1fr', gap: isMobile ? 32 : 52, alignItems: 'start' }}>
 
         {/* Schedule from Google Calendar */}
         <div>

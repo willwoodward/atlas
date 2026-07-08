@@ -1,16 +1,18 @@
 import { useState } from 'react'
 import CheckMark from '../components/CheckMark.jsx'
 import { useHabits, HABIT_PERIODS } from '../context/HabitsContext.jsx'
+import { useIsMobile } from '../hooks/useIsMobile.js'
 
 const DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 
 function AddForm({ onAdd, onCancel }) {
+  const isMobile = useIsMobile()
   const [name, setName] = useState('')
   const [color, setColor] = useState(HABIT_PERIODS[0].color)
   return (
     <form
       onSubmit={e => { e.preventDefault(); if (name.trim()) { onAdd(name.trim(), color) } }}
-      style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 0', borderTop: '1px solid var(--bd-xs)' }}
+      style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '14px 0', borderTop: '1px solid var(--bd-xs)' }}
     >
       <input
         autoFocus
@@ -19,7 +21,7 @@ function AddForm({ onAdd, onCancel }) {
         placeholder="Habit name…"
         style={{ flex: 1, padding: '8px 12px', borderRadius: 9, border: '1.5px solid var(--bd-xl)', background: 'var(--surface-2)', fontSize: 14, fontFamily: 'inherit', color: 'var(--ink)', outline: 'none' }}
       />
-      <div style={{ display: 'flex', gap: 6, flex: 'none' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         {HABIT_PERIODS.map(p => (
           <button key={p.color} type="button" onClick={() => setColor(p.color)}
             style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 8,
@@ -32,9 +34,10 @@ function AddForm({ onAdd, onCancel }) {
             {p.label}
           </button>
         ))}
+        <div style={{ flex: 1 }} />
+        <button type="submit" style={{ padding: '7px 14px', borderRadius: 8, border: 'none', background: '#c15f3c', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Add</button>
+        <button type="button" onClick={onCancel} style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--bd-xl)', background: 'transparent', color: 'var(--mid)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
       </div>
-      <button type="submit" style={{ padding: '7px 14px', borderRadius: 8, border: 'none', background: '#c15f3c', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Add</button>
-      <button type="button" onClick={onCancel} style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--bd-xl)', background: 'transparent', color: 'var(--mid)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
     </form>
   )
 }
@@ -48,6 +51,7 @@ function DayDot({ done, color, onClick }) {
 }
 
 export default function HabitsPage() {
+  const isMobile = useIsMobile()
   const { habits, weekDates, today, addHabit, removeHabit, toggleCompletion } = useHabits()
   const [open, setOpen] = useState({})
   const [adding, setAdding] = useState(false)
@@ -59,7 +63,7 @@ export default function HabitsPage() {
     <div>
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 22 }}>
         <div>
-          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 34, fontWeight: 500 }}>Habits</h1>
+          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>Habits</h1>
           <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>This week · consistency builds the compound.</p>
         </div>
         <button onClick={() => setAdding(true)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 15px', borderRadius: 11, border: 'none', background: '#c15f3c', color: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
@@ -68,7 +72,8 @@ export default function HabitsPage() {
         </button>
       </div>
 
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '8px 24px' }}>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: isMobile ? '8px 16px' : '8px 24px', overflowX: 'auto' }}>
+        <div style={{ minWidth: isMobile ? 440 : 'unset' }}>
         {/* Header */}
         <div style={{ display: 'grid', gridTemplateColumns: '1.4fr auto 90px 70px 26px', gap: 20, padding: '14px 0 12px', borderBottom: '1px solid var(--bd-sm)', fontSize: 11, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>
           <div>Habit</div>
@@ -145,6 +150,7 @@ export default function HabitsPage() {
             )}
           </div>
         ))}
+        </div>
       </div>
     </div>
   )

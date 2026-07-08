@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import { useGitHub } from '../context/GitHubContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useIsMobile } from '../hooks/useIsMobile.js'
 
 function StatusBadge({ connected }) {
   return connected
@@ -254,15 +255,16 @@ function MigrationCard() {
 }
 
 export default function AccountsPage() {
+  const isMobile = useIsMobile()
   const { gcal, connectGoogle, disconnectGoogle } = useIntegrations()
   const { user, logout } = useAuth()
   const hasClientId = !!import.meta.env.VITE_GOOGLE_CLIENT_ID
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 28 }}>
+      <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'flex-end', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', gap: isMobile ? 12 : 0, marginBottom: 28 }}>
         <div>
-          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 34, fontWeight: 500 }}>Accounts &amp; connections</h1>
+          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>Accounts &amp; connections</h1>
           <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>Link your services to bring everything into Atlas.</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 4 }}>

@@ -106,7 +106,7 @@ export default function MobileLayout() {
 
       {/* Page content */}
       <div style={{ flex: 1, overflowY: active === 'calendar' ? 'hidden' : 'auto', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: active === 'assistant' ? '0' : '20px 20px 40px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: (active === 'assistant' || active === 'notes' || active === 'calendar') ? '0' : '20px 20px 40px', flex: 1, display: 'flex', flexDirection: 'column' }}>
           <ActivePage />
         </div>
       </div>

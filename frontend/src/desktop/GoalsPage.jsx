@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useGoals, GOAL_PALETTE } from '../context/GoalsContext.jsx'
+import { useIsMobile } from '../hooks/useIsMobile.js'
 
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4']
 const QUARTER_LABELS = { Q1: 'Jan – Mar', Q2: 'Apr – Jun', Q3: 'Jul – Sep', Q4: 'Oct – Dec' }
@@ -131,7 +132,7 @@ function AddGoalForm({ onAdd, onCancel }) {
   return (
     <form
       onSubmit={e => { e.preventDefault(); if (title.trim()) { onAdd(title.trim(), color); } }}
-      style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 18, padding: '20px 22px', display: 'flex', gap: 12, alignItems: 'center' }}
+      style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 18, padding: '20px 22px', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}
     >
       <input
         autoFocus
@@ -154,6 +155,7 @@ function AddGoalForm({ onAdd, onCancel }) {
 }
 
 export default function GoalsPage() {
+  const isMobile = useIsMobile()
   const { goals, addGoal, removeGoal, updateGoal, setQuarterFocus } = useGoals()
   const [adding, setAdding] = useState(false)
 
@@ -166,7 +168,7 @@ export default function GoalsPage() {
     <div>
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 26 }}>
         <div>
-          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 34, fontWeight: 500 }}>Goals</h1>
+          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>Goals</h1>
           <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>The bigger arcs — where the days are pointing.</p>
         </div>
         {!adding && (
@@ -185,7 +187,7 @@ export default function GoalsPage() {
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: goals.length === 1 ? '1fr' : 'repeat(2, 1fr)', gap: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: (isMobile || goals.length === 1) ? '1fr' : 'repeat(2, 1fr)', gap: 14 }}>
           {goals.map(g => (
             <GoalCard key={g.id} goal={g} onRemove={removeGoal} onUpdate={updateGoal} onQuarterFocus={setQuarterFocus} />
           ))}

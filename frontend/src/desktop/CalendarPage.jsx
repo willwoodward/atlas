@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import { useLocalCalendar } from '../context/LocalCalendarContext.jsx'
 import { getWeekRange, localDateStr } from '../integrations/googleCalendar.js'
+import { useIsMobile } from '../hooks/useIsMobile.js'
 
 const HOUR_H = 48
 const DAY_START = 0
@@ -140,6 +141,7 @@ function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00'
 
 // ─── Calendar page ────────────────────────────────────────────────────────
 export default function CalendarPage() {
+  const isMobile = useIsMobile()
   const { gcal, connectGoogle, refetchEvents, createGcalEvent } = useIntegrations()
   const { events: localEvents, addEvent, removeEvent } = useLocalCalendar()
   const [weekOffset, setWeekOffset] = useState(0)
@@ -241,11 +243,11 @@ export default function CalendarPage() {
       {/* Page header */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, marginBottom: 22, flex: 'none' }}>
         <div>
-          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 34, fontWeight: 500, color: 'var(--ink)' }}>Calendar</h1>
+          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500, color: 'var(--ink)' }}>Calendar</h1>
           <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>{weekLabel}</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {!gcal.connected && (
+          {!gcal.connected && !isMobile && (
             <button onClick={connectGoogle} style={{ fontSize: 13, color: '#5f7591', background: 'rgba(95,117,145,.1)', border: '1px solid rgba(95,117,145,.25)', padding: '7px 14px', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
               Connect Google Calendar
             </button>
@@ -271,16 +273,46 @@ export default function CalendarPage() {
             Add event
           </button>
 
-          <div style={{ display: 'flex', gap: 6, padding: 4, background: 'var(--surface-2)', border: '1px solid var(--bd)', borderRadius: 11 }}>
-            {['Day','Week','Agenda'].map((v, i) => (
-              <span key={v} style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, color: i === 1 ? 'var(--ink)' : 'var(--muted)', background: i === 1 ? 'var(--surface)' : 'transparent', boxShadow: i === 1 ? '0 1px 3px var(--bd)' : 'none' }}>{v}</span>
-            ))}
-          </div>
+          {!isMobile && (
+            <div style={{ display: 'flex', gap: 6, padding: 4, background: 'var(--surface-2)', border: '1px solid var(--bd)', borderRadius: 11 }}>
+              {['Day','Week','Agenda'].map((v, i) => (
+                <span key={v} style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, color: i === 1 ? 'var(--ink)' : 'var(--muted)', background: i === 1 ? 'var(--surface)' : 'transparent', boxShadow: i === 1 ? '0 1px 3px var(--bd)' : 'none' }}>{v}</span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Calendar card */}
-      <div style={{ flex: 1, minHeight: 0, background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      {/* Mobile: agenda list */}
+      {isMobile && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 40px' }}>
+          {weekDays.map(d => (
+            <div key={d.dow} style={{ marginBottom: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0 8px', borderBottom: '1px solid var(--bd)' }}>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: d.today ? '#c15f3c' : 'transparent', flexShrink: 0 }}>
+                  <span style={{ fontFamily: "'Newsreader', serif", fontSize: 16, fontWeight: 600, color: d.today ? '#fff' : 'var(--ink)' }}>{d.num}</span>
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 600, color: d.today ? '#c15f3c' : 'var(--mid)', letterSpacing: '.04em', textTransform: 'uppercase' }}>{d.dow}</span>
+              </div>
+              {d.events.length === 0
+                ? <div style={{ padding: '10px 0', fontSize: 13, color: 'var(--faint)' }}>No events</div>
+                : d.events.sort((a, b) => a.start - b.start).map((ev, i) => (
+                  <div key={ev.id || i} onClick={() => setSelectedEvent(ev)} style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--bd-xs)', cursor: 'pointer' }}>
+                    <div style={{ width: 3, borderRadius: 99, background: ev.color, flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>{ev.title}</div>
+                      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{ev.time || ev.timeDisplay}</div>
+                    </div>
+                  </div>
+                ))
+              }
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Desktop: Calendar card */}
+      {!isMobile && <div style={{ flex: 1, minHeight: 0, background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <div className="no-scrollbar" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
 
           {/* Day headers — sticky */}
@@ -349,7 +381,7 @@ export default function CalendarPage() {
             ))}
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* Modals */}
       {selectedEvent && (

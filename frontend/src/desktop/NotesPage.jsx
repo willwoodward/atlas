@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react'
 import { marked } from 'marked'
 import { useNotes } from '../context/NotesContext.jsx'
 import { useGitHub } from '../context/GitHubContext.jsx'
+import { useIsMobile } from '../hooks/useIsMobile.js'
 
 marked.use({ gfm: true, breaks: true })
 
@@ -105,6 +106,7 @@ const notePreview = body => body.trim().split('\n').slice(1).join(' ').replace(/
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function NotesPage() {
+  const isMobile = useIsMobile()
   const { notes, addNote, updateNote, removeNote } = useNotes()
   const { github, loadTree, getFile, publishFile }  = useGitHub()
 
@@ -224,11 +226,14 @@ export default function NotesPage() {
   const tree = buildTree(github.tree)
   const currentNote = isQuick ? notes.find(n => n.id === selected?.id) : null
 
+  // On mobile: show sidebar OR editor, not both
+  const mobileShowEditor = isMobile && selected !== null
+
   return (
-    <div style={{ display: 'flex', height: 'calc(100vh - 96px)', minHeight: 0, margin: '-28px -28px 0', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: isMobile ? '100%' : 'calc(100vh - 96px)', minHeight: 0, margin: isMobile ? 0 : '-28px -28px 0', overflow: 'hidden' }}>
 
       {/* ── Sidebar ── */}
-      <div style={{ width: 236, flexShrink: 0, borderRight: '1px solid var(--bd)', display: 'flex', flexDirection: 'column', overflowY: 'auto', background: 'var(--surface-2)' }}>
+      <div style={{ width: isMobile ? '100%' : 236, flexShrink: 0, borderRight: isMobile ? 'none' : '1px solid var(--bd)', display: mobileShowEditor ? 'none' : 'flex', flexDirection: 'column', overflowY: 'auto', background: 'var(--surface-2)' }}>
 
         {/* Quick notes */}
         <div style={{ padding: '20px 10px 8px' }}>
@@ -301,7 +306,7 @@ export default function NotesPage() {
       </div>
 
       {/* ── Editor / viewer ── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--surface)' }}>
+      <div style={{ flex: 1, display: mobileShowEditor || !isMobile ? 'flex' : 'none', flexDirection: 'column', minWidth: 0, background: 'var(--surface)' }}>
 
         {!selected && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'var(--faint)' }}>
@@ -316,8 +321,14 @@ export default function NotesPage() {
         {selected && (
           <>
             {/* Toolbar */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 28px', borderBottom: '1px solid var(--bd-xs)', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isMobile ? '12px 16px' : '14px 28px', borderBottom: '1px solid var(--bd-xs)', flexShrink: 0 }}>
               <div style={{ fontSize: 12, color: 'var(--faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '55%', display: 'flex', alignItems: 'center', gap: 8 }}>
+                {isMobile && (
+                  <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--mid)', padding: '4px 0', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, fontFamily: 'inherit', flexShrink: 0, whiteSpace: 'nowrap' }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+                    Notes
+                  </button>
+                )}
                 {isGithub && <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{selected.path}</span>}
                 {isGithub && hasDraft && !editing && (
                   <span style={{ fontSize: 11, fontWeight: 600, color: '#b08a3e', background: 'rgba(176,138,62,.12)', padding: '2px 7px', borderRadius: 5 }}>unsaved</span>

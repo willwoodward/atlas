@@ -120,5 +120,13 @@ async def init_db():
             );
 
             INSERT OR IGNORE INTO user_profile (id, name, email) VALUES (1, '', '');
+
+            CREATE TABLE IF NOT EXISTS user_integrations (
+                email TEXT PRIMARY KEY,
+                gcal_token TEXT,
+                gcal_expires_at INTEGER,
+                github_token TEXT,
+                github_repo TEXT
+            );
         """)
         await db.commit()

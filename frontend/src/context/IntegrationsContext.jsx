@@ -1,21 +1,14 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
 import { buildAuthUrl, fetchEvents, toCalendarEvents, insertGcalEvent } from '../integrations/googleCalendar.js'
+import { useAuth } from './AuthContext.jsx'
 
-const GCAL_KEY = 'atlas:gcal:v1'
-
-function loadGcal() {
-  try {
-    const raw = localStorage.getItem(GCAL_KEY)
-    return raw ? JSON.parse(raw) : { token: null, expiresAt: 0 }
-  } catch {
-    return { token: null, expiresAt: 0 }
-  }
-}
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 const Ctx = createContext(null)
 
 export function IntegrationsProvider({ children }) {
-  const [gcalAuth, setGcalAuth] = useState(loadGcal)
+  const { token } = useAuth()
+  const [gcalAuth, setGcalAuth] = useState({ token: null, expiresAt: 0 })
   const [gcalEvents, setGcalEvents] = useState([])
   const [gcalLoading, setGcalLoading] = useState(false)
   const [gcalError, setGcalError] = useState(null)
@@ -24,12 +17,30 @@ export function IntegrationsProvider({ children }) {
 
   const isConnected = !!(gcalAuth.token && gcalAuth.expiresAt > Date.now())
 
-  const saveToken = useCallback((token, expiresAt) => {
-    const next = { token, expiresAt }
-    localStorage.setItem(GCAL_KEY, JSON.stringify(next))
-    setGcalAuth(next)
+  const authHeaders = { Authorization: `Bearer ${token}` }
+
+  // Load integrations from server on mount
+  useEffect(() => {
+    if (!token) return
+    fetch(`${API}/api/integrations`, { headers: authHeaders })
+      .then(r => r.json())
+      .then(data => {
+        if (data.gcal) {
+          setGcalAuth({ token: data.gcal.token, expiresAt: data.gcal.expires_at })
+        }
+      })
+      .catch(() => {})
+  }, [token]) // eslint-disable-line
+
+  const saveToken = useCallback((gcalToken, expiresAt) => {
+    setGcalAuth({ token: gcalToken, expiresAt })
     setGcalError(null)
-  }, [])
+    fetch(`${API}/api/integrations/gcal`, {
+      method: 'PUT',
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: gcalToken, expires_at: expiresAt }),
+    }).catch(() => {})
+  }, [token]) // eslint-disable-line
 
   const connectGoogle = useCallback(() => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
@@ -45,10 +56,13 @@ export function IntegrationsProvider({ children }) {
   }, [])
 
   const disconnectGoogle = useCallback(() => {
-    localStorage.removeItem(GCAL_KEY)
     setGcalAuth({ token: null, expiresAt: 0 })
     setGcalEvents([])
-  }, [])
+    fetch(`${API}/api/integrations/gcal`, {
+      method: 'DELETE',
+      headers: authHeaders,
+    }).catch(() => {})
+  }, [token]) // eslint-disable-line
 
   // Receive token from OAuth popup
   useEffect(() => {

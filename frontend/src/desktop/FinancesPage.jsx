@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useFinances } from '../context/FinancesContext.jsx'
 import GoalRing from '../components/GoalRing.jsx'
+import { useIsMobile } from '../hooks/useIsMobile.js'
 
 const PAL = ['#6f8168','#c15f3c','#5f7591','#b08a3e','#9a6d84','#c88a5f']
 
@@ -262,6 +263,7 @@ const ACC_COLOR = { checking: '#6f8168', savings: '#5f7591', investment: '#b08a3
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function FinancesPage() {
+  const isMobile = useIsMobile()
   const { pots, accounts, transactions, netWorth, income, spending } = useFinances()
   const [showAddPot, setShowAddPot]         = useState(false)
   const [showAddTxn, setShowAddTxn]         = useState(false)
@@ -276,37 +278,37 @@ export default function FinancesPage() {
     <div>
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
-          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 34, fontWeight: 500 }}>Finances</h1>
+          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>Finances</h1>
           <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>Net worth, cashflow, and savings pots.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <GhostBtn onClick={() => setShowAddAcc(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Account</GhostBtn>
           <GhostBtn onClick={() => setShowAddTxn(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Transaction</GhostBtn>
-          <PrimaryBtn onClick={() => setShowAddPot(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Savings pot</PrimaryBtn>
+          <PrimaryBtn onClick={() => setShowAddPot(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Pot</PrimaryBtn>
         </div>
       </div>
 
       {/* Summary strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr 1fr 1fr', gap: 14, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : '1.3fr 1fr 1fr 1fr', gap: isMobile ? 10 : 14, marginBottom: 24 }}>
         <div style={{ background: 'var(--ink)', borderRadius: 16, padding: '20px 22px', color: 'var(--surface-2)' }}>
           <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>Net worth</div>
-          <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: 32, fontWeight: 500 }}>{accounts.length > 0 ? fmt(netWorth) : '—'}</div>
+          <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 22 : 32, fontWeight: 500 }}>{accounts.length > 0 ? fmt(netWorth) : '—'}</div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 22px' }}>
           <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>Income</div>
-          <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: 26, fontWeight: 500 }}>{income > 0 ? fmt(income) : '—'}</div>
+          <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 20 : 26, fontWeight: 500 }}>{income > 0 ? fmt(income) : '—'}</div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 22px' }}>
           <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>Spending</div>
-          <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: 26, fontWeight: 500, color: spending > 0 ? '#c15f3c' : 'var(--ink)' }}>{spending > 0 ? fmt(spending) : '—'}</div>
+          <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 20 : 26, fontWeight: 500, color: spending > 0 ? '#c15f3c' : 'var(--ink)' }}>{spending > 0 ? fmt(spending) : '—'}</div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 22px' }}>
           <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>In pots</div>
-          <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: 26, fontWeight: 500, color: totalSaved > 0 ? '#6f8168' : 'var(--ink)' }}>{totalSaved > 0 ? fmt(totalSaved) : '—'}</div>
+          <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 20 : 26, fontWeight: 500, color: totalSaved > 0 ? '#6f8168' : 'var(--ink)' }}>{totalSaved > 0 ? fmt(totalSaved) : '—'}</div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.2fr 1fr', gap: 16, alignItems: 'start' }}>
 
         {/* LEFT col: Savings pots + Accounts */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import CheckMark from '../components/CheckMark.jsx'
 import { useTodos } from '../context/TodosContext.jsx'
 import { useGoals } from '../context/GoalsContext.jsx'
+import { useIsMobile } from '../hooks/useIsMobile.js'
 
 const BUCKETS = [
   { key: 'today',   label: 'Today',     color: '#c15f3c' },
@@ -182,6 +183,7 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, dragSt
 }
 
 export default function TodoPage() {
+  const isMobile = useIsMobile()
   const { todos, outcomes, addTodo, toggleTodo, removeTodo, clearDone, setOutcomes, reorderTodo } = useTodos()
   const { goals } = useGoals()
 
@@ -234,7 +236,7 @@ export default function TodoPage() {
   return (
     <div>
       <div style={{ marginBottom: 22 }}>
-        <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 34, fontWeight: 500 }}>To-do</h1>
+        <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>To-do</h1>
         <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>
           {totalOpen > 0 ? `${totalOpen} open` : 'All clear.'}
         </p>
@@ -255,7 +257,7 @@ export default function TodoPage() {
       </div>
 
       {/* Three buckets */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 14, alignItems: 'start' }}>
         {BUCKETS.map(b => (
           <BucketSection
             key={b.key}

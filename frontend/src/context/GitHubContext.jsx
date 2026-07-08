@@ -1,35 +1,41 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { fetchTree, fetchFile, putFile } from '../integrations/github.js'
+import { useAuth } from './AuthContext.jsx'
 
-const KEY = 'atlas:github:v1'
-
-function load() {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (raw) return JSON.parse(raw)
-  } catch { /* ignore */ }
-  // Fall back to env vars if set
-  const token = import.meta.env.VITE_GITHUB_TOKEN || null
-  const repo  = import.meta.env.VITE_GITHUB_REPO  || null
-  return { token, repo }
-}
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 const Ctx = createContext(null)
 
 export function GitHubProvider({ children }) {
-  const [auth, setAuth] = useState(load)
+  const { token } = useAuth()
+  const [auth, setAuth] = useState({ token: null, repo: null })
   const [tree, setTree] = useState([])
   const [treeLoading, setTreeLoading] = useState(false)
   const [treeError, setTreeError] = useState(null)
 
   const isConnected = !!(auth.token && auth.repo)
 
-  const loadTree = useCallback(async (token = auth.token, repo = auth.repo) => {
-    if (!token || !repo) return
+  const authHeaders = { Authorization: `Bearer ${token}` }
+
+  // Load from server on mount
+  useEffect(() => {
+    if (!token) return
+    fetch(`${API}/api/integrations`, { headers: authHeaders })
+      .then(r => r.json())
+      .then(data => {
+        if (data.github) {
+          setAuth({ token: data.github.token, repo: data.github.repo })
+        }
+      })
+      .catch(() => {})
+  }, [token]) // eslint-disable-line
+
+  const loadTree = useCallback(async (ghToken = auth.token, repo = auth.repo) => {
+    if (!ghToken || !repo) return
     setTreeLoading(true)
     setTreeError(null)
     try {
-      setTree(await fetchTree(token, repo))
+      setTree(await fetchTree(ghToken, repo))
     } catch (err) {
       setTreeError(err.message)
     } finally {
@@ -37,24 +43,30 @@ export function GitHubProvider({ children }) {
     }
   }, [auth.token, auth.repo])
 
-  // Auto-load tree on mount if already connected
+  // Auto-load tree when auth changes
   useEffect(() => {
     if (isConnected) loadTree()
-  }, []) // eslint-disable-line
+  }, [auth.token, auth.repo]) // eslint-disable-line
 
-  const connect = useCallback(async (token, repo) => {
-    const next = { token, repo }
-    localStorage.setItem(KEY, JSON.stringify(next))
-    setAuth(next)
-    await loadTree(token, repo)
-  }, [loadTree])
+  const connect = useCallback(async (ghToken, repo) => {
+    setAuth({ token: ghToken, repo })
+    await fetch(`${API}/api/integrations/github`, {
+      method: 'PUT',
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: ghToken, repo }),
+    }).catch(() => {})
+    await loadTree(ghToken, repo)
+  }, [token, loadTree]) // eslint-disable-line
 
   const disconnect = useCallback(() => {
-    localStorage.removeItem(KEY)
     setAuth({ token: null, repo: null })
     setTree([])
     setTreeError(null)
-  }, [])
+    fetch(`${API}/api/integrations/github`, {
+      method: 'DELETE',
+      headers: authHeaders,
+    }).catch(() => {})
+  }, [token]) // eslint-disable-line
 
   const getFile = useCallback(async (path) => {
     if (!isConnected) throw new Error('Not connected')

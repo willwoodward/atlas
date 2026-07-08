@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
 from mcp_server import mcp_app
-from routers import auth_router, habits, todos, goals, finances, notes, calendar
+from routers import auth_router, habits, todos, goals, finances, notes, calendar, integrations
 
 ALLOWED_ORIGINS = [
     o.strip()
@@ -41,6 +41,7 @@ app.include_router(goals.router)
 app.include_router(finances.router)
 app.include_router(notes.router)
 app.include_router(calendar.router)
+app.include_router(integrations.router)
 
 app.mount("/mcp", mcp_app)
 
