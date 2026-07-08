@@ -329,7 +329,7 @@ export default function AccountsPage() {
                   <>
                     {step}
                     <code style={{ display: 'block', marginTop: 6, padding: '6px 10px', background: 'rgba(255,255,255,.06)', borderRadius: 6, fontSize: 12, color: '#f0b98f' }}>
-                      {window.location.origin}
+                      {window.location.origin + import.meta.env.BASE_URL.replace(/\/$/, '')}
                     </code>
                   </>
                 ) : i === 4 ? (

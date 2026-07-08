@@ -45,7 +45,7 @@ export function AuthProvider({ children }) {
 
     const params = new URLSearchParams({
       client_id: CLIENT_ID,
-      redirect_uri: window.location.origin,
+      redirect_uri: window.location.origin + import.meta.env.BASE_URL.replace(/\/$/, ''),
       response_type: 'token',
       scope: 'openid email profile',
       state: 'atlas-auth',

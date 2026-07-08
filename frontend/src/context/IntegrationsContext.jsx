@@ -37,7 +37,7 @@ export function IntegrationsProvider({ children }) {
       alert('Add VITE_GOOGLE_CLIENT_ID=your_id to .env.local, then restart the dev server.')
       return
     }
-    const url = buildAuthUrl(clientId, window.location.origin)
+    const url = buildAuthUrl(clientId, window.location.origin + import.meta.env.BASE_URL.replace(/\/$/, ''))
     const w = 500, h = 640
     const left = window.screenX + (window.outerWidth - w) / 2
     const top  = window.screenY + (window.outerHeight - h) / 2
