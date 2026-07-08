@@ -1,27 +1,12 @@
 services:
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - api
-
   api:
     build: ./backend
     restart: unless-stopped
+    ports:
+      - "8000:8000"
     env_file: .env.production
     volumes:
       - sqlite_data:/data
-    expose:
-      - "8000"
 
 volumes:
-  caddy_data:
-  caddy_config:
   sqlite_data:
