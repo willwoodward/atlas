@@ -21,19 +21,15 @@ class GitHubUpdate(BaseModel):
 @router.get("")
 async def get_integrations(user: dict = Depends(get_current_user), db=Depends(get_db)):
     async with db.execute(
-        "SELECT gcal_token, gcal_expires_at, github_token, github_repo FROM user_integrations WHERE email = ?",
+        "SELECT gcal_refresh_token, github_token, github_repo FROM user_integrations WHERE email = ?",
         (user["sub"],),
     ) as cur:
         row = await cur.fetchone()
 
     if not row:
-        return {"gcal": None, "github": None}
+        return {"gcal": {"connected": False}, "github": None}
 
-    gcal = (
-        {"token": row["gcal_token"], "expires_at": row["gcal_expires_at"]}
-        if row["gcal_token"]
-        else None
-    )
+    gcal = {"connected": bool(row["gcal_refresh_token"])}
     github = (
         {"token": row["github_token"], "repo": row["github_repo"]}
         if row["github_token"]

@@ -5,9 +5,11 @@ export function buildAuthUrl(clientId, redirectUri) {
   return 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
-    response_type: 'token',
+    response_type: 'code',
     scope: SCOPE,
-    prompt: 'select_account',
+    access_type: 'offline',
+    prompt: 'consent',
+    state: 'atlas-gcal',
   })
 }
 

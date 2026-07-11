@@ -8,38 +8,32 @@ const Ctx = createContext(null)
 
 export function IntegrationsProvider({ children }) {
   const { token } = useAuth()
-  const [gcalAuth, setGcalAuth] = useState({ token: null, expiresAt: 0 })
+  const [gcalConnected, setGcalConnected] = useState(false)
   const [gcalEvents, setGcalEvents] = useState([])
   const [gcalLoading, setGcalLoading] = useState(false)
   const [gcalError, setGcalError] = useState(null)
   const [gcalMutatedAt, setGcalMutatedAt] = useState(0)
   const popupRef = useRef(null)
 
-  const isConnected = !!(gcalAuth.token && gcalAuth.expiresAt > Date.now())
+  const authHeaders = useCallback(() => ({ Authorization: `Bearer ${token}` }), [token])
 
-  const authHeaders = { Authorization: `Bearer ${token}` }
-
-  // Load integrations from server on mount
+  // Load connection status + GitHub on mount
   useEffect(() => {
     if (!token) return
-    fetch(`${API}/api/integrations`, { headers: authHeaders })
+    fetch(`${API}/api/integrations`, { headers: authHeaders() })
       .then(r => r.json())
       .then(data => {
-        if (data.gcal) {
-          setGcalAuth({ token: data.gcal.token, expiresAt: data.gcal.expires_at })
-        }
+        if (data.gcal?.connected) setGcalConnected(true)
       })
       .catch(() => {})
   }, [token]) // eslint-disable-line
 
-  const saveToken = useCallback((gcalToken, expiresAt) => {
-    setGcalAuth({ token: gcalToken, expiresAt })
-    setGcalError(null)
-    fetch(`${API}/api/integrations/gcal`, {
-      method: 'PUT',
-      headers: { ...authHeaders, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: gcalToken, expires_at: expiresAt }),
-    }).catch(() => {})
+  // Get a fresh GCal access token from the backend (handles refresh automatically)
+  const getAccessToken = useCallback(async () => {
+    const r = await fetch(`${API}/auth/gcal/token`, { headers: authHeaders() })
+    if (!r.ok) throw new Error(`gcal_token ${r.status}`)
+    const { access_token } = await r.json()
+    return access_token
   }, [token]) // eslint-disable-line
 
   const connectGoogle = useCallback(() => {
@@ -48,7 +42,7 @@ export function IntegrationsProvider({ children }) {
       alert('Add VITE_GOOGLE_CLIENT_ID=your_id to .env.local, then restart the dev server.')
       return
     }
-    const url = buildAuthUrl(clientId, window.location.origin + import.meta.env.BASE_URL.replace(/\/$/, ''))
+    const url = buildAuthUrl(clientId, window.location.origin + import.meta.env.BASE_URL)
     const w = 500, h = 640
     const left = window.screenX + (window.outerWidth - w) / 2
     const top  = window.screenY + (window.outerHeight - h) / 2
@@ -56,53 +50,56 @@ export function IntegrationsProvider({ children }) {
   }, [])
 
   const disconnectGoogle = useCallback(() => {
-    setGcalAuth({ token: null, expiresAt: 0 })
+    setGcalConnected(false)
     setGcalEvents([])
-    fetch(`${API}/api/integrations/gcal`, {
-      method: 'DELETE',
-      headers: authHeaders,
-    }).catch(() => {})
+    // Revoke + clear on backend
+    fetch(`${API}/auth/gcal`, { method: 'DELETE', headers: authHeaders() }).catch(() => {})
+    // Also clear legacy stored token if any
+    fetch(`${API}/api/integrations/gcal`, { method: 'DELETE', headers: authHeaders() }).catch(() => {})
   }, [token]) // eslint-disable-line
 
-  // Receive token from OAuth popup
+  // Receive confirmation from OAuth popup
   useEffect(() => {
     const handler = (e) => {
       if (e.origin !== window.location.origin) return
       if (e.data?.type === 'ATLAS_OAUTH' && e.data.provider === 'google') {
-        saveToken(e.data.token, e.data.expiresAt)
+        setGcalConnected(true)
+        setGcalError(null)
         popupRef.current?.close()
       }
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [saveToken])
+  }, [])
 
   const createGcalEvent = useCallback(async (eventData) => {
-    if (!isConnected) throw new Error('Not connected')
-    const result = await insertGcalEvent(gcalAuth.token, eventData)
+    if (!gcalConnected) throw new Error('Not connected')
+    const accessToken = await getAccessToken()
+    const result = await insertGcalEvent(accessToken, eventData)
     setGcalMutatedAt(Date.now())
     return result
-  }, [isConnected, gcalAuth.token])
+  }, [gcalConnected, getAccessToken])
 
   const refetchEvents = useCallback(async (weekStart, weekEnd) => {
-    if (!isConnected) return
+    if (!gcalConnected) return
     setGcalLoading(true)
     setGcalError(null)
     try {
-      const data = await fetchEvents(gcalAuth.token, weekStart, weekEnd)
+      const accessToken = await getAccessToken()
+      const data = await fetchEvents(accessToken, weekStart, weekEnd)
       setGcalEvents(toCalendarEvents(data.items || []))
     } catch (err) {
       setGcalError(err.message)
-      if (err.message.includes('401')) disconnectGoogle()
+      if (err.message.includes('401')) setGcalConnected(false)
     } finally {
       setGcalLoading(false)
     }
-  }, [isConnected, gcalAuth.token, disconnectGoogle])
+  }, [gcalConnected, getAccessToken])
 
   return (
     <Ctx.Provider value={{
       gcal: {
-        connected: isConnected,
+        connected: gcalConnected,
         loading: gcalLoading,
         error: gcalError,
         events: gcalEvents,

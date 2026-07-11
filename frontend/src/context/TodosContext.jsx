@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from './AuthContext.jsx'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -17,6 +17,8 @@ export function TodosProvider({ children }) {
   const [todos, setTodos] = useState([])
   const [outcomes, setOutcomesState] = useState('')
   const weekStr = getWeekStr()
+  const todosRef = useRef(todos)
+  useEffect(() => { todosRef.current = todos }, [todos])
 
   const call = useCallback((path, opts = {}) => fetch(`${API}${path}`, {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -26,7 +28,7 @@ export function TodosProvider({ children }) {
   // Convert API row (snake_case, int done) → internal shape
   const toInternal = (r) => ({
     id: r.id, text: r.text, bucket: r.bucket,
-    goalId: r.goal_id, done: !!r.done, createdAt: r.created_at,
+    goalId: r.goal_id, parentId: r.parent_id || null, done: !!r.done, createdAt: r.created_at,
   })
 
   useEffect(() => {
@@ -34,16 +36,35 @@ export function TodosProvider({ children }) {
     call(`/api/todos/outcomes/${weekStr}`).then(r => r.json()).then(d => setOutcomesState(d.text))
   }, [token])
 
-  const addTodo = useCallback(async (text, bucket = 'today', goalId = null) => {
+  const addTodo = useCallback(async (text, bucket = 'today', goalId = null, parentId = null) => {
     const id = crypto.randomUUID()
     const created_at = new Date().toISOString()
-    setTodos(prev => [...prev, { id, text, bucket, goalId, done: false, createdAt: created_at }])
-    await call('/api/todos', { method: 'POST', body: JSON.stringify({ id, text, bucket, goal_id: goalId, done: false, created_at, sort_order: 0 }) })
+    setTodos(prev => [...prev, { id, text, bucket, goalId, parentId, done: false, createdAt: created_at }])
+    await call('/api/todos', { method: 'POST', body: JSON.stringify({ id, text, bucket, goal_id: goalId, parent_id: parentId, done: false, created_at, sort_order: 0 }) })
   }, [call])
 
   const toggleTodo = useCallback(async (id) => {
-    setTodos(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t))
+    const current = todosRef.current
+    const toggled = current.find(t => t.id === id)
+    const nowDone = toggled ? !toggled.done : false
+
+    // If completing a sub-todo, check if all siblings are now done → auto-complete parent
+    let parentToComplete = null
+    if (toggled?.parentId && nowDone) {
+      const siblings = current.filter(t => t.parentId === toggled.parentId && t.id !== id)
+      const parent = current.find(t => t.id === toggled.parentId)
+      if (siblings.every(t => t.done) && parent && !parent.done) {
+        parentToComplete = toggled.parentId
+      }
+    }
+
+    setTodos(prev => {
+      let next = prev.map(t => t.id === id ? { ...t, done: !t.done } : t)
+      if (parentToComplete) next = next.map(t => t.id === parentToComplete ? { ...t, done: true } : t)
+      return next
+    })
     await call(`/api/todos/${id}/toggle`, { method: 'PATCH' })
+    if (parentToComplete) await call(`/api/todos/${parentToComplete}/toggle`, { method: 'PATCH' })
   }, [call])
 
   const moveTodo = useCallback(async (id, bucket) => {
@@ -88,8 +109,10 @@ export function TodosProvider({ children }) {
     })
   }, [call])
 
+  const addSubTodo = useCallback((parentId, text) => addTodo(text, todos.find(t => t.id === parentId)?.bucket ?? 'today', null, parentId), [addTodo, todos])
+
   return (
-    <Ctx.Provider value={{ todos, outcomes, addTodo, toggleTodo, moveTodo, removeTodo, clearDone, setOutcomes, reorderTodo }}>
+    <Ctx.Provider value={{ todos, outcomes, addTodo, addSubTodo, toggleTodo, moveTodo, removeTodo, clearDone, setOutcomes, reorderTodo }}>
       {children}
     </Ctx.Provider>
   )

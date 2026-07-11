@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useUser } from '../context/UserContext.jsx'
 import { useTheme } from '../context/ThemeContext.jsx'
-import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import HomePage      from '../desktop/HomePage.jsx'
 import CalendarPage  from '../desktop/CalendarPage.jsx'
 import HabitsPage    from '../desktop/HabitsPage.jsx'
@@ -24,8 +23,11 @@ const PAGES = [
   { id: 'accounts',  label: 'Accounts',  component: AccountsPage },
 ]
 
+// Pages shown in the drawer nav (excludes accounts — accessed via avatar)
+const NAV_PAGES = ['home', 'calendar', 'habits', 'todos', 'goals', 'notes', 'finances', 'assistant']
+
 const I = (...kids) => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{kids}</svg>
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{kids}</svg>
 )
 const icons = {
   home:      I(<path d="M4 11l8-7 8 7" key="a"/>, <path d="M6 10v9h4v-6h4v6h4v-9" key="b"/>),
@@ -38,10 +40,6 @@ const icons = {
   assistant: I(<circle cx="12" cy="12" r="7" key="a"/>, <circle cx="12" cy="12" r="2.5" key="b"/>),
   accounts:  I(<circle cx="12" cy="8" r="4" key="a"/>, <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" key="b"/>),
 }
-
-const NAV_MAIN   = ['home', 'calendar', 'habits', 'todos', 'goals']
-const NAV_APPS   = ['notes', 'finances']
-const NAV_BOTTOM = ['assistant', 'accounts']
 
 function Toggle({ checked, onChange }) {
   return (
@@ -56,12 +54,14 @@ export default function MobileLayout() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const { profile, initial } = useUser()
   const { isDark, toggleTheme } = useTheme()
-  const { gcal, connectGoogle, disconnectGoogle } = useIntegrations()
 
   const navigate = (id) => { setActive(id); setDrawerOpen(false) }
 
   const ActivePage = PAGES.find(p => p.id === active)?.component ?? HomePage
   const activeLabel = PAGES.find(p => p.id === active)?.label ?? ''
+
+  // Pages that manage their own layout (no outer padding, manage own scroll)
+  const noPad = active === 'assistant' || active === 'notes' || active === 'calendar'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: 'var(--bg)', overflow: 'hidden' }}>
@@ -96,17 +96,23 @@ export default function MobileLayout() {
         {/* Current page label */}
         <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: 'var(--mid)', textAlign: 'center' }}>{activeLabel}</span>
 
-        {/* Avatar */}
-        <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,#c88a5f,#9a6d84)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 13, flex: 'none', cursor: 'pointer' }}
+        {/* Avatar → accounts */}
+        <div
+          style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,#c88a5f,#9a6d84)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 13, flex: 'none', cursor: 'pointer' }}
           onClick={() => navigate('accounts')}
         >
           {initial}
         </div>
       </div>
 
-      {/* Page content */}
-      <div style={{ flex: 1, overflowY: active === 'calendar' ? 'hidden' : 'auto', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: (active === 'assistant' || active === 'notes' || active === 'calendar') ? '0' : '20px 20px 40px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+      {/* Page content — calendar manages its own inner scroll */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div style={{
+          padding: noPad ? '0' : '20px 20px 0',
+          paddingBottom: noPad ? 0 : 'max(20px, env(safe-area-inset-bottom))',
+          flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0,
+          overflowY: noPad ? 'hidden' : 'auto',
+        }}>
           <ActivePage />
         </div>
       </div>
@@ -142,33 +148,16 @@ export default function MobileLayout() {
           </button>
         </div>
 
-        {/* Nav */}
+        {/* Nav — all main pages */}
         <nav style={{ flex: 1, overflowY: 'auto', padding: '0 12px' }}>
-          {NAV_MAIN.map(id => {
+          {NAV_PAGES.map(id => {
             const p = PAGES.find(p => p.id === id)
-            return (
-              <NavItem key={id} id={id} label={p.label} active={active === id} onClick={() => navigate(id)} />
-            )
-          })}
-          <div style={{ height: 1, background: 'var(--bd)', margin: '8px 4px' }} />
-          {NAV_APPS.map(id => {
-            const p = PAGES.find(p => p.id === id)
-            return (
-              <NavItem key={id} id={id} label={p.label} active={active === id} onClick={() => navigate(id)} />
-            )
-          })}
-          <div style={{ flex: 1 }} />
-          <div style={{ height: 1, background: 'var(--bd)', margin: '8px 4px' }} />
-          {NAV_BOTTOM.map(id => {
-            const p = PAGES.find(p => p.id === id)
-            return (
-              <NavItem key={id} id={id} label={p.label} active={active === id} onClick={() => navigate(id)} />
-            )
+            return <NavItem key={id} id={id} label={p.label} active={active === id} onClick={() => navigate(id)} />
           })}
         </nav>
 
-        {/* Drawer footer — theme + GCal + user */}
-        <div style={{ borderTop: '1px solid var(--bd)', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Drawer footer — theme + user */}
+        <div style={{ borderTop: '1px solid var(--bd)', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
 
           {/* Dark mode */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -176,17 +165,7 @@ export default function MobileLayout() {
             <Toggle checked={isDark} onChange={toggleTheme} />
           </div>
 
-          {/* GCal */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <span style={{ fontSize: 15 }}>📅</span>
-            <span style={{ flex: 1, fontSize: 13, color: 'var(--ink)' }}>Google Calendar</span>
-            {gcal.connected
-              ? <button onClick={disconnectGoogle} style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>Disconnect</button>
-              : <button onClick={connectGoogle} style={{ fontSize: 11.5, fontWeight: 600, color: '#c15f3c', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>Connect</button>
-            }
-          </div>
-
-          {/* User */}
+          {/* User → accounts */}
           <button
             onClick={() => navigate('accounts')}
             style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--surface-3)', border: 'none', cursor: 'pointer', padding: '8px 10px', borderRadius: 10, width: '100%', textAlign: 'left', fontFamily: 'inherit' }}

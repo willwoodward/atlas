@@ -125,8 +125,24 @@ async def init_db():
                 email TEXT PRIMARY KEY,
                 gcal_token TEXT,
                 gcal_expires_at INTEGER,
+                gcal_refresh_token TEXT,
+                gcal_access_token TEXT,
+                gcal_access_expires_at INTEGER,
                 github_token TEXT,
                 github_repo TEXT
             );
         """)
         await db.commit()
+
+        # Migrations — add columns that may not exist in older DBs
+        for stmt in [
+            "ALTER TABLE todos ADD COLUMN parent_id TEXT",
+            "ALTER TABLE user_integrations ADD COLUMN gcal_refresh_token TEXT",
+            "ALTER TABLE user_integrations ADD COLUMN gcal_access_token TEXT",
+            "ALTER TABLE user_integrations ADD COLUMN gcal_access_expires_at INTEGER",
+        ]:
+            try:
+                await db.execute(stmt)
+                await db.commit()
+            except Exception:
+                pass  # column already exists

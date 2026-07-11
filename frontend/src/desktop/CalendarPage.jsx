@@ -24,6 +24,8 @@ function toTimeStr(h) {
 }
 function snapTo(h, step) { return Math.round(h / step) * step }
 
+const isSleepEvent = (title = '') => /\bsleep\b/i.test(title)
+
 const inputStyle = {
   width: '100%', padding: '8px 12px', borderRadius: 9, fontSize: 13.5,
   border: '1px solid var(--bd)', background: 'var(--surface-2)', color: 'var(--ink)',
@@ -36,7 +38,7 @@ function EventDetailModal({ event, onClose, onDelete }) {
   return (
     <>
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,.35)' }} />
-      <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 380, zIndex: 51, background: 'var(--surface)', borderRadius: 18, boxShadow: '0 16px 48px rgba(0,0,0,.22)', overflow: 'hidden' }}>
+      <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 380, maxWidth: '90vw', zIndex: 51, background: 'var(--surface)', borderRadius: 18, boxShadow: '0 16px 48px rgba(0,0,0,.22)', overflow: 'hidden' }}>
         <div style={{ height: 5, background: event.color }} />
         <div style={{ padding: '20px 22px 22px' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -91,7 +93,7 @@ function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00'
   return (
     <>
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,.35)' }} />
-      <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 420, zIndex: 51, background: 'var(--surface)', borderRadius: 18, boxShadow: '0 16px 48px rgba(0,0,0,.22)' }}>
+      <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 420, maxWidth: '94vw', zIndex: 51, background: 'var(--surface)', borderRadius: 18, boxShadow: '0 16px 48px rgba(0,0,0,.22)' }}>
         <div style={{ padding: '22px 24px 24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
             <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 21, fontWeight: 600, color: 'var(--ink)' }}>Add event</h2>
@@ -147,17 +149,30 @@ export default function CalendarPage() {
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
-  const [addDraft, setAddDraft] = useState(null)      // { date, startH, endH } pre-fill from click/drag
-  const [ghost, setGhost] = useState(null)             // { date, startH, endH } visual preview
+  const [addDraft, setAddDraft] = useState(null)
+  const [ghost, setGhost] = useState(null)
   const [syncStatus, setSyncStatus] = useState(null)
   const dragRef = useRef(null)
+  const todayRowRef = useRef(null)
+  const agendaScrollRef = useRef(null)
 
   const { weekStart, weekEnd, todayStr } = getWeekRange(weekOffset)
 
-  // Refetch when week changes, when GCal connects, or after a mutation (event created)
+  // Refetch GCal events when week/connection changes
   useEffect(() => {
     if (gcal.connected) refetchEvents(weekStart, weekEnd)
   }, [gcal.connected, weekOffset, gcal.mutatedAt]) // eslint-disable-line
+
+  // On mobile, scroll to today's row on mount
+  useEffect(() => {
+    if (!isMobile) return
+    const timer = setTimeout(() => {
+      if (agendaScrollRef.current && todayRowRef.current) {
+        agendaScrollRef.current.scrollTop = todayRowRef.current.offsetTop - 8
+      }
+    }, 150)
+    return () => clearTimeout(timer)
+  }, [isMobile]) // eslint-disable-line
 
   const handleAddEvent = async (eventData) => {
     if (gcal.connected) {
@@ -182,7 +197,7 @@ export default function CalendarPage() {
   }
 
   const handleColDown = (e, dateStr) => {
-    if (e.target.closest('[data-event]')) return   // clicking an existing event
+    if (e.target.closest('[data-event]')) return
     e.currentTarget.setPointerCapture(e.pointerId)
     dragRef.current = { date: dateStr, startH: hourFromEl(e.currentTarget, e.clientY), startY: e.clientY, el: e.currentTarget }
   }
@@ -201,9 +216,7 @@ export default function CalendarPage() {
     if (!d) return
     dragRef.current = null
     const moved = Math.abs(e.clientY - d.startY)
-
     if (moved < 8) {
-      // Click → 1-hour event snapped to nearest 30 min
       const snapped = snapTo(hourFromEl(d.el, e.clientY), 0.5)
       setAddDraft({ date: d.date, startH: snapped, endH: snapped + 1 })
     } else if (ghost) {
@@ -213,7 +226,7 @@ export default function CalendarPage() {
     setShowAddModal(true)
   }
 
-  // Format local events to match gcal event shape
+  // Format local events
   const localFormatted = localEvents.map(e => ({
     id: e.id, title: e.title, start: e.startH,
     dur: Math.max(e.endH - e.startH, 0.25),
@@ -231,7 +244,7 @@ export default function CalendarPage() {
     const d = new Date(weekStart)
     d.setDate(weekStart.getDate() + i)
     const dateStr = localDateStr(d)
-    return { dow: DOW[i], num: d.getDate(), today: dateStr === todayStr, dateStr, events: allEvents.filter(ev => ev.date === dateStr) }
+    return { dow: DOW[i], num: d.getDate(), today: dateStr === todayStr, dateStr, events: allEvents.filter(ev => ev.date === dateStr), isPast: dateStr < todayStr }
   })
 
   const weekLabel = `${weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })} – ${weekEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`
@@ -241,12 +254,12 @@ export default function CalendarPage() {
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
 
       {/* Page header */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, marginBottom: 22, flex: 'none' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, marginBottom: 22, flex: 'none', padding: isMobile ? '20px 20px 0' : 0 }}>
         <div>
           <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500, color: 'var(--ink)' }}>Calendar</h1>
           <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>{weekLabel}</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {!gcal.connected && !isMobile && (
             <button onClick={connectGoogle} style={{ fontSize: 13, color: '#5f7591', background: 'rgba(95,117,145,.1)', border: '1px solid rgba(95,117,145,.25)', padding: '7px 14px', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
               Connect Google Calendar
@@ -270,7 +283,7 @@ export default function CalendarPage() {
 
           <button onClick={() => { setAddDraft(null); setShowAddModal(true) }} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px', borderRadius: 9, border: 'none', background: '#c15f3c', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(193,95,60,.28)' }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add event
+            {isMobile ? 'Add' : 'Add event'}
           </button>
 
           {!isMobile && (
@@ -285,29 +298,55 @@ export default function CalendarPage() {
 
       {/* Mobile: agenda list */}
       {isMobile && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 40px' }}>
-          {weekDays.map(d => (
-            <div key={d.dow} style={{ marginBottom: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 0 8px', borderBottom: '1px solid var(--bd)' }}>
-                <div style={{ width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: d.today ? '#c15f3c' : 'transparent', flexShrink: 0 }}>
-                  <span style={{ fontFamily: "'Newsreader', serif", fontSize: 16, fontWeight: 600, color: d.today ? '#fff' : 'var(--ink)' }}>{d.num}</span>
-                </div>
-                <span style={{ fontSize: 13, fontWeight: 600, color: d.today ? '#c15f3c' : 'var(--mid)', letterSpacing: '.04em', textTransform: 'uppercase' }}>{d.dow}</span>
-              </div>
-              {d.events.length === 0
-                ? <div style={{ padding: '10px 0', fontSize: 13, color: 'var(--faint)' }}>No events</div>
-                : d.events.sort((a, b) => a.start - b.start).map((ev, i) => (
-                  <div key={ev.id || i} onClick={() => setSelectedEvent(ev)} style={{ display: 'flex', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--bd-xs)', cursor: 'pointer' }}>
-                    <div style={{ width: 3, borderRadius: 99, background: ev.color, flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>{ev.title}</div>
-                      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{ev.time || ev.timeDisplay}</div>
-                    </div>
+        <div ref={agendaScrollRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 20px 20px' }}>
+          {weekDays.map(d => {
+            const sortedEvents = d.events.sort((a, b) => a.start - b.start)
+            return (
+              <div
+                key={d.dow}
+                ref={d.today ? todayRowRef : null}
+                style={{ marginBottom: 4, opacity: d.isPast ? 0.5 : 1 }}
+              >
+                {/* Day header */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0 6px', borderBottom: '1px solid var(--bd)' }}>
+                  <div style={{ width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: d.today ? '#c15f3c' : 'transparent', flexShrink: 0 }}>
+                    <span style={{ fontFamily: "'Newsreader', serif", fontSize: 16, fontWeight: 600, color: d.today ? '#fff' : 'var(--ink)' }}>{d.num}</span>
                   </div>
-                ))
-              }
-            </div>
-          ))}
+                  <span style={{ fontSize: 13, fontWeight: 600, color: d.today ? '#c15f3c' : 'var(--mid)', letterSpacing: '.04em', textTransform: 'uppercase' }}>{d.dow}</span>
+                  {d.today && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#c15f3c', background: 'rgba(193,95,60,.1)', padding: '2px 7px', borderRadius: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Today</span>}
+                </div>
+
+                {/* Events */}
+                {sortedEvents.length === 0
+                  ? <div style={{ padding: '8px 0 4px', fontSize: 13, color: 'var(--faint)' }}>—</div>
+                  : sortedEvents.map((ev, i) => {
+                    const sleep = isSleepEvent(ev.title)
+                    return (
+                      <div
+                        key={ev.id || i}
+                        onClick={() => setSelectedEvent(ev)}
+                        style={{
+                          display: 'flex', gap: 12, padding: '9px 0',
+                          borderBottom: i < sortedEvents.length - 1 ? '1px solid var(--bd-xs)' : 'none',
+                          cursor: 'pointer',
+                          opacity: sleep ? 0.65 : 1,
+                        }}
+                      >
+                        <div style={{ width: 3, borderRadius: 99, background: sleep ? '#4a4540' : ev.color, flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {sleep && <span style={{ fontSize: 12 }}>🌙</span>}
+                            <span style={{ fontSize: 14, fontWeight: 500, color: sleep ? 'var(--muted)' : 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.title}</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{ev.time || ev.timeDisplay}</div>
+                        </div>
+                      </div>
+                    )
+                  })
+                }
+              </div>
+            )
+          })}
         </div>
       )}
 
@@ -350,10 +389,11 @@ export default function CalendarPage() {
               >
                 {HOURS.map(h => <div key={h} style={{ height: HOUR_H, borderTop: '1px solid var(--bd-2xs)' }} />)}
 
-                {/* Existing events */}
+                {/* Events */}
                 {d.events
                   .filter(ev => ev.start >= DAY_START && ev.start < 24)
                   .map((ev, i) => {
+                    const sleep = isSleepEvent(ev.title)
                     const top = (ev.start - DAY_START) * HOUR_H
                     const height = Math.max(ev.dur * HOUR_H - 4, 20)
                     return (
@@ -361,12 +401,20 @@ export default function CalendarPage() {
                         key={ev.id || i}
                         data-event="true"
                         onClick={e => { e.stopPropagation(); setSelectedEvent(ev) }}
-                        style={{ position: 'absolute', left: 4, right: 4, top, height, background: ev.tint, borderLeft: `3px solid ${ev.color}`, borderRadius: 8, padding: '5px 8px', overflow: 'hidden', cursor: 'pointer', transition: 'filter .1s' }}
+                        style={{
+                          position: 'absolute', left: 4, right: 4, top, height,
+                          background: sleep ? 'rgba(43,40,32,.06)' : ev.tint,
+                          borderLeft: `3px solid ${sleep ? '#6b665a' : ev.color}`,
+                          borderRadius: 8, padding: '5px 8px', overflow: 'hidden', cursor: 'pointer', transition: 'filter .1s',
+                          opacity: sleep ? 0.7 : 1,
+                        }}
                         onMouseEnter={e => e.currentTarget.style.filter = 'brightness(.94)'}
                         onMouseLeave={e => e.currentTarget.style.filter = ''}
                       >
-                        <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.2, color: ev.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.title}</div>
-                        {height > 28 && <div style={{ fontSize: 10, color: ev.color, opacity: .8 }}>{ev.timeDisplay}</div>}
+                        <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.2, color: sleep ? '#6b665a' : ev.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {sleep && '🌙 '}{ev.title}
+                        </div>
+                        {height > 28 && <div style={{ fontSize: 10, color: sleep ? '#6b665a' : ev.color, opacity: .8 }}>{ev.timeDisplay}</div>}
                       </div>
                     )
                   })}

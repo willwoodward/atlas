@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { marked } from 'marked'
 import { useNotes } from '../context/NotesContext.jsx'
 import { useGitHub } from '../context/GitHubContext.jsx'
@@ -98,6 +98,74 @@ function FileTree({ nodes, selectedPath, onSelect, depth = 0, drafts = {} }) {
   )
 }
 
+// ─── Heading extraction ───────────────────────────────────────────────────────
+
+function extractHeadings(body) {
+  return body.split('\n')
+    .map(line => { const m = line.match(/^(#{1,6})\s+(.+)/); return m ? { level: m[1].length, text: m[2].trim() } : null })
+    .filter(Boolean)
+}
+
+// ─── Outline bottom sheet ─────────────────────────────────────────────────────
+
+function OutlineSheet({ body, contentRef, onClose }) {
+  const headings = extractHeadings(body)
+
+  const scrollTo = (text, level) => {
+    const selector = `h${level}`
+    const els = contentRef.current?.querySelectorAll(selector) || []
+    for (const el of els) {
+      if (el.textContent.trim() === text) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        break
+      }
+    }
+    onClose()
+  }
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,.4)' }} />
+      <div style={{
+        position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 201,
+        background: 'var(--surface)', borderRadius: '18px 18px 0 0',
+        boxShadow: '0 -8px 40px rgba(0,0,0,.18)',
+        maxHeight: '70vh', display: 'flex', flexDirection: 'column',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}>
+        {/* Handle */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px 20px 0' }}>
+          <div style={{ width: 36, height: 4, borderRadius: 99, background: 'var(--bd-xl)' }} />
+        </div>
+        <div style={{ padding: '12px 20px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--mid)', letterSpacing: '.04em', textTransform: 'uppercase' }}>Outline</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4, fontSize: 16, lineHeight: 1 }}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 12px 16px' }}>
+          {headings.length === 0
+            ? <div style={{ padding: '12px 8px', fontSize: 13, color: 'var(--faint)' }}>No headings found.</div>
+            : headings.map((h, i) => (
+              <button key={i} onClick={() => scrollTo(h.text, h.level)}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: `8px 8px 8px ${8 + (h.level - 1) * 14}px`,
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontFamily: h.level <= 2 ? "'Newsreader', serif" : 'inherit',
+                  fontSize: h.level === 1 ? 16 : h.level === 2 ? 14 : 13,
+                  fontWeight: h.level <= 2 ? 600 : 500,
+                  color: h.level <= 2 ? 'var(--ink)' : 'var(--mid)',
+                  borderRadius: 8,
+                }}>
+                {h.text}
+              </button>
+            ))
+          }
+        </div>
+      </div>
+    </>
+  )
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const noteTitle   = body => body.trim().split('\n')[0].replace(/^#+\s*/, '').trim() || 'New note'
@@ -118,6 +186,8 @@ export default function NotesPage() {
   const [publishing,   setPublishing]   = useState(false)
   const [pubStatus,    setPubStatus]    = useState(null)  // 'ok' | 'err' | 'saved'
   const [drafts,       setDrafts]       = useState(loadDrafts)
+  const [showOutline,  setShowOutline]  = useState(false)
+  const contentRef = useRef(null)
   const saveTimer = useRef(null)
 
   const isQuick  = selected?.type === 'quick'
@@ -160,8 +230,8 @@ export default function NotesPage() {
     saveTimer.current = setTimeout(() => updateNote(selected.id, val), 400)
   }, [isQuick, selected, updateNote])
 
-  const handleNewNote = () => {
-    const id = addNote()
+  const handleNewNote = async () => {
+    const id = await addNote()
     setSelected({ type: 'quick', id })
     setBody('')
     setEditing(false)
@@ -305,8 +375,13 @@ export default function NotesPage() {
         </div>
       </div>
 
+      {/* Outline bottom sheet */}
+      {showOutline && isGithub && !editing && (
+        <OutlineSheet body={body} contentRef={contentRef} onClose={() => setShowOutline(false)} />
+      )}
+
       {/* ── Editor / viewer ── */}
-      <div style={{ flex: 1, display: mobileShowEditor || !isMobile ? 'flex' : 'none', flexDirection: 'column', minWidth: 0, background: 'var(--surface)' }}>
+      <div style={{ flex: 1, display: mobileShowEditor || !isMobile ? 'flex' : 'none', flexDirection: 'column', minWidth: 0, background: 'var(--surface)', position: 'relative' }}>
 
         {!selected && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'var(--faint)' }}>
@@ -389,7 +464,7 @@ export default function NotesPage() {
             </div>
 
             {/* Content */}
-            <div style={{ flex: 1, overflow: 'auto', padding: '28px 36px' }}>
+            <div ref={contentRef} style={{ flex: 1, overflow: 'auto', padding: '28px 36px' }}>
               {fileLoading && <div style={{ fontSize: 13, color: 'var(--faint)' }}>Loading…</div>}
 
               {/* Quick note — textarea, auto-saves */}
@@ -408,6 +483,24 @@ export default function NotesPage() {
               {/* GitHub — rendered markdown */}
               {isGithub && !fileLoading && !editing && (
                 <div className="md-prose" dangerouslySetInnerHTML={{ __html: marked.parse(body || '') }} />
+              )}
+
+              {/* Mobile outline trigger — ^ button */}
+              {isMobile && isGithub && !editing && !fileLoading && body && (
+                <button
+                  onClick={() => setShowOutline(true)}
+                  style={{
+                    position: 'fixed', bottom: 24, right: 20, zIndex: 10,
+                    width: 44, height: 44, borderRadius: '50%',
+                    background: 'var(--surface-2)', border: '1px solid var(--bd)',
+                    color: 'var(--mid)', fontSize: 18, fontWeight: 700,
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: '0 2px 12px rgba(0,0,0,.12)',
+                  }}
+                  title="Outline"
+                >
+                  ↑
+                </button>
               )}
 
               {/* GitHub — edit mode */}

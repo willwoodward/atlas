@@ -81,10 +81,53 @@ function GripIcon() {
   )
 }
 
-function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, dragState, onDragStart, onDragEnd, onDragOverTodo, onDropOnTodo, onDragOverBucket, onDropOnBucket }) {
+function SubTodoRow({ sub, onToggle, onRemove }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', paddingLeft: 28 }}>
+      <button onClick={() => onToggle(sub.id)}
+        style={{ width: 15, height: 15, flex: 'none', borderRadius: 4,
+          border: `1.4px solid ${sub.done ? '#9a9488' : '#c9c2b3'}`,
+          background: sub.done ? '#9a9488' : 'transparent',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', padding: 0, transition: 'all .12s' }}>
+        {sub.done && <CheckMark size={8} />}
+      </button>
+      <span style={{ flex: 1, fontSize: 12.5, lineHeight: 1.45, color: sub.done ? 'var(--faint)' : 'var(--mid)', textDecoration: sub.done ? 'line-through' : 'none' }}>
+        {sub.text}
+      </span>
+      <button onClick={() => onRemove(sub.id)}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', padding: '1px 3px', borderRadius: 4, fontSize: 11, flexShrink: 0 }}>
+        ✕
+      </button>
+    </div>
+  )
+}
+
+function AddSubTodoInput({ parentId, onAdd, onCancel }) {
+  const [text, setText] = useState('')
+  const submit = () => { if (text.trim()) onAdd(parentId, text.trim()); onCancel() }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', paddingLeft: 28 }}>
+      <span style={{ width: 15, height: 15, flex: 'none', borderRadius: 4, border: '1.4px solid #c9c2b3' }} />
+      <input
+        autoFocus
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel() }}
+        onBlur={submit}
+        placeholder="Sub-task…"
+        style={{ flex: 1, border: 'none', outline: 'none', fontFamily: 'inherit', fontSize: 12.5, color: 'var(--ink)', background: 'transparent' }}
+      />
+    </div>
+  )
+}
+
+function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddSub, dragState, onDragStart, onDragEnd, onDragOverTodo, onDropOnTodo, onDragOverBucket, onDropOnBucket }) {
   const [adding, setAdding] = useState(false)
-  const items    = todos.filter(t => t.bucket === bucket.key)
-  const openCount = items.filter(t => !t.done).length
+  const [addingSubFor, setAddingSubFor] = useState(null) // parentId
+
+  const topLevel = todos.filter(t => t.bucket === bucket.key && !t.parentId)
+  const openCount = topLevel.filter(t => !t.done).length
 
   const { dragId, dropTarget } = dragState
   const isTarget = !!dragId && dropTarget?.bucketKey === bucket.key && dropTarget?.bucketKey !== todos.find(t => t.id === dragId)?.bucket
@@ -98,24 +141,22 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, dragSt
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, paddingBottom: 11, borderBottom: '1px solid var(--bd-sm)' }}>
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: bucket.color, flexShrink: 0 }} />
         <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 18, fontWeight: 600, flex: 1 }}>{bucket.label}</h2>
-        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{items.length === 0 ? '—' : `${openCount} left`}</span>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>{topLevel.length === 0 ? '—' : `${openCount} left`}</span>
       </div>
 
-      {items.length === 0 && !adding && (
+      {topLevel.length === 0 && !adding && (
         <div style={{ padding: '14px 0 6px', fontSize: 13, color: 'var(--faint)' }}>Nothing here yet.</div>
       )}
 
-      {items.map((t, idx) => {
+      {topLevel.map((t, idx) => {
         const isDragging   = dragId === t.id
         const isDropAbove  = dropTarget?.todoId === t.id && dropTarget?.above
         const isDropBelow  = dropTarget?.todoId === t.id && !dropTarget?.above
+        const subTodos     = todos.filter(s => s.parentId === t.id)
 
         return (
           <div key={t.id}>
-            {/* Drop indicator above */}
-            {isDropAbove && (
-              <div style={{ height: 2, borderRadius: 2, background: bucket.color, margin: '2px 0' }} />
-            )}
+            {isDropAbove && <div style={{ height: 2, borderRadius: 2, background: bucket.color, margin: '2px 0' }} />}
 
             <div
               draggable
@@ -126,19 +167,12 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, dragSt
               style={{
                 display: 'flex', alignItems: 'flex-start', gap: 9,
                 padding: '10px 0', borderTop: idx === 0 ? 'none' : '1px solid var(--bd-xs)',
-                opacity: isDragging ? 0.35 : 1,
-                transition: 'opacity .1s',
+                opacity: isDragging ? 0.35 : 1, transition: 'opacity .1s',
               }}
             >
-              {/* Drag handle */}
-              <span
-                style={{ color: 'var(--faint)', cursor: 'grab', flexShrink: 0, marginTop: 3, padding: '0 2px' }}
-                onMouseDown={e => e.stopPropagation()}
-              >
+              <span style={{ color: 'var(--faint)', cursor: 'grab', flexShrink: 0, marginTop: 3, padding: '0 2px' }} onMouseDown={e => e.stopPropagation()}>
                 <GripIcon />
               </span>
-
-              {/* Checkbox */}
               <button onClick={() => onToggle(t.id)}
                 style={{ width: 18, height: 18, flex: 'none', marginTop: 1, borderRadius: 6,
                   border: `1.6px solid ${t.done ? bucket.color : '#c9c2b3'}`,
@@ -147,23 +181,34 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, dragSt
                   cursor: 'pointer', padding: 0, transition: 'all .12s' }}>
                 {t.done && <CheckMark size={10} />}
               </button>
-
               <GoalDot goalId={t.goalId} goals={goals} />
-
               <span style={{ flex: 1, fontSize: 13.5, lineHeight: 1.45, color: t.done ? 'var(--faint)' : 'var(--ink)', textDecoration: t.done ? 'line-through' : 'none', transition: 'color .12s' }}>
                 {t.text}
               </span>
-
+              {/* Add sub-task button */}
+              <button
+                onClick={() => setAddingSubFor(t.id)}
+                title="Add sub-task"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', padding: '2px 3px', borderRadius: 4, fontSize: 11, flexShrink: 0, lineHeight: 1 }}>
+                ⤵
+              </button>
               <button onClick={() => onRemove(t.id)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', padding: '2px 4px', borderRadius: 5, fontSize: 12, flexShrink: 0 }}>
                 ✕
               </button>
             </div>
 
-            {/* Drop indicator below */}
-            {isDropBelow && (
-              <div style={{ height: 2, borderRadius: 2, background: bucket.color, margin: '2px 0' }} />
+            {/* Sub-todos */}
+            {subTodos.map(s => (
+              <SubTodoRow key={s.id} sub={s} onToggle={onToggle} onRemove={onRemove} />
+            ))}
+
+            {/* Add sub-todo input */}
+            {addingSubFor === t.id && (
+              <AddSubTodoInput parentId={t.id} onAdd={onAddSub} onCancel={() => setAddingSubFor(null)} />
             )}
+
+            {isDropBelow && <div style={{ height: 2, borderRadius: 2, background: bucket.color, margin: '2px 0' }} />}
           </div>
         )
       })}
@@ -172,7 +217,7 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, dragSt
         ? <AddTodoRow bucket={bucket.key} goals={goals} onAdd={onAdd} onCancel={() => setAdding(false)} />
         : (
           <button onClick={() => setAdding(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: items.length > 0 ? 8 : 0, color: 'var(--faint)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: 'inherit', padding: '4px 0' }}>
+            style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: topLevel.length > 0 ? 8 : 0, color: 'var(--faint)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: 'inherit', padding: '4px 0' }}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Add task
           </button>
@@ -184,7 +229,7 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, dragSt
 
 export default function TodoPage() {
   const isMobile = useIsMobile()
-  const { todos, outcomes, addTodo, toggleTodo, removeTodo, clearDone, setOutcomes, reorderTodo } = useTodos()
+  const { todos, outcomes, addTodo, addSubTodo, toggleTodo, removeTodo, clearDone, setOutcomes, reorderTodo } = useTodos()
   const { goals } = useGoals()
 
   const [dragId,     setDragId]     = useState(null)
@@ -267,6 +312,7 @@ export default function TodoPage() {
             onToggle={toggleTodo}
             onRemove={removeTodo}
             onAdd={addTodo}
+            onAddSub={addSubTodo}
             dragState={{ dragId, dropTarget }}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}

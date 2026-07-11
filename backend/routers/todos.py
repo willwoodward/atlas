@@ -12,6 +12,7 @@ class TodoIn(BaseModel):
     text: str
     bucket: str
     goal_id: Optional[str] = None
+    parent_id: Optional[str] = None
     done: bool = False
     created_at: str
     sort_order: int = 0
@@ -43,8 +44,8 @@ async def add_todo(body: TodoIn, user=Depends(get_current_user), db=Depends(get_
     ) as cur:
         order = (await cur.fetchone())[0]
     await db.execute(
-        "INSERT INTO todos (id, text, bucket, goal_id, done, created_at, sort_order) VALUES (?,?,?,?,?,?,?)",
-        (body.id, body.text, body.bucket, body.goal_id, int(body.done), body.created_at, order),
+        "INSERT INTO todos (id, text, bucket, goal_id, parent_id, done, created_at, sort_order) VALUES (?,?,?,?,?,?,?,?)",
+        (body.id, body.text, body.bucket, body.goal_id, body.parent_id, int(body.done), body.created_at, order),
     )
     await db.commit()
     return {"ok": True}
