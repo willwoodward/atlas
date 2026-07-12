@@ -131,6 +131,12 @@ async def init_db():
                 github_token TEXT,
                 github_repo TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS github_drafts (
+                path TEXT PRIMARY KEY,
+                content TEXT NOT NULL DEFAULT '',
+                saved_at TEXT NOT NULL
+            );
         """)
         await db.commit()
 

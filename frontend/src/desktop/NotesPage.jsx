@@ -2,9 +2,12 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { marked } from 'marked'
 import { useNotes } from '../context/NotesContext.jsx'
 import { useGitHub } from '../context/GitHubContext.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 
 marked.use({ gfm: true, breaks: true })
+
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 // ─── Local drafts (per-path saves that haven't been published yet) ────────────
 
@@ -31,7 +34,7 @@ function buildTree(files) {
       let child = node.children.find(c => c.name === part)
       if (!child) {
         child = isLast
-          ? { name: part, path: file.path, isFile: true }
+          ? { name: part, path: file.path, isFile: true, draftOnly: !!file.draftOnly }
           : { name: part, path: parts.slice(0, i + 1).join('/'), isFile: false, children: [] }
         node.children.push(child)
       }
@@ -50,7 +53,7 @@ function buildTree(files) {
   return root.children
 }
 
-function FileTree({ nodes, selectedPath, onSelect, depth = 0, drafts = {} }) {
+function FileTree({ nodes, selectedPath, onSelect, depth = 0, draftPaths = new Set() }) {
   const [open, setOpen] = useState({})
   return (
     <>
@@ -61,9 +64,11 @@ function FileTree({ nodes, selectedPath, onSelect, depth = 0, drafts = {} }) {
             padding: `5px 10px 5px ${10 + depth * 14}px`,
             cursor: 'pointer', borderRadius: 7, marginBottom: 1,
             background: selectedPath === node.path ? 'rgba(95,117,145,.12)' : 'transparent',
-            color: selectedPath === node.path ? '#5f7591' : 'var(--mid)',
+            color: selectedPath === node.path ? '#5f7591' : node.draftOnly ? 'var(--mid)' : 'var(--mid)',
             fontSize: 13, display: 'flex', alignItems: 'center', gap: 7,
             transition: 'background .1s',
+            fontStyle: node.draftOnly ? 'italic' : 'normal',
+            opacity: node.draftOnly ? 0.8 : 1,
           }}
         >
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, opacity: .5 }}>
@@ -73,7 +78,10 @@ function FileTree({ nodes, selectedPath, onSelect, depth = 0, drafts = {} }) {
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
             {node.name.replace(/\.md$/, '')}
           </span>
-          {drafts[node.path] && (
+          {node.draftOnly && (
+            <span style={{ fontSize: 9, fontWeight: 700, color: '#b08a3e', background: 'rgba(176,138,62,.15)', padding: '1px 4px', borderRadius: 3, flexShrink: 0 }}>new</span>
+          )}
+          {!node.draftOnly && draftPaths.has(node.path) && (
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#b08a3e', flexShrink: 0 }} />
           )}
         </div>
@@ -90,7 +98,7 @@ function FileTree({ nodes, selectedPath, onSelect, depth = 0, drafts = {} }) {
             {node.name}
           </div>
           {open[node.path] && node.children && (
-            <FileTree nodes={node.children} selectedPath={selectedPath} onSelect={onSelect} depth={depth + 1} drafts={drafts} />
+            <FileTree nodes={node.children} selectedPath={selectedPath} onSelect={onSelect} depth={depth + 1} draftPaths={draftPaths} />
           )}
         </div>
       ))}
@@ -175,30 +183,82 @@ const notePreview = body => body.trim().split('\n').slice(1).join(' ').replace(/
 
 export default function NotesPage() {
   const isMobile = useIsMobile()
+  const { token } = useAuth()
   const { notes, addNote, updateNote, removeNote } = useNotes()
   const { github, loadTree, getFile, publishFile, createFile } = useGitHub()
 
-  const [selected,     setSelected]     = useState(null)  // { type:'quick',id } | { type:'github',path }
-  const [body,         setBody]         = useState('')
-  const [editing,      setEditing]      = useState(false) // github view → edit
-  const [fileMeta,     setFileMeta]     = useState(null)  // { sha }
-  const [fileLoading,  setFileLoading]  = useState(false)
-  const [publishing,   setPublishing]   = useState(false)
-  const [pubStatus,    setPubStatus]    = useState(null)  // 'ok' | 'err' | 'saved'
-  const [drafts,       setDrafts]       = useState(loadDrafts)
-  const [showOutline,  setShowOutline]  = useState(false)
-  const [newItem,      setNewItem]      = useState(null)   // null | 'menu' | 'file' | 'folder'
-  const [newName,      setNewName]      = useState('')
-  const [creating,     setCreating]     = useState(false)
-  const [createError,  setCreateError]  = useState(null)
+  const [selected,          setSelected]          = useState(null)  // { type:'quick',id } | { type:'github',path }
+  const [body,              setBody]              = useState('')
+  const [editing,           setEditing]           = useState(false) // github view → edit
+  const [fileMeta,          setFileMeta]          = useState(null)  // { sha } | null (draft-only has no sha)
+  const [fileLoading,       setFileLoading]       = useState(false)
+  const [publishing,        setPublishing]        = useState(false)
+  const [pubStatus,         setPubStatus]         = useState(null)  // 'ok' | 'err' | 'saved'
+  const [drafts,            setDrafts]            = useState(loadDrafts)
+  const [backendDraftPaths, setBackendDraftPaths] = useState(new Set()) // paths with backend drafts
+  const [showOutline,       setShowOutline]       = useState(false)
+  const [newItem,           setNewItem]           = useState(null)   // null | 'menu' | 'file' | 'folder'
+  const [newName,           setNewName]           = useState('')
+  const [creating,          setCreating]          = useState(false)
+  const [createError,       setCreateError]       = useState(null)
   const contentRef = useRef(null)
-  const saveTimer = useRef(null)
+  const saveTimer  = useRef(null)
 
   const isQuick  = selected?.type === 'quick'
   const isGithub = selected?.type === 'github'
-  const hasDraft = isGithub && !!drafts[selected?.path]
+  const hasDraft = isGithub && (!!drafts[selected?.path] || backendDraftPaths.has(selected?.path))
+  const isDraftOnly = isGithub && !github.tree.some(f => f.path === selected?.path)
 
   const updateDrafts = (next) => { saveDrafts(next); setDrafts(next) }
+
+  // ── Backend draft API helpers ─────────────────────────────────────────────
+
+  const authHeaders = { Authorization: `Bearer ${token}` }
+
+  const fetchBackendDraftPaths = useCallback(async () => {
+    if (!token) return
+    try {
+      const r = await fetch(`${API}/api/github-drafts`, { headers: authHeaders })
+      if (!r.ok) return
+      const list = await r.json()
+      setBackendDraftPaths(new Set(list.map(d => d.path)))
+    } catch {}
+  }, [token]) // eslint-disable-line
+
+  const saveBackendDraft = useCallback((path, content) => {
+    if (!token) return
+    fetch(`${API}/api/github-drafts`, {
+      method: 'PUT',
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, content }),
+    }).catch(() => {})
+    setBackendDraftPaths(prev => new Set([...prev, path]))
+  }, [token]) // eslint-disable-line
+
+  const deleteBackendDraft = useCallback((path) => {
+    if (!token) return
+    fetch(`${API}/api/github-drafts/${encodeURIComponent(path)}`, {
+      method: 'DELETE',
+      headers: authHeaders,
+    }).catch(() => {})
+    setBackendDraftPaths(prev => { const s = new Set(prev); s.delete(path); return s })
+  }, [token]) // eslint-disable-line
+
+  // Fetch backend drafts on mount and when connection changes
+  useEffect(() => {
+    if (github.connected && token) fetchBackendDraftPaths()
+  }, [github.connected, token, fetchBackendDraftPaths])
+
+  // ── Tree with draft-only files ────────────────────────────────────────────
+
+  const githubPaths = new Set(github.tree.map(f => f.path))
+  const draftOnlyPaths = [...backendDraftPaths].filter(p => !githubPaths.has(p))
+  const allTreeFiles = [...github.tree, ...draftOnlyPaths.map(path => ({ path, draftOnly: true }))]
+  const tree = buildTree(allTreeFiles)
+  // Combined draft indicator (localStorage + backend)
+  const allDraftPaths = new Set([...Object.keys(drafts), ...backendDraftPaths])
+
+  // ── Note selection ────────────────────────────────────────────────────────
 
   const selectQuick = (note) => {
     setSelected({ type: 'quick', id: note.id })
@@ -215,11 +275,32 @@ export default function NotesPage() {
     setPubStatus(null)
     setFileLoading(true)
     try {
-      const { content, sha } = await getFile(file.path)
-      // If a local draft exists, use that instead of the remote content
-      const draft = loadDrafts()[file.path]
-      setBody(draft ? draft.body : content)
-      setFileMeta({ sha })
+      const localDraft = loadDrafts()[file.path]
+      const isDraftOnlyFile = file.draftOnly || (backendDraftPaths.has(file.path) && !githubPaths.has(file.path))
+      if (isDraftOnlyFile) {
+        // Draft-only: load content from backend (not on GitHub yet)
+        if (localDraft) {
+          setBody(localDraft.body)
+        } else {
+          const r = await fetch(`${API}/api/github-drafts/${encodeURIComponent(file.path)}`, { headers: authHeaders })
+          const data = r.ok ? await r.json() : {}
+          setBody(data.content || '')
+        }
+        setFileMeta(null) // no SHA — not published to GitHub yet
+        setEditing(true)  // auto-open edit mode for new drafts
+      } else {
+        const { content, sha } = await getFile(file.path)
+        const draft = localDraft || null
+        if (!draft && backendDraftPaths.has(file.path)) {
+          // Backend draft exists but not in localStorage — fetch content
+          const r = await fetch(`${API}/api/github-drafts/${encodeURIComponent(file.path)}`, { headers: authHeaders })
+          const data = r.ok ? await r.json() : {}
+          setBody(data.content || content)
+        } else {
+          setBody(draft ? draft.body : content)
+        }
+        setFileMeta({ sha })
+      }
     } catch (e) {
       setBody(`_Error loading file: ${e.message}_`)
     } finally {
@@ -249,20 +330,28 @@ export default function NotesPage() {
     setBody('')
   }
 
-  // Save locally — no GitHub call
+  // Save locally (localStorage) + sync to backend
   const handleSave = () => {
     if (!isGithub) return
     updateDrafts({ ...drafts, [selected.path]: { body, savedAt: new Date().toISOString() } })
+    saveBackendDraft(selected.path, body)
     setPubStatus('saved')
     setEditing(false)
   }
 
-  // Discard local draft, reload from remote
+  // Discard local + backend draft, reload from remote
   const handleDiscard = async () => {
     if (!isGithub) return
     const next = { ...drafts }
     delete next[selected.path]
     updateDrafts(next)
+    deleteBackendDraft(selected.path)
+    if (isDraftOnly) {
+      // Draft-only file discarded — remove from view
+      setSelected(null)
+      setBody('')
+      return
+    }
     setFileLoading(true)
     setEditing(false)
     try {
@@ -275,18 +364,30 @@ export default function NotesPage() {
     setPubStatus(null)
   }
 
-  // Publish to GitHub, then clear draft
+  // Publish to GitHub (create if draft-only, update if existing), then clear drafts
   const handlePublish = async () => {
-    if (!isGithub || !fileMeta) return
+    if (!isGithub) return
     setPublishing(true)
     setPubStatus(null)
     try {
-      const res = await publishFile(selected.path, body, fileMeta.sha, `Update ${selected.path}`)
-      const newSha = res?.content?.sha
+      let newSha
+      if (fileMeta?.sha) {
+        // Update existing file
+        const res = await publishFile(selected.path, body, fileMeta.sha, `Update ${selected.path}`)
+        newSha = res?.content?.sha
+      } else {
+        // Draft-only → create on GitHub
+        const res = await createFile(selected.path, body, `Create ${selected.path}`)
+        newSha = res?.content?.sha
+        await loadTree() // refresh tree to show new file
+      }
       if (newSha) setFileMeta({ sha: newSha })
+      // Clear from localStorage
       const next = { ...drafts }
       delete next[selected.path]
       updateDrafts(next)
+      // Clear from backend
+      deleteBackendDraft(selected.path)
       setPubStatus('ok')
       setEditing(false)
     } catch {
@@ -296,6 +397,7 @@ export default function NotesPage() {
     }
   }
 
+  // Create new file/folder as a draft (not directly to GitHub)
   const handleCreate = async (e) => {
     e.preventDefault()
     const name = newName.trim()
@@ -303,20 +405,27 @@ export default function NotesPage() {
     setCreating(true)
     setCreateError(null)
     try {
-      let filePath
+      let filePath, content
       if (newItem === 'file') {
         filePath = name.endsWith('.md') ? name : name + '.md'
         const title = filePath.split('/').pop().replace(/\.md$/, '')
-        await createFile(filePath, `# ${title}\n`, `Create ${filePath}`)
+        content = `# ${title}\n`
       } else {
         const folder = name.replace(/\/$/, '')
         filePath = `${folder}/README.md`
-        await createFile(filePath, `# ${folder.split('/').pop()}\n`, `Create ${folder}/`)
+        content = `# ${folder.split('/').pop()}\n`
       }
+      // Save as backend draft
+      const r = await fetch(`${API}/api/github-drafts`, {
+        method: 'PUT',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: filePath, content }),
+      })
+      if (!r.ok) throw new Error('Failed to save draft')
+      setBackendDraftPaths(prev => new Set([...prev, filePath]))
       setNewItem(null)
       setNewName('')
-      await loadTree()
-      await selectGithub({ path: filePath })
+      await selectGithub({ path: filePath, draftOnly: true })
     } catch (err) {
       setCreateError(err.message || 'Failed to create')
     } finally {
@@ -324,8 +433,7 @@ export default function NotesPage() {
     }
   }
 
-  const draftCount = Object.keys(drafts).length
-  const tree = buildTree(github.tree)
+  const draftCount = allDraftPaths.size
   const currentNote = isQuick ? notes.find(n => n.id === selected?.id) : null
 
   // On mobile: show sidebar OR editor, not both
@@ -439,7 +547,7 @@ export default function NotesPage() {
             </form>
           )}
           {tree.length > 0 && (
-            <FileTree nodes={tree} selectedPath={isGithub ? selected.path : null} onSelect={selectGithub} drafts={drafts} />
+            <FileTree nodes={tree} selectedPath={isGithub ? selected.path : null} onSelect={selectGithub} draftPaths={allDraftPaths} />
           )}
         </div>
       </div>
@@ -474,7 +582,10 @@ export default function NotesPage() {
                   </button>
                 )}
                 {isGithub && <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{selected.path}</span>}
-                {isGithub && hasDraft && !editing && (
+                {isGithub && isDraftOnly && (
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#b08a3e', background: 'rgba(176,138,62,.12)', padding: '2px 7px', borderRadius: 5 }}>draft</span>
+                )}
+                {isGithub && !isDraftOnly && hasDraft && !editing && (
                   <span style={{ fontSize: 11, fontWeight: 600, color: '#b08a3e', background: 'rgba(176,138,62,.12)', padding: '2px 7px', borderRadius: 5 }}>unsaved</span>
                 )}
                 {isQuick && currentNote && (
@@ -494,7 +605,7 @@ export default function NotesPage() {
                 {/* View mode actions */}
                 {isGithub && !editing && !fileLoading && (
                   <>
-                    {hasDraft && (
+                    {(hasDraft || isDraftOnly) && (
                       <>
                         <button onClick={handleDiscard}
                           style={{ fontSize: 13, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 10px', borderRadius: 8, fontFamily: 'inherit' }}>
@@ -506,10 +617,12 @@ export default function NotesPage() {
                         </button>
                       </>
                     )}
-                    <button onClick={() => { setEditing(true); setPubStatus(null) }}
-                      style={{ fontSize: 13, fontWeight: 600, color: 'var(--mid)', background: 'var(--surface-3)', border: 'none', cursor: 'pointer', padding: '6px 14px', borderRadius: 8, fontFamily: 'inherit' }}>
-                      Edit
-                    </button>
+                    {!isDraftOnly && (
+                      <button onClick={() => { setEditing(true); setPubStatus(null) }}
+                        style={{ fontSize: 13, fontWeight: 600, color: 'var(--mid)', background: 'var(--surface-3)', border: 'none', cursor: 'pointer', padding: '6px 14px', borderRadius: 8, fontFamily: 'inherit' }}>
+                        Edit
+                      </button>
+                    )}
                   </>
                 )}
                 {/* Edit mode actions */}

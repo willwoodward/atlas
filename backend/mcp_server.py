@@ -73,9 +73,11 @@ async def list_tools() -> list[Tool]:
         Tool(name="set_week_outcomes", description="Set the weekly outcomes / intentions text", inputSchema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}),
         Tool(name="get_today_summary", description="Get a full summary of today: pending todos, habit completions, calendar events, and weekly outcomes — useful for a daily briefing", inputSchema={"type":"object","properties":{},"required":[]}),
         Tool(name="list_github_notes", description="List all markdown files in the connected GitHub repo", inputSchema={"type":"object","properties":{},"required":[]}),
-        Tool(name="read_github_note", description="Read a GitHub note by path", inputSchema={"type":"object","properties":{"path":{"type":"string","description":"File path e.g. folder/note.md"}},"required":["path"]}),
-        Tool(name="write_github_note", description="Create or update a GitHub note (auto-fetches SHA for updates). Adds .md extension if missing.", inputSchema={"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"message":{"type":"string","description":"Git commit message (optional)"}},"required":["path","content"]}),
-        Tool(name="create_github_folder", description="Create a new folder in the GitHub repo by adding a README.md inside it", inputSchema={"type":"object","properties":{"path":{"type":"string","description":"Folder path e.g. ideas/2024"}},"required":["path"]}),
+        Tool(name="read_github_note", description="Read a GitHub note by path. Checks local drafts first, then falls back to GitHub.", inputSchema={"type":"object","properties":{"path":{"type":"string","description":"File path e.g. folder/note.md"}},"required":["path"]}),
+        Tool(name="write_github_note", description="Save a GitHub note as a local draft (will appear in the UI for review before publishing). Adds .md extension if missing.", inputSchema={"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}),
+        Tool(name="create_github_folder", description="Create a new folder draft in the GitHub notes (saves README.md as a draft for review before publishing)", inputSchema={"type":"object","properties":{"path":{"type":"string","description":"Folder path e.g. ideas/2024"}},"required":["path"]}),
+        Tool(name="list_github_drafts", description="List all pending GitHub note drafts (created/edited via MCP, not yet published to GitHub)", inputSchema={"type":"object","properties":{},"required":[]}),
+        Tool(name="read_github_draft", description="Read the content of a specific GitHub note draft by path", inputSchema={"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}),
     ]
 
 
@@ -274,45 +276,56 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         return {"files": files, "count": len(files)}
 
     if name == "read_github_note":
+        path = args["path"]
+        # Check local draft first
+        async with db.execute("SELECT content, saved_at FROM github_drafts WHERE path=?", (path,)) as c:
+            draft_row = await c.fetchone()
+        if draft_row:
+            return {"path": path, "content": draft_row["content"], "saved_at": draft_row["saved_at"], "source": "draft"}
+        # Fall back to GitHub
         token, repo = await _get_github_creds(db)
         if not token:
             return {"error": "GitHub not connected"}
-        path = arguments["path"]
         async with httpx.AsyncClient() as client:
             r = await client.get(f"https://api.github.com/repos/{repo}/contents/{path}", headers=_gh_headers(token))
         if r.status_code == 404:
             return {"error": "File not found"}
         data = r.json()
         content = base64.b64decode(data["content"]).decode("utf-8")
-        return {"path": path, "content": content, "sha": data["sha"]}
+        return {"path": path, "content": content, "sha": data["sha"], "source": "github"}
 
     if name in ("write_github_note", "create_github_folder"):
-        token, repo = await _get_github_creds(db)
-        if not token:
-            return {"error": "GitHub not connected"}
+        from datetime import datetime, timezone
         if name == "create_github_folder":
-            folder = arguments["path"].rstrip("/")
+            folder = args["path"].rstrip("/")
             path = f"{folder}/README.md"
             content = f"# {folder.split('/')[-1]}\n"
-            message = f"Create {folder}/"
         else:
-            path = arguments["path"]
+            path = args["path"]
             if not path.endswith(".md"):
                 path += ".md"
-            content = arguments["content"]
-            message = arguments.get("message", f"Update {path}")
-        async with httpx.AsyncClient() as client:
-            r = await client.get(f"https://api.github.com/repos/{repo}/contents/{path}", headers=_gh_headers(token))
-            sha = r.json().get("sha") if r.status_code == 200 else None
-            body = {"message": message, "content": base64.b64encode(content.encode()).decode()}
-            if sha:
-                body["sha"] = sha
-            r = await client.put(
-                f"https://api.github.com/repos/{repo}/contents/{path}",
-                headers={**_gh_headers(token), "Content-Type": "application/json"},
-                json=body,
-            )
-        return {"ok": r.status_code in (200, 201), "path": path}
+            content = args["content"]
+        now = datetime.now(timezone.utc).isoformat()
+        await db.execute(
+            "INSERT INTO github_drafts (path, content, saved_at) VALUES (?, ?, ?)"
+            " ON CONFLICT(path) DO UPDATE SET content=excluded.content, saved_at=excluded.saved_at",
+            (path, content, now),
+        )
+        await db.commit()
+        return {"ok": True, "path": path, "status": "saved as draft — open Atlas to review and publish"}
+
+    if name == "list_github_drafts":
+        async with db.execute("SELECT path, saved_at FROM github_drafts ORDER BY saved_at DESC") as c:
+            rows = [dict(r) for r in await c.fetchall()]
+        return {"drafts": rows, "count": len(rows)}
+
+    if name == "read_github_draft":
+        path = args["path"]
+        async with db.execute("SELECT path, content, saved_at FROM github_drafts WHERE path=?", (path,)) as c:
+            row = await c.fetchone()
+        if not row:
+            return {"error": "Draft not found"}
+        return dict(row)
 
     return {"error": f"Unknown tool: {name}"}
 
