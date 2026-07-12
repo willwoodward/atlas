@@ -73,9 +73,9 @@ export default function HabitsPage() {
       </div>
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: isMobile ? '8px 16px' : '8px 24px', overflowX: 'auto' }}>
-        <div style={{ minWidth: isMobile ? 440 : 'unset' }}>
+        <div style={{ minWidth: isMobile ? 620 : 'unset' }}>
         {/* Header */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr auto 90px 70px 26px', gap: 20, padding: '14px 0 12px', borderBottom: '1px solid var(--bd-sm)', fontSize: 11, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 208px 90px 70px 26px', gap: 20, padding: '14px 0 12px', borderBottom: '1px solid var(--bd-sm)', fontSize: 11, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>
           <div>Habit</div>
           <div style={{ display: 'flex', gap: 9 }}>
             {DOW.map((d, i) => (
@@ -108,7 +108,7 @@ export default function HabitsPage() {
           <div key={h.id} style={{ borderTop: '1px solid var(--bd-xs)' }}>
             <div
               onClick={() => setOpen(p => ({ ...p, [h.id]: !p[h.id] }))}
-              style={{ display: 'grid', gridTemplateColumns: '1.4fr auto 90px 70px 26px', gap: 20, alignItems: 'center', padding: '16px 0', cursor: 'pointer' }}
+              style={{ display: 'grid', gridTemplateColumns: '1.4fr 208px 90px 70px 26px', gap: 20, alignItems: 'center', padding: '16px 0', cursor: 'pointer' }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span style={{ width: 9, height: 9, borderRadius: '50%', background: h.color, flexShrink: 0 }} />

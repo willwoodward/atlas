@@ -28,7 +28,8 @@ export function TodosProvider({ children }) {
   // Convert API row (snake_case, int done) → internal shape
   const toInternal = (r) => ({
     id: r.id, text: r.text, bucket: r.bucket,
-    goalId: r.goal_id, parentId: r.parent_id || null, done: !!r.done, createdAt: r.created_at,
+    goalId: r.goal_id, parentId: r.parent_id || null, done: !!r.done,
+    createdAt: r.created_at, completedAt: r.completed_at || null,
   })
 
   useEffect(() => {
@@ -47,6 +48,7 @@ export function TodosProvider({ children }) {
     const current = todosRef.current
     const toggled = current.find(t => t.id === id)
     const nowDone = toggled ? !toggled.done : false
+    const now = nowDone ? new Date().toISOString() : null
 
     // If completing a sub-todo, check if all siblings are now done → auto-complete parent
     let parentToComplete = null
@@ -58,13 +60,22 @@ export function TodosProvider({ children }) {
       }
     }
 
+    // If un-ticking a sub-todo, also un-tick parent
+    let parentToUncomplete = null
+    if (toggled?.parentId && !nowDone) {
+      const parent = current.find(t => t.id === toggled.parentId)
+      if (parent?.done) parentToUncomplete = toggled.parentId
+    }
+
     setTodos(prev => {
-      let next = prev.map(t => t.id === id ? { ...t, done: !t.done } : t)
-      if (parentToComplete) next = next.map(t => t.id === parentToComplete ? { ...t, done: true } : t)
+      let next = prev.map(t => t.id === id ? { ...t, done: nowDone, completedAt: now } : t)
+      if (parentToComplete) next = next.map(t => t.id === parentToComplete ? { ...t, done: true, completedAt: new Date().toISOString() } : t)
+      if (parentToUncomplete) next = next.map(t => t.id === parentToUncomplete ? { ...t, done: false, completedAt: null } : t)
       return next
     })
     await call(`/api/todos/${id}/toggle`, { method: 'PATCH' })
     if (parentToComplete) await call(`/api/todos/${parentToComplete}/toggle`, { method: 'PATCH' })
+    if (parentToUncomplete) await call(`/api/todos/${parentToUncomplete}/toggle`, { method: 'PATCH' })
   }, [call])
 
   const moveTodo = useCallback(async (id, bucket) => {

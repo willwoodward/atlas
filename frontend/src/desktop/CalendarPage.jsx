@@ -24,8 +24,6 @@ function toTimeStr(h) {
 }
 function snapTo(h, step) { return Math.round(h / step) * step }
 
-const isSleepEvent = (title = '') => /\bsleep\b/i.test(title)
-
 const inputStyle = {
   width: '100%', padding: '8px 12px', borderRadius: 9, fontSize: 13.5,
   border: '1px solid var(--bd)', background: 'var(--surface-2)', color: 'var(--ink)',
@@ -50,10 +48,18 @@ function EventDetailModal({ event, onClose, onDelete }) {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="4" y="5" width="16" height="16" rx="2"/><line x1="4" y1="9" x2="20" y2="9"/></svg>
               {event.date}
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13.5, color: 'var(--mid)' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg>
-              {event.time} <span style={{ color: 'var(--muted)', fontSize: 12 }}>({event.durDisplay})</span>
-            </div>
+            {!event.isAllDay && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13.5, color: 'var(--mid)' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg>
+                {event.time} <span style={{ color: 'var(--muted)', fontSize: 12 }}>({event.durDisplay})</span>
+              </div>
+            )}
+            {event.isAllDay && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13.5, color: 'var(--mid)' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg>
+                All day
+              </div>
+            )}
             {event.location && (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13.5, color: 'var(--mid)' }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
@@ -158,12 +164,10 @@ export default function CalendarPage() {
 
   const { weekStart, weekEnd, todayStr } = getWeekRange(weekOffset)
 
-  // Refetch GCal events when week/connection changes
   useEffect(() => {
     if (gcal.connected) refetchEvents(weekStart, weekEnd)
   }, [gcal.connected, weekOffset, gcal.mutatedAt]) // eslint-disable-line
 
-  // On mobile, scroll to today's row on mount
   useEffect(() => {
     if (!isMobile) return
     const timer = setTimeout(() => {
@@ -232,9 +236,10 @@ export default function CalendarPage() {
     dur: Math.max(e.endH - e.startH, 0.25),
     time: `${fmtH(e.startH)}–${fmtH(e.endH)}`,
     timeDisplay: fmtH(e.startH),
+    endTimeDisplay: fmtH(e.endH),
     durDisplay: `${Math.round(Math.max(e.endH - e.startH, 0.25) * 60)}m`,
     color: e.color, tint: hexTint(e.color),
-    date: e.date, isLocal: true, notes: e.notes,
+    date: e.date, isLocal: true, isAllDay: false, notes: e.notes,
     description: '', location: '',
   }))
 
@@ -268,7 +273,6 @@ export default function CalendarPage() {
           {gcal.loading && <span style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</span>}
           {gcal.error && <span style={{ fontSize: 13, color: '#c15f3c' }}>⚠ {gcal.error}</span>}
 
-          {/* Week navigation */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <button onClick={() => setWeekOffset(o => o - 1)} style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', cursor: 'pointer' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
@@ -300,13 +304,10 @@ export default function CalendarPage() {
       {isMobile && (
         <div ref={agendaScrollRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 20px 20px' }}>
           {weekDays.map(d => {
-            const sortedEvents = d.events.sort((a, b) => a.start - b.start)
+            const allDayEvs = d.events.filter(ev => ev.isAllDay).sort((a, b) => a.title.localeCompare(b.title))
+            const timedEvs = d.events.filter(ev => !ev.isAllDay && !ev.isSleepWakeUp).sort((a, b) => a.start - b.start)
             return (
-              <div
-                key={d.dow}
-                ref={d.today ? todayRowRef : null}
-                style={{ marginBottom: 4, opacity: d.isPast ? 0.5 : 1 }}
-              >
+              <div key={d.dow} ref={d.today ? todayRowRef : null} style={{ marginBottom: 4, opacity: d.isPast ? 0.5 : 1 }}>
                 {/* Day header */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0 6px', borderBottom: '1px solid var(--bd)' }}>
                   <div style={{ width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: d.today ? '#c15f3c' : 'transparent', flexShrink: 0 }}>
@@ -316,33 +317,29 @@ export default function CalendarPage() {
                   {d.today && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#c15f3c', background: 'rgba(193,95,60,.1)', padding: '2px 7px', borderRadius: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Today</span>}
                 </div>
 
-                {/* Events */}
-                {sortedEvents.length === 0
+                {/* All-day events */}
+                {allDayEvs.map((ev, i) => (
+                  <div key={ev.id || i} onClick={() => setSelectedEvent(ev)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--bd-xs)', cursor: 'pointer' }}>
+                    <div style={{ width: 3, borderRadius: 99, background: ev.color, flexShrink: 0, alignSelf: 'stretch', minHeight: 20 }} />
+                    <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)' }}>{ev.title}</span>
+                    <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>All day</span>
+                  </div>
+                ))}
+
+                {/* Timed events */}
+                {timedEvs.length === 0 && allDayEvs.length === 0
                   ? <div style={{ padding: '8px 0 4px', fontSize: 13, color: 'var(--faint)' }}>—</div>
-                  : sortedEvents.map((ev, i) => {
-                    const sleep = isSleepEvent(ev.title)
-                    return (
-                      <div
-                        key={ev.id || i}
-                        onClick={() => setSelectedEvent(ev)}
-                        style={{
-                          display: 'flex', gap: 12, padding: '9px 0',
-                          borderBottom: i < sortedEvents.length - 1 ? '1px solid var(--bd-xs)' : 'none',
-                          cursor: 'pointer',
-                          opacity: sleep ? 0.65 : 1,
-                        }}
-                      >
-                        <div style={{ width: 3, borderRadius: 99, background: sleep ? '#4a4540' : ev.color, flexShrink: 0 }} />
+                  : timedEvs.map((ev, i) => (
+                      <div key={ev.id || i} onClick={() => setSelectedEvent(ev)}
+                        style={{ display: 'flex', gap: 12, padding: '9px 0', borderBottom: i < timedEvs.length - 1 ? '1px solid var(--bd-xs)' : 'none', cursor: 'pointer' }}>
+                        <div style={{ width: 3, borderRadius: 99, background: ev.color, flexShrink: 0 }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            {sleep && <span style={{ fontSize: 12 }}>🌙</span>}
-                            <span style={{ fontSize: 14, fontWeight: 500, color: sleep ? 'var(--muted)' : 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.title}</span>
-                          </div>
+                          <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.title}</span>
                           <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{ev.time || ev.timeDisplay}</div>
                         </div>
                       </div>
-                    )
-                  })
+                    ))
                 }
               </div>
             )
@@ -357,12 +354,21 @@ export default function CalendarPage() {
           {/* Day headers — sticky */}
           <div style={{ display: 'grid', gridTemplateColumns: '56px repeat(7,1fr)', borderBottom: '1px solid var(--bd)', position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 2 }}>
             <div />
-            {weekDays.map(d => (
-              <div key={d.dow} style={{ padding: '13px 8px', textAlign: 'center', borderLeft: '1px solid var(--bd-xs)' }}>
-                <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>{d.dow}</div>
-                <div style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', fontFamily: "'Newsreader', serif", fontSize: 16, fontWeight: 600, color: d.today ? '#fff' : 'var(--ink)', background: d.today ? '#c15f3c' : 'transparent' }}>{d.num}</div>
-              </div>
-            ))}
+            {weekDays.map(d => {
+              const allDayEvs = d.events.filter(ev => ev.isAllDay)
+              return (
+                <div key={d.dow} style={{ padding: allDayEvs.length > 0 ? '8px 6px 5px' : '13px 8px', textAlign: 'center', borderLeft: '1px solid var(--bd-xs)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>{d.dow}</div>
+                  <div style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', fontFamily: "'Newsreader', serif", fontSize: 16, fontWeight: 600, color: d.today ? '#fff' : 'var(--ink)', background: d.today ? '#c15f3c' : 'transparent' }}>{d.num}</div>
+                  {allDayEvs.map(ev => (
+                    <div key={ev.id} onClick={() => setSelectedEvent(ev)}
+                      style={{ marginTop: 3, padding: '2px 5px', borderRadius: 4, fontSize: 10.5, fontWeight: 500, background: ev.tint, color: ev.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer', textAlign: 'left' }}>
+                      {ev.title}
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
           </div>
 
           {/* Hour grid */}
@@ -380,8 +386,7 @@ export default function CalendarPage() {
 
             {/* Day columns */}
             {weekDays.map(d => (
-              <div
-                key={d.dow}
+              <div key={d.dow}
                 style={{ position: 'relative', borderLeft: '1px solid var(--bd-xs)', background: d.today ? 'rgba(193,95,60,.025)' : 'transparent', userSelect: 'none', cursor: 'crosshair' }}
                 onPointerDown={e => handleColDown(e, d.dateStr)}
                 onPointerMove={handleColMove}
@@ -389,32 +394,28 @@ export default function CalendarPage() {
               >
                 {HOURS.map(h => <div key={h} style={{ height: HOUR_H, borderTop: '1px solid var(--bd-2xs)' }} />)}
 
-                {/* Events */}
+                {/* Timed events */}
                 {d.events
-                  .filter(ev => ev.start >= DAY_START && ev.start < 24)
+                  .filter(ev => !ev.isAllDay && !ev.isSleepWakeUp && ev.start >= DAY_START && ev.start < 24)
                   .map((ev, i) => {
-                    const sleep = isSleepEvent(ev.title)
                     const top = (ev.start - DAY_START) * HOUR_H
                     const height = Math.max(ev.dur * HOUR_H - 4, 20)
                     return (
-                      <div
-                        key={ev.id || i}
-                        data-event="true"
+                      <div key={ev.id || i} data-event="true"
                         onClick={e => { e.stopPropagation(); setSelectedEvent(ev) }}
                         style={{
                           position: 'absolute', left: 4, right: 4, top, height,
-                          background: sleep ? 'rgba(43,40,32,.06)' : ev.tint,
-                          borderLeft: `3px solid ${sleep ? '#6b665a' : ev.color}`,
+                          background: ev.tint,
+                          borderLeft: `3px solid ${ev.color}`,
                           borderRadius: 8, padding: '5px 8px', overflow: 'hidden', cursor: 'pointer', transition: 'filter .1s',
-                          opacity: sleep ? 0.7 : 1,
                         }}
                         onMouseEnter={e => e.currentTarget.style.filter = 'brightness(.94)'}
                         onMouseLeave={e => e.currentTarget.style.filter = ''}
                       >
-                        <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.2, color: sleep ? '#6b665a' : ev.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {sleep && '🌙 '}{ev.title}
+                        <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.2, color: ev.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {ev.title}
                         </div>
-                        {height > 28 && <div style={{ fontSize: 10, color: sleep ? '#6b665a' : ev.color, opacity: .8 }}>{ev.timeDisplay}</div>}
+                        {height > 28 && <div style={{ fontSize: 10, color: ev.color, opacity: .8 }}>{ev.timeDisplay}</div>}
                       </div>
                     )
                   })}

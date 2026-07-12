@@ -62,10 +62,13 @@ const COLOR_MAP = {
   '11': { c: '#c15f3c', t: 'rgba(193,95,60,.13)'  },
 }
 const DEFAULT_COL = { c: '#5f7591', t: 'rgba(95,117,145,.16)' }
+const SLEEP_COL   = { c: '#9a9488', t: 'rgba(154,148,136,.16)' }
 
 // Use local date parts to avoid UTC offset shifting the date
 export const localDateStr = d =>
   `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+
+export const isSleepEvent = (title = '') => /\bsleep\b/i.test(title)
 
 function parsedt(dt) {
   if (!dt) return null
@@ -77,34 +80,124 @@ const toH = d => d.getHours() + d.getMinutes() / 60
 const fmtT = d => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 
 export function toCalendarEvents(items = []) {
-  return items
-    .filter(e => e.status !== 'cancelled' && e.start)
-    .map(e => {
-      const start = parsedt(e.start)
-      const end   = parsedt(e.end)
-      if (!start || !end) return null
+  const result = []
+
+  for (const e of items) {
+    if (e.status === 'cancelled' || !e.start) continue
+
+    // ── All-day events (start.date, no dateTime) ──────────────────────────
+    if (!e.start.dateTime) {
       const pal = COLOR_MAP[e.colorId] || DEFAULT_COL
-      const startH   = toH(start)
-      // If end is on a later date (crosses midnight), clip to end of day
-      const endH     = localDateStr(end) > localDateStr(start) ? 24 : toH(end)
-      const dur      = Math.max(endH - startH, 0.25)
-      return {
+      result.push({
         id:          e.id,
         title:       e.summary || '(No title)',
         description: e.description || '',
         location:    e.location || '',
-        start:       startH,
-        dur,
-        time:        `${fmtT(start)}–${fmtT(end)}`,
-        timeDisplay: fmtT(start),
-        durDisplay:  `${Math.round(dur * 60)}m`,
+        isAllDay:    true,
+        start:       -1, // sort before timed events
+        dur:         0,
+        time:        'All day',
+        timeDisplay: 'All day',
+        endTimeDisplay: '',
+        durDisplay:  '',
         color:       pal.c,
         tint:        pal.t,
-        date:        localDateStr(start),
+        date:        e.start.date,
         isLocal:     false,
+      })
+      continue
+    }
+
+    // ── Timed events ──────────────────────────────────────────────────────
+    const start = parsedt(e.start)
+    const end   = parsedt(e.end)
+    if (!start || !end) continue
+
+    const pal       = COLOR_MAP[e.colorId] || DEFAULT_COL
+    const startH    = toH(start)
+    const startDate = localDateStr(start)
+    const endDate   = localDateStr(end)
+    const crossesMidnight = endDate > startDate
+    const endH      = crossesMidnight ? 24 : toH(end)
+    const dur       = Math.max(endH - startH, 0.25)
+
+    // ── Sleep events — special handling ─────────────────────────────────────
+    if (isSleepEvent(e.summary)) {
+      const wakeH = toH(end)
+      if (!crossesMidnight && startH < 12) {
+        // Early-morning same-day sleep (e.g. midnight → 8am)
+        // Emit actual sleep block for calendar view
+        result.push({
+          id: e.id, title: e.summary || '(No title)',
+          description: e.description || '', location: e.location || '',
+          isAllDay: false, isBedtime: true,
+          start: startH, dur: Math.max(wakeH - startH, 0.25),
+          time: `${fmtT(start)}–${fmtT(end)}`, timeDisplay: fmtT(start),
+          endTimeDisplay: fmtT(end), durDisplay: `${Math.round((wakeH - startH) * 60)}m`,
+          color: SLEEP_COL.c, tint: SLEEP_COL.t, date: startDate, isLocal: false,
+        })
+        // Emit wake-up hint for homepage schedule
+        result.push({
+          id: `${e.id}_wakeup`, title: 'Wake up', description: '', location: '',
+          isAllDay: false, isSleepWakeUp: true,
+          start: wakeH, dur: wakeH,
+          time: fmtT(end), timeDisplay: fmtT(end), endTimeDisplay: '', durDisplay: '',
+          color: SLEEP_COL.c, tint: SLEEP_COL.t, date: startDate, isLocal: false,
+        })
+      } else if (crossesMidnight && wakeH > 0) {
+        // Cross-midnight sleep ending in morning → bedtime + wake-up
+        result.push({
+          id: e.id, title: e.summary || '(No title)',
+          description: e.description || '', location: e.location || '',
+          isAllDay: false, isBedtime: true,
+          start: startH, dur,
+          time: `${fmtT(start)}–${fmtT(end)}`, timeDisplay: fmtT(start),
+          endTimeDisplay: fmtT(end), durDisplay: `${Math.round(dur * 60)}m`,
+          color: SLEEP_COL.c, tint: SLEEP_COL.t, date: startDate, isLocal: false,
+        })
+        result.push({
+          id: `${e.id}_wakeup`, title: 'Wake up', description: '', location: '',
+          isAllDay: false, isSleepWakeUp: true,
+          start: wakeH, dur: wakeH,
+          time: fmtT(end), timeDisplay: fmtT(end), endTimeDisplay: '', durDisplay: '',
+          color: SLEEP_COL.c, tint: SLEEP_COL.t, date: endDate, isLocal: false,
+        })
+      } else {
+        // Evening sleep going to midnight (calendar boundary) → bedtime only
+        result.push({
+          id: e.id, title: e.summary || '(No title)',
+          description: e.description || '', location: e.location || '',
+          isAllDay: false, isBedtime: true,
+          start: startH, dur,
+          time: `${fmtT(start)}–${fmtT(end)}`, timeDisplay: fmtT(start),
+          endTimeDisplay: fmtT(end), durDisplay: `${Math.round(dur * 60)}m`,
+          color: SLEEP_COL.c, tint: SLEEP_COL.t, date: startDate, isLocal: false,
+        })
       }
+      continue
+    }
+
+    // ── Regular timed events ─────────────────────────────────────────────────
+    result.push({
+      id:          e.id,
+      title:       e.summary || '(No title)',
+      description: e.description || '',
+      location:    e.location || '',
+      isAllDay:    false,
+      start:       startH,
+      dur,
+      time:        `${fmtT(start)}–${fmtT(end)}`,
+      timeDisplay: fmtT(start),
+      endTimeDisplay: fmtT(end),
+      durDisplay:  `${Math.round(dur * 60)}m`,
+      color:       pal.c,
+      tint:        pal.t,
+      date:        startDate,
+      isLocal:     false,
     })
-    .filter(Boolean)
+  }
+
+  return result
 }
 
 // offset: 0 = current week, 1 = next week, -1 = prev week, etc.

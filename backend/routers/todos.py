@@ -53,7 +53,10 @@ async def add_todo(body: TodoIn, user=Depends(get_current_user), db=Depends(get_
 
 @router.patch("/{todo_id}/toggle")
 async def toggle_todo(todo_id: str, user=Depends(get_current_user), db=Depends(get_db)):
-    await db.execute("UPDATE todos SET done = NOT done WHERE id = ?", (todo_id,))
+    await db.execute(
+        "UPDATE todos SET done = NOT done, completed_at = CASE WHEN done = 0 THEN datetime('now') ELSE NULL END WHERE id = ?",
+        (todo_id,),
+    )
     await db.commit()
     return {"ok": True}
 

@@ -143,6 +143,7 @@ async def init_db():
         # Migrations — add columns that may not exist in older DBs
         for stmt in [
             "ALTER TABLE todos ADD COLUMN parent_id TEXT",
+            "ALTER TABLE todos ADD COLUMN completed_at TEXT",
             "ALTER TABLE user_integrations ADD COLUMN gcal_refresh_token TEXT",
             "ALTER TABLE user_integrations ADD COLUMN gcal_access_token TEXT",
             "ALTER TABLE user_integrations ADD COLUMN gcal_access_expires_at INTEGER",
