@@ -246,7 +246,7 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
 
 # ── SSE Transport + auth middleware ───────────────────────────────────────────
 
-sse_transport = SseServerTransport("/mcp/messages/")
+sse_transport = SseServerTransport("/messages/")
 
 
 async def _check_auth(request: Request) -> bool:
