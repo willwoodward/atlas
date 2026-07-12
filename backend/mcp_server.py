@@ -254,7 +254,19 @@ async def _check_auth(request: Request) -> bool:
         return True  # no key configured → open (dev mode)
     auth = request.headers.get("authorization", "")
     key = request.query_params.get("key", "")
-    return auth == f"Bearer {ATLAS_MCP_KEY}" or key == ATLAS_MCP_KEY
+    # Accept static bearer key
+    if auth == f"Bearer {ATLAS_MCP_KEY}" or key == ATLAS_MCP_KEY:
+        return True
+    # Accept JWT issued by our OAuth server
+    if auth.startswith("Bearer "):
+        token = auth[7:]
+        try:
+            from auth import decode_jwt
+            decode_jwt(token)
+            return True
+        except Exception:
+            pass
+    return False
 
 
 async def handle_sse(request: Request) -> Response:
