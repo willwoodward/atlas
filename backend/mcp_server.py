@@ -52,6 +52,9 @@ async def list_tools() -> list[Tool]:
         Tool(name="create_note", description="Create a new quick note", inputSchema={"type":"object","properties":{"body":{"type":"string"}},"required":["body"]}),
         Tool(name="update_note", description="Update an existing note body", inputSchema={"type":"object","properties":{"id":{"type":"string"},"body":{"type":"string"}},"required":["id","body"]}),
         Tool(name="list_events", description="List local calendar events, optionally for a specific date (YYYY-MM-DD)", inputSchema={"type":"object","properties":{"date":{"type":"string"}},"required":[]}),
+        Tool(name="delete_todo", description="Delete a todo permanently", inputSchema={"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}),
+        Tool(name="set_week_outcomes", description="Set the weekly outcomes / intentions text", inputSchema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}),
+        Tool(name="get_today_summary", description="Get a full summary of today: pending todos, habit completions, calendar events, and weekly outcomes — useful for a daily briefing", inputSchema={"type":"object","properties":{},"required":[]}),
     ]
 
 
@@ -181,6 +184,62 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
                 return [dict(r) for r in await c.fetchall()]
         async with db.execute("SELECT * FROM local_events ORDER BY date, start_h") as c:
             return [dict(r) for r in await c.fetchall()]
+
+    if name == "delete_todo":
+        await db.execute("DELETE FROM todos WHERE id = ?", (args["id"],))
+        await db.commit()
+        return {"ok": True}
+
+    if name == "set_week_outcomes":
+        from datetime import timedelta
+        d = datetime.now(timezone.utc).date()
+        monday = (d - timedelta(days=d.weekday())).isoformat()
+        await db.execute(
+            "INSERT INTO week_outcomes (week_str, text) VALUES (?, ?) ON CONFLICT(week_str) DO UPDATE SET text=excluded.text",
+            (monday, args["text"]),
+        )
+        await db.commit()
+        return {"ok": True, "week": monday}
+
+    if name == "get_today_summary":
+        from datetime import timedelta
+        d = datetime.now(timezone.utc).date()
+        monday = (d - timedelta(days=d.weekday())).isoformat()
+
+        # Pending todos (today bucket, not done)
+        async with db.execute("SELECT id, text, goal_id FROM todos WHERE bucket='today' AND done=0 ORDER BY sort_order") as c:
+            pending_todos = [dict(r) for r in await c.fetchall()]
+
+        # Done todos today
+        async with db.execute("SELECT id, text FROM todos WHERE bucket='today' AND done=1 ORDER BY sort_order") as c:
+            done_todos = [dict(r) for r in await c.fetchall()]
+
+        # Habits with completion status
+        async with db.execute("SELECT id, name, period FROM habits ORDER BY created_at") as c:
+            habits = [dict(r) for r in await c.fetchall()]
+        for h in habits:
+            async with db.execute("SELECT 1 FROM habit_completions WHERE habit_id=? AND date=?", (h["id"], today)) as c:
+                h["done_today"] = bool(await c.fetchone())
+
+        # Today's calendar events
+        async with db.execute("SELECT title, start_h, end_h, color FROM local_events WHERE date=? ORDER BY start_h", (today,)) as c:
+            events = [dict(r) for r in await c.fetchall()]
+
+        # Weekly outcomes
+        async with db.execute("SELECT text FROM week_outcomes WHERE week_str=?", (monday,)) as c:
+            row = await c.fetchone()
+        outcomes = row["text"] if row else ""
+
+        return {
+            "date": today,
+            "week_outcomes": outcomes,
+            "todos": {
+                "pending": pending_todos,
+                "done": done_todos,
+            },
+            "habits": habits,
+            "calendar_events": events,
+        }
 
     return {"error": f"Unknown tool: {name}"}
 
