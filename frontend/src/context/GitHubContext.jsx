@@ -78,6 +78,11 @@ export function GitHubProvider({ children }) {
     return putFile(auth.token, auth.repo, path, content, sha, message)
   }, [isConnected, auth.token, auth.repo])
 
+  const createFile = useCallback(async (path, content = '', message) => {
+    if (!isConnected) throw new Error('Not connected')
+    return putFile(auth.token, auth.repo, path, content, undefined, message)
+  }, [isConnected, auth.token, auth.repo])
+
   return (
     <Ctx.Provider value={{
       github: { connected: isConnected, repo: auth.repo, tree, treeLoading, treeError },
@@ -86,6 +91,7 @@ export function GitHubProvider({ children }) {
       loadTree,
       getFile,
       publishFile,
+      createFile,
     }}>
       {children}
     </Ctx.Provider>

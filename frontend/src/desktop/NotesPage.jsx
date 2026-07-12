@@ -176,7 +176,7 @@ const notePreview = body => body.trim().split('\n').slice(1).join(' ').replace(/
 export default function NotesPage() {
   const isMobile = useIsMobile()
   const { notes, addNote, updateNote, removeNote } = useNotes()
-  const { github, loadTree, getFile, publishFile }  = useGitHub()
+  const { github, loadTree, getFile, publishFile, createFile } = useGitHub()
 
   const [selected,     setSelected]     = useState(null)  // { type:'quick',id } | { type:'github',path }
   const [body,         setBody]         = useState('')
@@ -187,6 +187,10 @@ export default function NotesPage() {
   const [pubStatus,    setPubStatus]    = useState(null)  // 'ok' | 'err' | 'saved'
   const [drafts,       setDrafts]       = useState(loadDrafts)
   const [showOutline,  setShowOutline]  = useState(false)
+  const [newItem,      setNewItem]      = useState(null)   // null | 'menu' | 'file' | 'folder'
+  const [newName,      setNewName]      = useState('')
+  const [creating,     setCreating]     = useState(false)
+  const [createError,  setCreateError]  = useState(null)
   const contentRef = useRef(null)
   const saveTimer = useRef(null)
 
@@ -292,6 +296,34 @@ export default function NotesPage() {
     }
   }
 
+  const handleCreate = async (e) => {
+    e.preventDefault()
+    const name = newName.trim()
+    if (!name || creating) return
+    setCreating(true)
+    setCreateError(null)
+    try {
+      let filePath
+      if (newItem === 'file') {
+        filePath = name.endsWith('.md') ? name : name + '.md'
+        const title = filePath.split('/').pop().replace(/\.md$/, '')
+        await createFile(filePath, `# ${title}\n`, `Create ${filePath}`)
+      } else {
+        const folder = name.replace(/\/$/, '')
+        filePath = `${folder}/README.md`
+        await createFile(filePath, `# ${folder.split('/').pop()}\n`, `Create ${folder}/`)
+      }
+      setNewItem(null)
+      setNewName('')
+      await loadTree()
+      await selectGithub({ path: filePath })
+    } catch (err) {
+      setCreateError(err.message || 'Failed to create')
+    } finally {
+      setCreating(false)
+    }
+  }
+
   const draftCount = Object.keys(drafts).length
   const tree = buildTree(github.tree)
   const currentNote = isQuick ? notes.find(n => n.id === selected?.id) : null
@@ -348,13 +380,36 @@ export default function NotesPage() {
               )}
             </span>
             {github.connected && (
-              <button onClick={() => loadTree()} title="Refresh"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', padding: 2, display: 'flex', alignItems: 'center' }}>
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
-                  <path d="M3.51 9a9 9 0 0114.85-3.36L23 10"/><path d="M20.49 15a9 9 0 01-14.85 3.36L1 14"/>
-                </svg>
-              </button>
+              <div style={{ display: 'flex', gap: 2, alignItems: 'center', position: 'relative' }}>
+                <button onClick={() => loadTree()} title="Refresh"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', padding: 2, display: 'flex', alignItems: 'center' }}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                    <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+                    <path d="M3.51 9a9 9 0 0114.85-3.36L23 10"/><path d="M20.49 15a9 9 0 01-14.85 3.36L1 14"/>
+                  </svg>
+                </button>
+                <button onClick={() => { setNewItem(p => p ? null : 'menu'); setCreateError(null) }} title="New"
+                  style={{ width: 18, height: 18, borderRadius: 5, border: 'none', background: 'var(--surface-3)', color: 'var(--mid)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, fontSize: 14, lineHeight: 1 }}>
+                  +
+                </button>
+                {newItem === 'menu' && (
+                  <>
+                    <div onClick={() => setNewItem(null)} style={{ position: 'fixed', inset: 0, zIndex: 10 }} />
+                    <div style={{ position: 'absolute', right: 0, top: '100%', zIndex: 11, background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,.12)', minWidth: 120, overflow: 'hidden', marginTop: 4 }}>
+                      {['file', 'folder'].map(type => (
+                        <div key={type} onClick={() => { setNewItem(type); setNewName(''); setCreateError(null) }}
+                          style={{ padding: '8px 14px', fontSize: 13, color: 'var(--ink)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          {type === 'file'
+                            ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                            : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                          }
+                          New {type}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
           {!github.connected && (
@@ -368,6 +423,20 @@ export default function NotesPage() {
           )}
           {github.connected && !github.treeLoading && !github.treeError && tree.length === 0 && (
             <div style={{ padding: '2px 4px', fontSize: 12, color: 'var(--faint)' }}>No markdown files found.</div>
+          )}
+          {(newItem === 'file' || newItem === 'folder') && (
+            <form onSubmit={handleCreate} style={{ padding: '0 10px 8px' }}>
+              <input
+                autoFocus
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                placeholder={newItem === 'file' ? 'folder/note.md' : 'folder/name'}
+                onKeyDown={e => e.key === 'Escape' && setNewItem(null)}
+                disabled={creating}
+                style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--bd-xl)', background: 'var(--surface-2)', color: 'var(--ink)', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', opacity: creating ? 0.6 : 1 }}
+              />
+              {createError && <div style={{ fontSize: 11, color: '#c15f3c', marginTop: 3 }}>{createError}</div>}
+            </form>
           )}
           {tree.length > 0 && (
             <FileTree nodes={tree} selectedPath={isGithub ? selected.path : null} onSelect={selectGithub} drafts={drafts} />

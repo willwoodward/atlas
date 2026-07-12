@@ -5,7 +5,10 @@ Mount on FastAPI: app.mount("/mcp", mcp_app)
 """
 import os
 import json
+import base64
 from datetime import datetime, timezone
+
+import httpx
 
 import aiosqlite
 from mcp.server import Server
@@ -18,6 +21,20 @@ from starlette.routing import Mount, Route
 
 DATABASE_PATH = os.getenv("DATABASE_PATH", "./atlas.db")
 ATLAS_MCP_KEY = os.getenv("ATLAS_MCP_KEY", "")
+
+
+def _gh_headers(token):
+    return {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+
+
+async def _get_github_creds(db):
+    async with db.execute(
+        "SELECT github_token, github_repo FROM user_integrations WHERE github_token IS NOT NULL LIMIT 1"
+    ) as c:
+        row = await c.fetchone()
+    if not row or not row["github_token"]:
+        return None, None
+    return row["github_token"], row["github_repo"]
 
 server = Server("atlas")
 
@@ -55,6 +72,10 @@ async def list_tools() -> list[Tool]:
         Tool(name="delete_todo", description="Delete a todo permanently", inputSchema={"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}),
         Tool(name="set_week_outcomes", description="Set the weekly outcomes / intentions text", inputSchema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}),
         Tool(name="get_today_summary", description="Get a full summary of today: pending todos, habit completions, calendar events, and weekly outcomes — useful for a daily briefing", inputSchema={"type":"object","properties":{},"required":[]}),
+        Tool(name="list_github_notes", description="List all markdown files in the connected GitHub repo", inputSchema={"type":"object","properties":{},"required":[]}),
+        Tool(name="read_github_note", description="Read a GitHub note by path", inputSchema={"type":"object","properties":{"path":{"type":"string","description":"File path e.g. folder/note.md"}},"required":["path"]}),
+        Tool(name="write_github_note", description="Create or update a GitHub note (auto-fetches SHA for updates). Adds .md extension if missing.", inputSchema={"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"message":{"type":"string","description":"Git commit message (optional)"}},"required":["path","content"]}),
+        Tool(name="create_github_folder", description="Create a new folder in the GitHub repo by adding a README.md inside it", inputSchema={"type":"object","properties":{"path":{"type":"string","description":"Folder path e.g. ideas/2024"}},"required":["path"]}),
     ]
 
 
@@ -215,7 +236,7 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
             done_todos = [dict(r) for r in await c.fetchall()]
 
         # Habits with completion status
-        async with db.execute("SELECT id, name, period FROM habits ORDER BY created_at") as c:
+        async with db.execute("SELECT id, name, color FROM habits ORDER BY created_at") as c:
             habits = [dict(r) for r in await c.fetchall()]
         for h in habits:
             async with db.execute("SELECT 1 FROM habit_completions WHERE habit_id=? AND date=?", (h["id"], today)) as c:
@@ -240,6 +261,58 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
             "habits": habits,
             "calendar_events": events,
         }
+
+    if name == "list_github_notes":
+        token, repo = await _get_github_creds(db)
+        if not token:
+            return {"error": "GitHub not connected"}
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"https://api.github.com/repos/{repo}", headers=_gh_headers(token))
+            branch = r.json()["default_branch"]
+            r = await client.get(f"https://api.github.com/repos/{repo}/git/trees/{branch}?recursive=1", headers=_gh_headers(token))
+        files = [f["path"] for f in r.json().get("tree", []) if f["type"] == "blob" and f["path"].endswith(".md")]
+        return {"files": files, "count": len(files)}
+
+    if name == "read_github_note":
+        token, repo = await _get_github_creds(db)
+        if not token:
+            return {"error": "GitHub not connected"}
+        path = arguments["path"]
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"https://api.github.com/repos/{repo}/contents/{path}", headers=_gh_headers(token))
+        if r.status_code == 404:
+            return {"error": "File not found"}
+        data = r.json()
+        content = base64.b64decode(data["content"]).decode("utf-8")
+        return {"path": path, "content": content, "sha": data["sha"]}
+
+    if name in ("write_github_note", "create_github_folder"):
+        token, repo = await _get_github_creds(db)
+        if not token:
+            return {"error": "GitHub not connected"}
+        if name == "create_github_folder":
+            folder = arguments["path"].rstrip("/")
+            path = f"{folder}/README.md"
+            content = f"# {folder.split('/')[-1]}\n"
+            message = f"Create {folder}/"
+        else:
+            path = arguments["path"]
+            if not path.endswith(".md"):
+                path += ".md"
+            content = arguments["content"]
+            message = arguments.get("message", f"Update {path}")
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"https://api.github.com/repos/{repo}/contents/{path}", headers=_gh_headers(token))
+            sha = r.json().get("sha") if r.status_code == 200 else None
+            body = {"message": message, "content": base64.b64encode(content.encode()).decode()}
+            if sha:
+                body["sha"] = sha
+            r = await client.put(
+                f"https://api.github.com/repos/{repo}/contents/{path}",
+                headers={**_gh_headers(token), "Content-Type": "application/json"},
+                json=body,
+            )
+        return {"ok": r.status_code in (200, 201), "path": path}
 
     return {"error": f"Unknown tool: {name}"}
 
