@@ -205,11 +205,11 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 
   // many times a second, and yanking the view down while you are reading
   // something further up is worse than losing the follow.
   useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
-    if (nearBottom) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-  }, [messages, busy])
+    const page = isMobile ? scrollRef.current : scrollRef.current?.parentElement
+    if (!page) return
+    const nearBottom = page.scrollHeight - page.scrollTop - page.clientHeight < 120
+    if (nearBottom) page.scrollTo({ top: page.scrollHeight, behavior: 'smooth' })
+  }, [messages, busy, isMobile])
 
   const submit = (text) => {
     send(text)
@@ -276,9 +276,9 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 
   }
 
   return (
-    // flex:1 + minHeight:0 rather than a hardcoded viewport calc — this component
-    // is mounted inside desktop, tablet and mobile shells with different chrome.
-    <div style={{ flex: 1, minHeight: 0, height: '100%', width: '100%', maxWidth: COLUMN, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
+    // The desktop and tablet shells provide the page-level scroll container;
+    // mobile keeps it here because its shell deliberately hides page overflow.
+    <div ref={scrollRef} style={{ flex: 1, minWidth: 0, minHeight: '100%', width: '100%', maxWidth: COLUMN, margin: '0 auto', display: 'flex', flexDirection: 'column', overflowY: isMobile ? 'auto' : 'visible', overflowX: 'hidden' }}>
       {/* Threads now persist across navigation and reloads, so there has to be a way out. */}
       <div style={{ flex: 'none', display: 'flex', justifyContent: 'flex-end', padding: `6px ${gutter}px 0` }}>
         <button onClick={clear}
@@ -287,7 +287,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 
           New chat
         </button>
       </div>
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: `8px ${gutter}px 20px`, display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ padding: `8px ${gutter}px 20px`, display: 'flex', flexDirection: 'column', gap: 20 }}>
         {messages.map((m, i) => m.role === 'user' ? (
           <div key={i} style={{ alignSelf: 'flex-end', maxWidth: '80%', padding: '10px 15px', borderRadius: 14, background: 'var(--surface)', border: '1px solid var(--bd)', fontSize: 14, lineHeight: 1.55, whiteSpace: 'pre-wrap', color: 'var(--ink)' }}>
             {m.content}
@@ -305,7 +305,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 
         {error && <div style={{ fontSize: 12.5, color: '#c15f3c' }}>{error}</div>}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'center', padding: `0 ${gutter}px`, paddingBottom: isMobile ? 'max(8px, env(safe-area-inset-bottom))' : 8 }}>{composer}</div>
+      <div style={{ position: 'sticky', bottom: 0, zIndex: 1, display: 'flex', justifyContent: 'center', padding: `8px ${gutter}px`, paddingBottom: isMobile ? 'max(8px, env(safe-area-inset-bottom))' : 8, background: 'var(--bg)' }}>{composer}</div>
     </div>
   )
 }
