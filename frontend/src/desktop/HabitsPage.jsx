@@ -52,7 +52,7 @@ function DayDot({ done, color, onClick }) {
 
 export default function HabitsPage() {
   const isMobile = useIsMobile()
-  const { habits, weekDates, today, addHabit, removeHabit, toggleCompletion } = useHabits()
+  const { habits, weekDates, last30, today, addHabit, removeHabit, toggleCompletion } = useHabits()
   const [open, setOpen] = useState({})
   const [adding, setAdding] = useState(false)
 
@@ -143,7 +143,9 @@ export default function HabitsPage() {
                 </div>
                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', maxWidth: 560 }}>
                   {h.history.map((done, i) => (
-                    <span key={i} style={{ width: 15, height: 15, borderRadius: 4, background: done ? h.color : 'var(--surface-3)' }} />
+                    <span key={i} onClick={() => {
+                      if (window.confirm(`This will edit a past entry (${last30[i]}). Are you sure?`)) toggleCompletion(h.id, last30[i])
+                    }} style={{ width: 15, height: 15, borderRadius: 4, background: done ? h.color : 'var(--surface-3)', cursor: 'pointer' }} />
                   ))}
                 </div>
               </div>

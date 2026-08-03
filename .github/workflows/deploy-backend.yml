@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'backend/**'
+      - 'agent/**'
       - 'docker-compose.yml'
       - 'Caddyfile'
       - '.github/workflows/deploy-backend.yml'
@@ -23,4 +24,4 @@ jobs:
           script: |
             cd ~/atlas
             git pull origin main
-            docker compose up -d --build api
+            docker compose up -d --build api agent

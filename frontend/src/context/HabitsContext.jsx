@@ -102,7 +102,7 @@ export function HabitsProvider({ children }) {
   })
 
   return (
-    <Ctx.Provider value={{ habits, weekDates, today, addHabit, removeHabit, toggleCompletion }}>
+    <Ctx.Provider value={{ habits, weekDates, last30, today, addHabit, removeHabit, toggleCompletion }}>
       {children}
     </Ctx.Provider>
   )

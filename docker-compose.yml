@@ -8,5 +8,15 @@ services:
     volumes:
       - sqlite_data:/data
 
+  # Strands agent runtime. Deliberately publishes no ports — it can drive every
+  # MCP tool, so the only route in is the api container's /assistant proxy,
+  # which enforces the Google-OAuth JWT.
+  agent:
+    build: ./agent
+    restart: unless-stopped
+    env_file: .env.production
+    depends_on:
+      - api
+
 volumes:
   sqlite_data:

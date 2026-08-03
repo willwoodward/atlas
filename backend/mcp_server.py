@@ -6,7 +6,9 @@ Mount on FastAPI: app.mount("/mcp", mcp_app)
 import os
 import json
 import base64
-from datetime import datetime, timezone
+import time as _time
+from datetime import datetime, date as _date, time as _clock, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -21,6 +23,11 @@ from starlette.routing import Mount, Route
 
 DATABASE_PATH = os.getenv("DATABASE_PATH", "./atlas.db")
 ATLAS_MCP_KEY = os.getenv("ATLAS_MCP_KEY", "")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GCAL_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GCAL_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+TIMEZONE = os.getenv("TZ", "Europe/London")
 
 
 def _gh_headers(token):
@@ -35,6 +42,95 @@ async def _get_github_creds(db):
     if not row or not row["github_token"]:
         return None, None
     return row["github_token"], row["github_repo"]
+
+# ── Google Calendar ───────────────────────────────────────────────────────────
+# The frontend reads GCal directly from the browser, so those events never touch
+# the database. To let the tools see the same calendar the user sees, we refresh
+# the stored refresh_token server-side — same flow as GET /auth/gcal/token.
+
+
+async def _gcal_token(db) -> str | None:
+    """Return a valid GCal access token, refreshing and re-caching if needed."""
+    async with db.execute(
+        "SELECT email, gcal_refresh_token, gcal_access_token, gcal_access_expires_at "
+        "FROM user_integrations WHERE gcal_refresh_token IS NOT NULL LIMIT 1"
+    ) as c:
+        row = await c.fetchone()
+    if not row:
+        return None
+
+    now = int(_time.time())
+    if row["gcal_access_token"] and row["gcal_access_expires_at"] and row["gcal_access_expires_at"] > now + 300:
+        return row["gcal_access_token"]
+
+    if not GOOGLE_CLIENT_SECRET:
+        return None
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(GCAL_TOKEN_URL, data={
+            "refresh_token": row["gcal_refresh_token"],
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "grant_type": "refresh_token",
+        })
+    if resp.status_code != 200:
+        return None
+
+    data = resp.json()
+    token = data["access_token"]
+    await db.execute(
+        "UPDATE user_integrations SET gcal_access_token=?, gcal_access_expires_at=? WHERE email=?",
+        (token, now + data.get("expires_in", 3600) - 60, row["email"]),
+    )
+    await db.commit()
+    return token
+
+
+async def _gcal_events(db, day_from: _date, day_to: _date) -> list[dict]:
+    """Fetch GCal events for an inclusive local-time date range. [] if unavailable."""
+    token = await _gcal_token(db)
+    if not token:
+        return []
+
+    tz = ZoneInfo(TIMEZONE)
+    time_min = datetime.combine(day_from, _clock.min, tz)
+    time_max = datetime.combine(day_to + timedelta(days=1), _clock.min, tz)
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                GCAL_EVENTS_URL,
+                headers={"Authorization": f"Bearer {token}"},
+                params={
+                    "timeMin": time_min.isoformat(),
+                    "timeMax": time_max.isoformat(),
+                    "singleEvents": "true",
+                    "orderBy": "startTime",
+                    "maxResults": "100",
+                },
+            )
+    except httpx.HTTPError:
+        return []
+    if resp.status_code != 200:
+        return []
+
+    events = []
+    for e in resp.json().get("items", []):
+        if e.get("status") == "cancelled":
+            continue
+        start, end = e.get("start", {}), e.get("end", {})
+        all_day = "date" in start
+        events.append({
+            "source": "google",
+            "title": e.get("summary") or "(No title)",
+            "date": start.get("date") or (start.get("dateTime") or "")[:10],
+            "start": start.get("date") or start.get("dateTime"),
+            "end": end.get("date") or end.get("dateTime"),
+            "all_day": all_day,
+            "location": e.get("location", ""),
+            "description": e.get("description", ""),
+        })
+    return events
+
 
 server = Server("atlas")
 
@@ -68,10 +164,10 @@ async def list_tools() -> list[Tool]:
         Tool(name="search_notes", description="Search notes by keyword", inputSchema={"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}),
         Tool(name="create_note", description="Create a new quick note", inputSchema={"type":"object","properties":{"body":{"type":"string"}},"required":["body"]}),
         Tool(name="update_note", description="Update an existing note body", inputSchema={"type":"object","properties":{"id":{"type":"string"},"body":{"type":"string"}},"required":["id","body"]}),
-        Tool(name="list_events", description="List local calendar events, optionally for a specific date (YYYY-MM-DD)", inputSchema={"type":"object","properties":{"date":{"type":"string"}},"required":[]}),
+        Tool(name="list_events", description="List calendar events — both the user's Google Calendar and local Atlas events. Pass a date (YYYY-MM-DD) for a single day; without one you get local events plus the next 7 days of Google Calendar. Each event has a 'source' of 'google' or 'local'.", inputSchema={"type":"object","properties":{"date":{"type":"string"}},"required":[]}),
         Tool(name="delete_todo", description="Delete a todo permanently", inputSchema={"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}),
         Tool(name="set_week_outcomes", description="Set the weekly outcomes / intentions text", inputSchema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}),
-        Tool(name="get_today_summary", description="Get a full summary of today: pending todos, habit completions, calendar events, and weekly outcomes — useful for a daily briefing", inputSchema={"type":"object","properties":{},"required":[]}),
+        Tool(name="get_today_summary", description="Get a full summary of today: pending todos, habit completions, calendar events (Google Calendar + local), and weekly outcomes — useful for a daily briefing", inputSchema={"type":"object","properties":{},"required":[]}),
         Tool(name="list_github_notes", description="List all markdown files in the connected GitHub repo", inputSchema={"type":"object","properties":{},"required":[]}),
         Tool(name="read_github_note", description="Read a GitHub note by path. Checks local drafts first, then falls back to GitHub.", inputSchema={"type":"object","properties":{"path":{"type":"string","description":"File path e.g. folder/note.md"}},"required":["path"]}),
         Tool(name="write_github_note", description="Save a GitHub note as a local draft (will appear in the UI for review before publishing). Adds .md extension if missing.", inputSchema={"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}),
@@ -127,7 +223,6 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
 
     if name == "get_week_outcomes":
         # Get Monday of current week
-        from datetime import timedelta
         d = datetime.now(timezone.utc).date()
         monday = (d - timedelta(days=d.weekday())).isoformat()
         async with db.execute("SELECT text FROM week_outcomes WHERE week_str = ?", (monday,)) as c:
@@ -204,9 +299,15 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         date = args.get("date")
         if date:
             async with db.execute("SELECT * FROM local_events WHERE date=? ORDER BY start_h", (date,)) as c:
-                return [dict(r) for r in await c.fetchall()]
+                local = [dict(r) | {"source": "local"} for r in await c.fetchall()]
+            day = _date.fromisoformat(date)
+            return local + await _gcal_events(db, day, day)
+
+        # No date given — local events are few, but bound the GCal window.
         async with db.execute("SELECT * FROM local_events ORDER BY date, start_h") as c:
-            return [dict(r) for r in await c.fetchall()]
+            local = [dict(r) | {"source": "local"} for r in await c.fetchall()]
+        start = datetime.now(ZoneInfo(TIMEZONE)).date()
+        return local + await _gcal_events(db, start, start + timedelta(days=7))
 
     if name == "delete_todo":
         await db.execute("DELETE FROM todos WHERE id = ?", (args["id"],))
@@ -214,7 +315,6 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         return {"ok": True}
 
     if name == "set_week_outcomes":
-        from datetime import timedelta
         d = datetime.now(timezone.utc).date()
         monday = (d - timedelta(days=d.weekday())).isoformat()
         await db.execute(
@@ -225,7 +325,6 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         return {"ok": True, "week": monday}
 
     if name == "get_today_summary":
-        from datetime import timedelta
         d = datetime.now(timezone.utc).date()
         monday = (d - timedelta(days=d.weekday())).isoformat()
 
@@ -244,9 +343,10 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
             async with db.execute("SELECT 1 FROM habit_completions WHERE habit_id=? AND date=?", (h["id"], today)) as c:
                 h["done_today"] = bool(await c.fetchone())
 
-        # Today's calendar events
+        # Today's calendar events — local Atlas events plus the real Google calendar
         async with db.execute("SELECT title, start_h, end_h, color FROM local_events WHERE date=? ORDER BY start_h", (today,)) as c:
-            events = [dict(r) for r in await c.fetchall()]
+            events = [dict(r) | {"source": "local"} for r in await c.fetchall()]
+        events += await _gcal_events(db, d, d)
 
         # Weekly outcomes
         async with db.execute("SELECT text FROM week_outcomes WHERE week_str=?", (monday,)) as c:
@@ -295,7 +395,6 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         return {"path": path, "content": content, "sha": data["sha"], "source": "github"}
 
     if name in ("write_github_note", "create_github_folder"):
-        from datetime import datetime, timezone
         if name == "create_github_folder":
             folder = args["path"].rstrip("/")
             path = f"{folder}/README.md"

@@ -17,6 +17,16 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     restart: unless-stopped
 
+  agent:
+    build: ./agent
+    env_file: .env
+    volumes:
+      - ./agent:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8100 --reload
+    restart: unless-stopped
+    depends_on:
+      - api
+
   web:
     image: node:20-alpine
     working_dir: /app
