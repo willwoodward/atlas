@@ -31,7 +31,28 @@ as the rest of the API. The agent re-validates that JWT itself and additionally 
 the token subject to be in `ALLOWED_EMAILS` — which locks out the `atlas-mcp-client`
 tokens minted by the MCP OAuth flow.
 
-Set `OPENAI_API_KEY` (and optionally `AGENT_MODEL_ID`) in `.env` / `.env.production`.
+Set `OPENAI_API_KEY`, `TAVILY_API_KEY` (and optionally `AGENT_MODEL_ID`) in
+`.env` / `.env.production`.
+
+### Durable runs
+
+A turn can take minutes, so runs outlive the request that started them.
+`POST /assistant/runs` returns a `run_id` immediately and the API drives the run
+in a background task, persisting every event to `agent_run_events`. Subscribers
+`GET /assistant/runs/{id}/events?after=<seq>` to replay what they missed and then
+follow live — so closing the app mid-run and reopening it elsewhere resumes.
+
+### Research delegation
+
+`delegate_research` lets the orchestrator compose a team at runtime: it passes a
+list of objectives it invented, and one subagent runs per objective, in parallel,
+each with web search and fetch tools. They report progress out-of-band through a
+queue (merged into the model's own stream in `runtime.py`), so the UI shows what
+each is chasing instead of sitting silent. The orchestrator then synthesises
+their written summaries.
+
+This is deliberately not a `GraphBuilder` graph — the shape of the work isn't
+known until the question is asked.
 
 ```bash
 # rebuild just the agent after a change

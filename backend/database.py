@@ -137,6 +137,27 @@ async def init_db():
                 content TEXT NOT NULL DEFAULT '',
                 saved_at TEXT NOT NULL
             );
+
+            -- Assistant runs. A run outlives the HTTP request that started it, so
+            -- long tool-using work survives the browser closing or a device switch.
+            CREATE TABLE IF NOT EXISTS agent_runs (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running',  -- running|done|error|cancelled
+                prompt TEXT NOT NULL DEFAULT '',
+                error TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS agent_run_events (
+                run_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                type TEXT NOT NULL,
+                payload TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (run_id, seq)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_agent_runs_created ON agent_runs(created_at DESC);
         """)
         await db.commit()
 

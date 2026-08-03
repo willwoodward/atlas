@@ -48,6 +48,10 @@ async def chat(req: ChatRequest, user: dict = Depends(get_current_user)):
     async def events():
         try:
             async for kind, payload in stream_reply(messages, name):
+                if kind == "progress":
+                    # Already a full event dict (research_plan / research_done).
+                    yield f"data: {json.dumps(payload)}\n\n"
+                    continue
                 key = {"token": "text", "tool": "name", "error": "message"}[kind]
                 yield f"data: {json.dumps({'type': kind, key: payload})}\n\n"
         finally:

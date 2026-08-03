@@ -121,6 +121,7 @@ async def _gcal_events(db, day_from: _date, day_to: _date) -> list[dict]:
         all_day = "date" in start
         events.append({
             "source": "google",
+            "id": e.get("id"),  # needed to update/delete the event later
             "title": e.get("summary") or "(No title)",
             "date": start.get("date") or (start.get("dateTime") or "")[:10],
             "start": start.get("date") or start.get("dateTime"),
@@ -130,6 +131,33 @@ async def _gcal_events(db, day_from: _date, day_to: _date) -> list[dict]:
             "description": e.get("description", ""),
         })
     return events
+
+
+def _rfc3339(date_str: str, hour: float) -> str:
+    """('2026-08-03', 14.5) -> '2026-08-03T14:30:00+01:00' in the user's timezone."""
+    h, m = int(hour), round((hour % 1) * 60)
+    base = datetime.combine(_date.fromisoformat(date_str), _clock.min, ZoneInfo(TIMEZONE))
+    return (base + timedelta(hours=h, minutes=m)).isoformat()
+
+
+async def _gcal_write(db, method: str, path: str = "", json_body: dict | None = None):
+    """Call the GCal events API. Returns (ok, data_or_error_string)."""
+    token = await _gcal_token(db)
+    if not token:
+        return False, "Google Calendar is not connected"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.request(
+                method,
+                f"{GCAL_EVENTS_URL}{path}",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json=json_body,
+            )
+    except httpx.HTTPError as exc:
+        return False, f"Could not reach Google Calendar: {exc}"
+    if resp.status_code not in (200, 201, 204):
+        return False, f"Google Calendar rejected the request ({resp.status_code}): {resp.text[:200]}"
+    return True, (resp.json() if resp.content and resp.status_code != 204 else {})
 
 
 server = Server("atlas")
@@ -165,6 +193,9 @@ async def list_tools() -> list[Tool]:
         Tool(name="create_note", description="Create a new quick note", inputSchema={"type":"object","properties":{"body":{"type":"string"}},"required":["body"]}),
         Tool(name="update_note", description="Update an existing note body", inputSchema={"type":"object","properties":{"id":{"type":"string"},"body":{"type":"string"}},"required":["id","body"]}),
         Tool(name="list_events", description="List calendar events — both the user's Google Calendar and local Atlas events. Pass a date (YYYY-MM-DD) for a single day; without one you get local events plus the next 7 days of Google Calendar. Each event has a 'source' of 'google' or 'local'.", inputSchema={"type":"object","properties":{"date":{"type":"string"}},"required":[]}),
+        Tool(name="create_event", description="Create a calendar event in the user's Google Calendar. Times are local (Europe/London) decimal hours: 14.5 = 2:30pm. For an all-day event pass all_day=true and omit start/end.", inputSchema={"type":"object","properties":{"title":{"type":"string"},"date":{"type":"string","description":"YYYY-MM-DD"},"start":{"type":"number","description":"Start hour, e.g. 9.25 for 9:15am"},"end":{"type":"number","description":"End hour, e.g. 10.5 for 10:30am"},"description":{"type":"string"},"location":{"type":"string"},"all_day":{"type":"boolean"}},"required":["title","date"]}),
+        Tool(name="update_event", description="Update or reschedule an existing Google Calendar event. Use the event 'id' from list_events. Only pass the fields you want to change.", inputSchema={"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"date":{"type":"string","description":"YYYY-MM-DD — required if changing start/end"},"start":{"type":"number"},"end":{"type":"number"},"description":{"type":"string"},"location":{"type":"string"}},"required":["id"]}),
+        Tool(name="delete_event", description="Delete a Google Calendar event by its 'id' from list_events", inputSchema={"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}),
         Tool(name="delete_todo", description="Delete a todo permanently", inputSchema={"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}),
         Tool(name="set_week_outcomes", description="Set the weekly outcomes / intentions text", inputSchema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}),
         Tool(name="get_today_summary", description="Get a full summary of today: pending todos, habit completions, calendar events (Google Calendar + local), and weekly outcomes — useful for a daily briefing", inputSchema={"type":"object","properties":{},"required":[]}),
@@ -308,6 +339,65 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
             local = [dict(r) | {"source": "local"} for r in await c.fetchall()]
         start = datetime.now(ZoneInfo(TIMEZONE)).date()
         return local + await _gcal_events(db, start, start + timedelta(days=7))
+
+    if name == "create_event":
+        date_str, title = args["date"], args["title"]
+        body = {"summary": title}
+        if args.get("description"):
+            body["description"] = args["description"]
+        if args.get("location"):
+            body["location"] = args["location"]
+
+        if args.get("all_day"):
+            nxt = (_date.fromisoformat(date_str) + timedelta(days=1)).isoformat()
+            body["start"] = {"date": date_str}
+            body["end"] = {"date": nxt}  # GCal all-day end is exclusive
+        else:
+            start_h = args.get("start")
+            if start_h is None:
+                return {"error": "start is required for a timed event (or pass all_day=true)"}
+            end_h = args.get("end", start_h + 1)
+            if end_h <= start_h:
+                return {"error": "end must be after start"}
+            body["start"] = {"dateTime": _rfc3339(date_str, start_h), "timeZone": TIMEZONE}
+            body["end"] = {"dateTime": _rfc3339(date_str, end_h), "timeZone": TIMEZONE}
+
+        ok, data = await _gcal_write(db, "POST", "", body)
+        if not ok:
+            return {"error": data}
+        return {"ok": True, "id": data.get("id"), "title": title, "date": date_str, "source": "google"}
+
+    if name == "update_event":
+        body = {}
+        if args.get("title"):
+            body["summary"] = args["title"]
+        if args.get("description") is not None:
+            body["description"] = args["description"]
+        if args.get("location") is not None:
+            body["location"] = args["location"]
+
+        if args.get("start") is not None or args.get("end") is not None:
+            date_str = args.get("date")
+            if not date_str:
+                return {"error": "date is required when changing start or end"}
+            if args.get("start") is not None:
+                body["start"] = {"dateTime": _rfc3339(date_str, args["start"]), "timeZone": TIMEZONE}
+            if args.get("end") is not None:
+                body["end"] = {"dateTime": _rfc3339(date_str, args["end"]), "timeZone": TIMEZONE}
+
+        if not body:
+            return {"error": "Nothing to update — pass at least one field to change"}
+
+        ok, data = await _gcal_write(db, "PATCH", f"/{args['id']}", body)
+        if not ok:
+            return {"error": data}
+        return {"ok": True, "id": data.get("id"), "title": data.get("summary")}
+
+    if name == "delete_event":
+        ok, data = await _gcal_write(db, "DELETE", f"/{args['id']}")
+        if not ok:
+            return {"error": data}
+        return {"ok": True, "id": args["id"]}
 
     if name == "delete_todo":
         await db.execute("DELETE FROM todos WHERE id = ?", (args["id"],))
