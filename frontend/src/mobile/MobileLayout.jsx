@@ -111,7 +111,7 @@ export default function MobileLayout() {
           padding: noPad ? '0' : '20px 20px 0',
           paddingBottom: noPad ? 0 : 'max(20px, env(safe-area-inset-bottom))',
           flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0,
-          overflowY: noPad ? 'hidden' : 'auto',
+          overflowY: active === 'assistant' ? 'auto' : noPad ? 'hidden' : 'auto',
         }}>
           <ActivePage />
         </div>
