@@ -3,20 +3,66 @@ services:
     build: ./backend
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      # Loopback only. Caddy proxies to localhost:8000 on the host, so this is
+      # all it needs — and it keeps the API off the public interface and out of
+      # reach of other containers via the Docker gateway (172.17.0.1). The
+      # sandbox is meant to hold no credentials and have no path to this data.
+      - "127.0.0.1:8000:8000"
     env_file: .env.production
     volumes:
       - sqlite_data:/data
+    networks:
+      - default
 
   # Strands agent runtime. Deliberately publishes no ports — it can drive every
   # MCP tool, so the only route in is the api container's /assistant proxy,
   # which enforces the Google-OAuth JWT.
+  #
+  # Holds every secret: model keys, the MCP key, and the GitHub PAT. It is also
+  # the only container that talks to git remotes, which is what keeps the
+  # sandbox credential-free.
   agent:
     build: ./agent
     restart: unless-stopped
     env_file: .env.production
     depends_on:
       - api
+    volumes:
+      - workspace:/workspace
+      - ./secrets/sandbox_key:/etc/sandbox/id_ed25519:ro
+    networks:
+      - default
+      - sandbox_net
+
+  # Runs the code the agent writes. Assume everything in here is untrusted.
+  #
+  # Only on sandbox_net, so it has no route to api — combined with api's
+  # loopback binding, there is no path from here to the dashboard data. It does
+  # have internet egress, because npm/pip need it.
+  sandbox:
+    build: ./sandbox
+    restart: unless-stopped
+    volumes:
+      - workspace:/workspace
+      - ./secrets/sandbox_key.pub:/etc/sandbox/authorized_key.pub:ro
+      - sandbox_hostkeys:/etc/ssh/keys
+      # Persistent package cache: a cold npm install on 1 vCPU is slow
+      # enough that the agent skips verifying, which is how an unparseable
+      # file reached a PR. Cached, `npm install` is routine.
+      - sandbox_npm:/home/coder/.npm
+    networks:
+      - sandbox_net
+    # A runaway build should die on its own rather than take the host with it.
+    mem_limit: 1g
+    memswap_limit: 1500m
+    pids_limit: 512
+
+networks:
+  default:
+  sandbox_net:
 
 volumes:
   sqlite_data:
+  workspace:
+  sandbox_hostkeys:
+  sandbox_npm:

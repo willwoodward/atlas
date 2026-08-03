@@ -113,6 +113,170 @@ function CodeBlock({ label, body, tone }) {
  * parallel — this is the only window into a run that can take minutes, so it
  * shows what each one is chasing and ticks them off as they report back.
  */
+/**
+ * A question the agent is blocked on.
+ *
+ * Rendered inline in the thread rather than as a modal: the run is paused, not
+ * urgent, and the user may want to read what the agent did before answering.
+ * Answering is optimistic-free — the agent echoes question_answered back down
+ * the stream, so this shows the answered state only once it has really landed.
+ */
+function QuestionPanel({ question, runId, onAnswer }) {
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
+  const [failed, setFailed] = useState(null)
+  if (!question) return null
+
+  const submit = async (value) => {
+    const body = (value ?? text).trim()
+    if (!body || sending) return
+    setSending(true)
+    setFailed(null)
+    try {
+      await onAnswer(runId, question.id, body)
+      setText('')
+    } catch (err) {
+      setFailed(err.message || 'Could not send your answer.')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  if (question.status === 'answered') {
+    return (
+      <div style={{ margin: '8px 0', fontSize: 12.5, color: 'var(--muted)' }}>
+        <span style={{ color: 'var(--mid)' }}>{question.text}</span>
+        <div style={{ marginTop: 2, color: 'var(--ink)' }}>→ {question.answer}</div>
+      </div>
+    )
+  }
+
+  if (question.status === 'timeout') {
+    return (
+      <div style={{ margin: '8px 0', fontSize: 12.5, color: 'var(--muted)' }}>
+        {question.text} <em>— not answered in time; the agent carried on.</em>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ margin: '10px 0', padding: 12, borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--bd)' }}>
+      <div style={{ fontSize: 13.5, lineHeight: 1.5, color: 'var(--ink)', marginBottom: 8 }}>
+        {question.text}
+      </div>
+      {question.options?.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+          {question.options.map((o, i) => (
+            <button key={i} onClick={() => submit(o)} disabled={sending}
+              style={{ fontSize: 12.5, padding: '5px 10px', borderRadius: 7, cursor: 'pointer',
+                       border: '1px solid var(--bd)', background: 'var(--surface-2)', color: 'var(--ink)', fontFamily: 'inherit' }}>
+              {o}
+            </button>
+          ))}
+        </div>
+      )}
+      <form onSubmit={e => { e.preventDefault(); submit() }} style={{ display: 'flex', gap: 6 }}>
+        <input
+          autoFocus
+          value={text}
+          onChange={e => setText(e.target.value)}
+          placeholder="Your answer…"
+          disabled={sending}
+          style={{ flex: 1, fontSize: 13, padding: '6px 9px', borderRadius: 7, border: '1px solid var(--bd-xl)',
+                   background: 'var(--surface-2)', color: 'var(--ink)', fontFamily: 'inherit', outline: 'none' }}
+        />
+        <button type="submit" disabled={sending || !text.trim()}
+          style={{ fontSize: 12.5, padding: '6px 12px', borderRadius: 7, cursor: 'pointer', border: '1px solid var(--bd)',
+                   background: 'var(--surface-2)', color: 'var(--ink)', fontFamily: 'inherit' }}>
+          {sending ? '…' : 'Send'}
+        </button>
+      </form>
+      {failed && <div style={{ fontSize: 11.5, color: '#c15f3c', marginTop: 5 }}>{failed}</div>}
+    </div>
+  )
+}
+
+/**
+ * A coding run in progress.
+ *
+ * Collapsed by default, like ResearchPanel — a 30-minute run emits a lot of tool
+ * calls and an always-expanded list would push the page down continuously while
+ * the user is trying to read something else.
+ *
+ * Commits are shown even when collapsed: they are the milestones that survive a
+ * failed run, so "3 commits pushed" is the difference between a wasted half hour
+ * and work waiting on a branch.
+ */
+function CodingPanel({ coding }) {
+  const [open, setOpen] = useState(false)
+  if (!coding) return null
+
+  const { branch, status, commits = [], activity, prUrl, summary } = coding
+  const saved = commits.filter(c => !c.failed)
+  const failedCommits = commits.filter(c => c.failed)
+  const running = status === 'running'
+  const failed = status && status !== 'running' && status !== 'ok'
+  const last = activity?.[activity.length - 1]
+
+  return (
+    <div style={{ margin: '8px 0', border: '1px solid var(--bd)', borderRadius: 10, background: 'var(--surface)', overflow: 'hidden' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 11px', border: 'none',
+                 background: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'var(--ink)' }}
+      >
+        <span style={{ fontSize: 12, color: failed ? '#c15f3c' : 'var(--muted)' }}>
+          {running ? '○' : failed ? '!' : '●'}
+        </span>
+        <span style={{ fontSize: 13, fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {branch}
+        </span>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+          {saved.length} commit{saved.length === 1 ? '' : 's'}
+          {failedCommits.length > 0 ? ` · ${failedCommits.length} failed` : ''}
+          {running && last ? ` · ${last.tool}` : ''}
+        </span>
+        <span style={{ fontSize: 10, color: 'var(--faint)' }}>{open ? '▾' : '▸'}</span>
+      </button>
+
+      {open && (
+        <div style={{ padding: '0 11px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {commits.map((c, i) => (
+            <div key={i} style={{ fontSize: 12, color: c.failed ? '#c15f3c' : 'var(--mid)', display: 'flex', gap: 6 }}>
+              <code style={{ fontSize: 11, color: 'var(--faint)' }}>{c.failed ? '—' : c.sha}</code>
+              <span style={{ flex: 1 }}>{c.message}{c.failed && c.error ? ` · ${c.error}` : ''}</span>
+              {c.files ? <span style={{ color: 'var(--faint)', fontSize: 11 }}>{c.files}f</span> : null}
+            </div>
+          ))}
+          {activity?.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: commits.length ? 4 : 0 }}>
+              {activity.map((a, i) => (
+                <div key={i} style={{ fontSize: 11.5, color: a.status === 'error' ? '#c15f3c' : 'var(--muted)',
+                                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {a.tool}{a.detail ? ` · ${a.detail}` : ''}
+                </div>
+              ))}
+            </div>
+          )}
+          {!running && summary && (
+            <div style={{ fontSize: 12.5, color: 'var(--mid)', lineHeight: 1.5, marginTop: 4, whiteSpace: 'pre-wrap' }}>
+              {summary.slice(0, 1200)}
+            </div>
+          )}
+        </div>
+      )}
+
+      {prUrl && (
+        <a href={prUrl} target="_blank" rel="noopener noreferrer"
+           style={{ display: 'block', padding: '8px 11px', borderTop: '1px solid var(--bd-xl)', fontSize: 12.5,
+                    color: 'var(--ink)', textDecoration: 'none', background: 'var(--surface-2)' }}>
+          Review the draft pull request →
+        </a>
+      )}
+    </div>
+  )
+}
+
 function ResearchPanel({ research }) {
   const [open, setOpen] = useState({})
   if (!research?.length) return null
@@ -190,7 +354,7 @@ const COLUMN = 720
 
 export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 }) {
   // Thread state lives in AssistantContext so it survives navigating away and back.
-  const { messages, busy, error, send, stop, clear } = useAssistant()
+  const { messages, busy, error, send, stop, clear, answer } = useAssistant()
   // The mobile shell renders the assistant with no padding (it was built for the
   // centred orb), so the chat supplies its own gutters and safe-area inset there.
   const isMobile = useIsMobile()
@@ -296,9 +460,11 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 
           <div key={i} style={{ maxWidth: '100%' }}>
             <ToolTrace tools={m.tools} />
             <ResearchPanel research={m.research} />
+            <CodingPanel coding={m.coding} />
+            <QuestionPanel question={m.question} runId={m.runId} onAnswer={answer} />
             {m.content
               ? <div className="md-prose" style={{ fontSize: 14.5, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: marked.parse(m.content) }} />
-              : busy && i === messages.length - 1 && (m.tools?.length ?? 0) === 0 && !m.research?.length &&
+              : busy && i === messages.length - 1 && (m.tools?.length ?? 0) === 0 && !m.research?.length && !m.question && !m.coding &&
                   <span style={{ fontSize: 13.5, color: 'var(--muted)' }}>Thinking…</span>}
           </div>
         ))}

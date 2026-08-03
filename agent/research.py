@@ -15,7 +15,6 @@ Nothing here is domain-specific. The orchestrator supplies the topics, so the
 same machinery serves trip planning, market research or a technical comparison.
 """
 import asyncio
-import contextvars
 import logging
 import os
 import re
@@ -28,6 +27,7 @@ from strands.agent.conversation_manager import (
 from strands.models.openai_responses import OpenAIResponsesModel
 from strands_tools import http_request, tavily
 
+from progress import emit as _emit, set_progress_queue  # noqa: F401 (re-exported for runtime)
 from tool_trace import ToolTracer, summarise_args
 
 log = logging.getLogger("atlas.agent.research")
@@ -50,24 +50,6 @@ COMPRESSION_THRESHOLD = 0.6
 # rather than preventing failures. Lower it if runs feel like they are stalling.
 MAX_CONCURRENT = int(os.getenv("RESEARCH_MAX_CONCURRENT", "5"))
 _slots = asyncio.Semaphore(MAX_CONCURRENT)
-
-# Subagents can run for minutes without the orchestrator emitting anything, so
-# they report progress out-of-band. The runtime sets a queue here before the run;
-# contextvars are copied into the tasks Strands spawns, so the tool can find it.
-_progress: contextvars.ContextVar = contextvars.ContextVar("atlas_research_progress", default=None)
-
-
-def set_progress_queue(queue) -> None:
-    _progress.set(queue)
-
-
-def _emit(event: dict) -> None:
-    queue = _progress.get()
-    if queue is not None:
-        try:
-            queue.put_nowait(event)
-        except Exception:  # full or closed — progress is best-effort
-            log.debug("Could not emit research progress", exc_info=True)
 
 RESEARCHER_PROMPT = """You are a research specialist working as part of a team. \
 You have been given one specific area to investigate. Other specialists are \

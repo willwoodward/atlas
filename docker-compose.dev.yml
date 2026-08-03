@@ -9,23 +9,48 @@ services:
   api:
     build: ./backend
     ports:
-      - "8000:8000"
+      # Loopback only, mirroring production: it keeps the sandbox from reaching
+      # the API via the Docker gateway, so the isolation you test locally is the
+      # isolation you get deployed. The browser on this machine is unaffected.
+      - "127.0.0.1:8000:8000"
     env_file: .env
     volumes:
       - ./data:/data
       - ./backend:/app
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     restart: unless-stopped
+    networks: [default]
 
   agent:
     build: ./agent
     env_file: .env
     volumes:
       - ./agent:/app
+      - workspace:/workspace
+      - ./secrets/sandbox_key:/etc/sandbox/id_ed25519:ro
     command: uvicorn main:app --host 0.0.0.0 --port 8100 --reload
     restart: unless-stopped
     depends_on:
       - api
+    networks: [default, sandbox_net]
+
+  # Same image and same isolation as production. Run `ssh-keygen -t ed25519 -N ""
+  # -f secrets/sandbox_key` once before first use — see docs/INFRA.md.
+  sandbox:
+    build: ./sandbox
+    volumes:
+      - workspace:/workspace
+      - ./secrets/sandbox_key.pub:/etc/sandbox/authorized_key.pub:ro
+      - sandbox_hostkeys:/etc/ssh/keys
+      # Persistent package cache: a cold npm install on 1 vCPU is slow
+      # enough that the agent skips verifying, which is how an unparseable
+      # file reached a PR. Cached, `npm install` is routine.
+      - sandbox_npm:/home/coder/.npm
+    restart: unless-stopped
+    networks: [sandbox_net]
+    mem_limit: 1g
+    memswap_limit: 1500m
+    pids_limit: 512
 
   web:
     image: node:20-alpine
@@ -41,6 +66,14 @@ services:
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
     depends_on:
       - api
+    networks: [default]
+
+networks:
+  default:
+  sandbox_net:
 
 volumes:
   frontend_modules:
+  workspace:
+  sandbox_hostkeys:
+  sandbox_npm:

@@ -19,15 +19,25 @@ MAX_DETAIL_CHARS = 2000
 
 
 def summarise_args(args: Any) -> str:
-    """The human-meaningful part of a tool call — its query or URL."""
+    """The human-meaningful part of a tool call — its query, URL or command."""
     if not isinstance(args, dict):
         return ""
-    for key in ("query", "url", "urls", "path", "text", "title"):
+
+    # The sandbox tools both take `command`, but it means different things: for
+    # the file editor it is the operation ("view", "str_replace") and the path
+    # carries the meaning, so show both. For bash it is the shell command
+    # itself, which is the single most useful thing to show.
+    command, path = args.get("command"), args.get("path")
+    if isinstance(command, str) and isinstance(path, str) and command and path:
+        return f"{command} {path}"[:160]
+
+    for key in ("query", "url", "urls", "path", "command", "text", "title"):
         value = args.get(key)
         if isinstance(value, list):
             value = value[0] if value else None
         if isinstance(value, str) and value:
-            return value[:160]
+            # Commands are often multi-line; the UI renders one line per call.
+            return " ".join(value.split())[:160]
     return ""
 
 
