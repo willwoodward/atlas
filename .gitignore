@@ -15,6 +15,10 @@ frontend/.env.*.local
 .env.production
 backend/.env.production
 
+# Agent -> sandbox SSH keypair, generated per host (see docs/INFRA.md)
+secrets/
+*.bak-*
+
 # Local SQLite data volume
 data/
 

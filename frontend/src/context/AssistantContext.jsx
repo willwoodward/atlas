@@ -37,6 +37,47 @@ export function reduceMessage(msg, ev) {
             ? { ...t, status: ev.status, input: ev.input, output: ev.output }
             : t),
       }
+    case 'question':
+      return {
+        ...msg,
+        question: { id: ev.questionId, text: ev.question, options: ev.options || [], status: 'open' },
+      }
+    case 'question_answered':
+      return msg.question?.id === ev.questionId
+        ? { ...msg, question: { ...msg.question, status: 'answered', answer: ev.answer } }
+        : msg
+    case 'question_timeout':
+      return msg.question?.id === ev.questionId
+        ? { ...msg, question: { ...msg.question, status: 'timeout' } }
+        : msg
+    case 'coding_started':
+      return { ...msg, coding: { repo: ev.repo, branch: ev.branch, task: ev.task,
+                                 status: 'running', activity: [], commits: [] } }
+    case 'coding_activity':
+      return msg.coding
+        ? { ...msg, coding: { ...msg.coding,
+            activity: [...(msg.coding.activity || []),
+                       { tool: ev.tool, detail: ev.detail, status: ev.status }].slice(-30) } }
+        : msg
+    case 'coding_commit':
+      // Commits are the durable milestones of a run — never trimmed, unlike
+      // activity, because they map to real pushed work the user can go and read.
+      // Failed commits are kept too: an agent that cannot save its work looks
+      // identical to one that never tried, and the difference matters a lot.
+      return msg.coding
+        ? { ...msg, coding: { ...msg.coding,
+            commits: [...(msg.coding.commits || []),
+                      { sha: ev.sha, message: ev.message, files: ev.files,
+                        failed: !ev.committed, error: ev.error }] } }
+        : msg
+    case 'coding_done':
+      // Activity is deliberately kept, unlike research: a coding run's tool
+      // calls are how you work out why a diff looks the way it does, and that
+      // question is asked after the run, not during it.
+      return msg.coding
+        ? { ...msg, coding: { ...msg.coding, status: ev.status, prUrl: ev.pr_url,
+                              summary: ev.summary } }
+        : msg
     case 'research_plan':
       return { ...msg, research: ev.objectives.map(o => ({ objective: o, status: 'running' })) }
     case 'research_activity':
@@ -100,6 +141,10 @@ export function AssistantProvider({ children }) {
         tools: (m.tools || []).map(t => typeof t === 'string'
           ? t : { name: t.name, status: t.status, toolUseId: t.toolUseId }),
         research: m.research?.map(({ objective, status, retried }) => ({ objective, status, retried })),
+        question: m.question,
+        coding: m.coding && { repo: m.coding.repo, branch: m.coding.branch,
+                              status: m.coding.status, prUrl: m.coding.prUrl,
+                              commits: m.coding.commits },
       }))
       localStorage.setItem(STORE_KEY, JSON.stringify(slim))
     } catch { /* quota — thread just won't survive reload */ }
@@ -264,6 +309,25 @@ export function AssistantProvider({ children }) {
     }
   }, [token])
 
+  /**
+   * Answer a question a running agent is blocked on.
+   *
+   * State is not updated here — the agent echoes a question_answered event back
+   * down the same stream, so the live path and a reload replay stay identical.
+   */
+  const answer = useCallback(async (runId, questionId, text) => {
+    const res = await fetch(`${API}/assistant/runs/${runId}/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ question_id: questionId, answer: text }),
+    })
+    if (!res.ok) {
+      throw new Error(res.status === 409
+        ? 'That question is no longer waiting for an answer.'
+        : 'Could not send your answer.')
+    }
+  }, [token])
+
   const send = useCallback(async (text) => {
     const prompt = (text || '').trim()
     if (!prompt || busy) return
@@ -291,7 +355,7 @@ export function AssistantProvider({ children }) {
   }, [messages, busy, token, follow])
 
   return (
-    <Ctx.Provider value={{ messages, busy, error, send, stop, clear }}>
+    <Ctx.Provider value={{ messages, busy, error, send, stop, clear, answer }}>
       {children}
     </Ctx.Provider>
   )

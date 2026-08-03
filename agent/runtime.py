@@ -18,7 +18,10 @@ from strands.models.openai_responses import OpenAIResponsesModel
 from strands.tools.mcp import MCPClient
 from strands_tools import http_request, tavily
 
-from research import delegate_research, set_progress_queue
+from coding import delegate_coding
+from progress import set_progress_queue
+from questions import ask_user, set_run_id
+from research import delegate_research
 from tool_trace import ToolTracer, pretty_args
 
 log = logging.getLogger("atlas.agent")
@@ -78,6 +81,22 @@ When research produces a plan the user will act on, offer to turn it into todos 
 and calendar entries — and where a step has a real deadline, put it in the \
 calendar rather than leaving it as an undated task.
 
+Coding: for anything that means changing code in a repository, use \
+delegate_coding. It clones the repo into an isolated sandbox, works on its own \
+branch, commits as it goes and opens a DRAFT pull request. Give it the full task \
+including what "done" looks like — it cannot see this conversation. One task \
+runs at a time.
+
+Two things to be straight with the user about. First, it cannot merge, and it \
+cannot push to main: they review and merge the PR on GitHub themselves. Always \
+give them the PR link. Second, if the result comes back with a status that is \
+not "ok", say so plainly and say what was left unfinished — the work is still \
+committed on the branch, but do not describe a timed-out run as a success.
+
+Ask before delegating if the task is ambiguous in a way that would send the \
+engineer down the wrong path — which repo, which behaviour is wanted, what \
+counts as done. A misdirected coding run costs far more than a question.
+
 Calendar: you can create, reschedule and delete events in their real Google \
 Calendar. Times are local decimal hours (14.5 = 2:30pm) and need the event's \
 date. Before scheduling anything, check what is already on that day so you do \
@@ -124,7 +143,7 @@ def _to_strands(messages: list[dict]) -> list[dict]:
     ]
 
 
-async def stream_reply(messages: list[dict], user_name: str):
+async def stream_reply(messages: list[dict], user_name: str, run_id: str | None = None):
     """Yield (event_type, payload) tuples: ("token", str) | ("tool", str) | ("error", str)."""
     history = _to_strands(messages)
     if not history or history[-1]["role"] != "user":
@@ -152,6 +171,8 @@ async def stream_reply(messages: list[dict], user_name: str):
         # until the whole team finished.
         queue: asyncio.Queue = asyncio.Queue()
         set_progress_queue(queue)
+        # Lets ask_user route the answer back to this particular run.
+        set_run_id(run_id)
         DONE = object()
 
         agent = Agent(
@@ -159,7 +180,8 @@ async def stream_reply(messages: list[dict], user_name: str):
             system_prompt=system_prompt,
             # Dashboard tools over MCP, plus web access and the ability to
             # delegate to a research team it composes itself.
-            tools=[*tools, delegate_research, tavily.tavily_search, http_request.http_request],
+            tools=[*tools, delegate_research, delegate_coding, ask_user,
+                   tavily.tavily_search, http_request.http_request],
             messages=prior,
             hooks=[ToolTracer(
                 emit=queue.put_nowait,

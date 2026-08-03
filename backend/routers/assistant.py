@@ -30,6 +30,10 @@ from database import DATABASE_PATH
 AGENT_URL = os.getenv("AGENT_URL", "http://agent:8100")
 POLL_SECONDS = 0.2          # how often a subscriber checks for new events
 IDLE_TIMEOUT_SECONDS = 900  # give up on a run the agent never finishes
+# A run blocked on ask_user is idle by design — it is waiting on a human, who may
+# be asleep. It is exempt from the stall timeout and gets a much longer ceiling,
+# so a forgotten question cannot pin an agent and a sandbox forever.
+AWAITING_TIMEOUT_SECONDS = 86_400
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
 
@@ -62,6 +66,15 @@ async def _append(db, run_id: str, seq: int, type_: str, payload: str) -> None:
         (run_id, seq, type_, payload),
     )
     await db.execute("UPDATE agent_runs SET updated_at=? WHERE id=?", (_now(), run_id))
+    await db.commit()
+
+
+async def _set_status(db, run_id: str, status: str) -> None:
+    """Move a live run between running and awaiting_input. Not a terminal write."""
+    await db.execute(
+        "UPDATE agent_runs SET status=?, updated_at=? WHERE id=? AND status IN ('running','awaiting_input')",
+        (status, _now(), run_id),
+    )
     await db.commit()
 
 
@@ -107,6 +120,12 @@ async def _drive_run(run_id: str, body: bytes, auth: str) -> None:
                         kind = ev.get("type")
                         if kind == "done":
                             continue  # emitted by the subscriber on terminal status
+                        # The agent is parked on a question: mark the run so the
+                        # subscriber stops counting it as stalled.
+                        if kind == "question":
+                            await _set_status(db, run_id, "awaiting_input")
+                        elif kind in ("question_answered", "question_timeout"):
+                            await _set_status(db, run_id, "running")
                         if kind == "error":
                             error = ev.get("message") or "The assistant hit an error."
                             status = "error"
@@ -142,7 +161,11 @@ async def start_run(req: RunRequest, request: Request, user: dict = Depends(get_
     await db.commit()
     await db.close()
 
-    body = json.dumps({"messages": [m.model_dump() for m in req.messages]}).encode()
+    # run_id goes to the agent so ask_user has an address to be answered at.
+    body = json.dumps({
+        "messages": [m.model_dump() for m in req.messages],
+        "run_id": run_id,
+    }).encode()
     # Forward the caller's own JWT — the agent re-validates it against
     # ALLOWED_EMAILS, and that second check is only meaningful if it's the real one.
     auth = request.headers.get("authorization", "")
@@ -175,12 +198,14 @@ async def run_events(run_id: str, after: int = 0, user: dict = Depends(get_curre
 
                 async with db.execute("SELECT status, error FROM agent_runs WHERE id=?", (run_id,)) as cur:
                     run = await cur.fetchone()
-                if run and run["status"] != "running":
+                if run and run["status"] not in ("running", "awaiting_input"):
                     yield f"data: {json.dumps({'type': 'done', 'status': run['status'], 'seq': last})}\n\n"
                     return
 
+                waiting = bool(run and run["status"] == "awaiting_input")
                 idle = 0.0 if rows else idle + POLL_SECONDS
-                if idle > IDLE_TIMEOUT_SECONDS:
+                limit = AWAITING_TIMEOUT_SECONDS if waiting else IDLE_TIMEOUT_SECONDS
+                if idle > limit:
                     yield f"data: {json.dumps({'type': 'done', 'status': 'stalled', 'seq': last})}\n\n"
                     return
                 # Comment frame doubles as a keep-alive through Caddy.
@@ -217,6 +242,47 @@ async def run_history(run_id: str, user: dict = Depends(get_current_user)):
         events = [{"seq": r["seq"], **json.loads(r["payload"])} for r in await c.fetchall()]
     await db.close()
     return {"run_id": run_id, "status": run["status"], "error": run["error"], "events": events}
+
+
+class AnswerRequest(BaseModel):
+    question_id: str
+    answer: str = Field(..., min_length=1, max_length=4000)
+
+
+@router.post("/runs/{run_id}/answer")
+async def answer_run(run_id: str, req: AnswerRequest, request: Request,
+                     user: dict = Depends(get_current_user)):
+    """Answer a question a running agent is blocked on.
+
+    The agent holds the pending question in memory and is parked on a future, so
+    this has to reach the same process — it is forwarded rather than persisted.
+    The run then continues with its context and sandbox intact.
+    """
+    db = await _connect()
+    async with db.execute("SELECT status FROM agent_runs WHERE id=?", (run_id,)) as c:
+        run = await c.fetchone()
+    await db.close()
+    if not run:
+        raise HTTPException(404, "No such run")
+    if run["status"] not in ("running", "awaiting_input"):
+        raise HTTPException(409, f"Run is {run['status']} — it can no longer be answered.")
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{AGENT_URL}/runs/{run_id}/answer",
+                json={"question_id": req.question_id, "answer": req.answer},
+                headers={"Authorization": request.headers.get("authorization", "")},
+            )
+        delivered = resp.status_code == 200 and resp.json().get("delivered")
+    except httpx.HTTPError:
+        raise HTTPException(503, "The assistant is not reachable.")
+
+    if not delivered:
+        # Nothing was waiting: the question timed out, was already answered, or
+        # the run restarted. Say so rather than pretending it landed.
+        raise HTTPException(409, "That question is no longer waiting for an answer.")
+    return {"ok": True}
 
 
 @router.get("/runs")

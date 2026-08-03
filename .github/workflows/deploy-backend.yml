@@ -6,6 +6,7 @@ on:
     paths:
       - 'backend/**'
       - 'agent/**'
+      - 'sandbox/**'
       - 'docker-compose.yml'
       - 'Caddyfile'
       - '.github/workflows/deploy-backend.yml'
