@@ -205,7 +205,8 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 
   // many times a second, and yanking the view down while you are reading
   // something further up is worse than losing the follow.
   useEffect(() => {
-    const el = scrollRef.current
+    const root = scrollRef.current
+    const el = root?.parentElement
     if (!el) return
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
     if (nearBottom) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
@@ -269,16 +270,14 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 
           ))}
         </div>
 
-        {composer}
+        <div style={{ position: 'fixed', left: 0, right: 0, bottom: isMobile ? 'max(8px, env(safe-area-inset-bottom))' : 8, zIndex: 10, display: 'flex', justifyContent: 'center', padding: `0 ${gutter}px` }}>{composer}</div>
         {error && <div style={{ marginTop: 12, fontSize: 12.5, color: '#c15f3c' }}>{error}</div>}
       </div>
     )
   }
 
   return (
-    // flex:1 + minHeight:0 rather than a hardcoded viewport calc — this component
-    // is mounted inside desktop, tablet and mobile shells with different chrome.
-    <div style={{ flex: 1, minHeight: 0, height: '100%', width: '100%', maxWidth: COLUMN, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ width: '100%', maxWidth: COLUMN, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
       {/* Threads now persist across navigation and reloads, so there has to be a way out. */}
       <div style={{ flex: 'none', display: 'flex', justifyContent: 'flex-end', padding: `6px ${gutter}px 0` }}>
         <button onClick={clear}
@@ -305,7 +304,11 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 
         {error && <div style={{ fontSize: 12.5, color: '#c15f3c' }}>{error}</div>}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'center', padding: `0 ${gutter}px`, paddingBottom: isMobile ? 'max(8px, env(safe-area-inset-bottom))' : 8 }}>{composer}</div>
+      <div style={{ position: 'fixed', left: 0, right: 0, bottom: isMobile ? 'max(8px, env(safe-area-inset-bottom))' : 8, zIndex: 10, display: 'flex', justifyContent: 'center', padding: `0 ${gutter}px` }}>{composer}</div>
+    </div>
+  )
+}
+ttom: isMobile ? 'max(8px, env(safe-area-inset-bottom))' : 8, zIndex: 10, display: 'flex', justifyContent: 'center', padding: `0 ${gutter}px` }}>{composer}</div>
     </div>
   )
 }
