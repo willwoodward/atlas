@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { useAuth } from './AuthContext.jsx'
+import { useRefresh } from './RefreshContext.jsx'
 
 export const HABIT_PERIODS = [
   { label: 'Morning', color: '#6f8168' },
@@ -42,6 +43,8 @@ const Ctx = createContext(null)
 
 export function HabitsProvider({ children }) {
   const { token } = useAuth()
+  // Bumped when the assistant mutates data via MCP, forcing a refetch.
+  const { tick } = useRefresh()
   // Internal shape: { habits: [{id,name,color,createdAt}], completions: {[id]: [dateStr]} }
   const [data, setData] = useState({ habits: [], completions: {} })
 
@@ -57,7 +60,7 @@ export function HabitsProvider({ children }) {
       const completions = Object.fromEntries(rows.map(r => [r.id, r.completions]))
       setData({ habits, completions })
     })
-  }, [token])
+  }, [token, tick])
 
   const addHabit = useCallback(async (name, color) => {
     const id = crypto.randomUUID()

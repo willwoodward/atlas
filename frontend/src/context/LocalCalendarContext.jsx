@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { useAuth } from './AuthContext.jsx'
+import { useRefresh } from './RefreshContext.jsx'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -7,6 +8,8 @@ const Ctx = createContext(null)
 
 export function LocalCalendarProvider({ children }) {
   const { token } = useAuth()
+  // Bumped when the assistant mutates data via MCP, forcing a refetch.
+  const { tick } = useRefresh()
   const [events, setEvents] = useState([])
 
   const call = useCallback((path, opts = {}) => fetch(`${API}${path}`, {
@@ -19,7 +22,7 @@ export function LocalCalendarProvider({ children }) {
       // API uses snake_case; internal shape uses camelCase
       setEvents(rows.map(r => ({ id: r.id, title: r.title, date: r.date, startH: r.start_h, endH: r.end_h, color: r.color, notes: r.notes })))
     )
-  }, [token])
+  }, [token, tick])
 
   const addEvent = useCallback(async ({ title, date, startH, endH, color, notes = '' }) => {
     const id = crypto.randomUUID()

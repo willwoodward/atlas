@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { ThemeProvider }         from './context/ThemeContext.jsx'
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
+import { RefreshProvider }        from './context/RefreshContext.jsx'
+import { AssistantProvider }      from './context/AssistantContext.jsx'
 import { UserProvider }          from './context/UserContext.jsx'
 import { HabitsProvider }        from './context/HabitsContext.jsx'
 import { IntegrationsProvider }  from './context/IntegrationsContext.jsx'
@@ -60,7 +62,8 @@ function SyncManager() {
 function Dashboard() {
   const layout = useLayout()
   return (
-    <UserProvider>
+    <RefreshProvider>
+     <UserProvider>
       <HabitsProvider>
         <IntegrationsProvider>
           <FinancesProvider>
@@ -69,8 +72,10 @@ function Dashboard() {
                 <TodosProvider>
                   <GitHubProvider>
                     <NotesProvider>
+                     <AssistantProvider>
                       <SyncManager />
                       {layout === 'desktop' ? <DesktopLayout /> : layout === 'tablet' ? <TabletLayout /> : <MobileLayout />}
+                     </AssistantProvider>
                     </NotesProvider>
                   </GitHubProvider>
                 </TodosProvider>
@@ -79,7 +84,8 @@ function Dashboard() {
           </FinancesProvider>
         </IntegrationsProvider>
       </HabitsProvider>
-    </UserProvider>
+     </UserProvider>
+    </RefreshProvider>
   )
 }
 

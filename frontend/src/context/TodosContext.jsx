@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from './AuthContext.jsx'
+import { useRefresh } from './RefreshContext.jsx'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -14,6 +15,8 @@ const Ctx = createContext(null)
 
 export function TodosProvider({ children }) {
   const { token } = useAuth()
+  // Bumped when the assistant mutates data via MCP, forcing a refetch.
+  const { tick } = useRefresh()
   const [todos, setTodos] = useState([])
   const [outcomes, setOutcomesState] = useState('')
   const weekStr = getWeekStr()
@@ -35,7 +38,7 @@ export function TodosProvider({ children }) {
   useEffect(() => {
     call('/api/todos').then(r => r.json()).then(rows => setTodos(rows.map(toInternal)))
     call(`/api/todos/outcomes/${weekStr}`).then(r => r.json()).then(d => setOutcomesState(d.text))
-  }, [token])
+  }, [token, tick])
 
   const addTodo = useCallback(async (text, bucket = 'today', goalId = null, parentId = null) => {
     const id = crypto.randomUUID()

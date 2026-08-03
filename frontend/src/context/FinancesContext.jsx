@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { useAuth } from './AuthContext.jsx'
+import { useRefresh } from './RefreshContext.jsx'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -22,6 +23,8 @@ const Ctx = createContext(null)
 
 export function FinancesProvider({ children }) {
   const { token } = useAuth()
+  // Bumped when the assistant mutates data via MCP, forcing a refetch.
+  const { tick } = useRefresh()
   const [data, setData] = useState({ pots: [], transactions: [], accounts: [] })
 
   const call = useCallback((path, opts = {}) => fetch(`${API}${path}`, {
@@ -33,7 +36,7 @@ export function FinancesProvider({ children }) {
     call('/api/finances').then(r => r.json()).then(d => {
       setData({ pots: d.pots.map(potToInternal), transactions: d.transactions, accounts: d.accounts })
     })
-  }, [token])
+  }, [token, tick])
 
   // ─── Pots ──────────────────────────────────────────────────────────────────
   const addPot = useCallback(async (name, color, targetAmount, notes = '') => {

@@ -1,13 +1,11 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { marked } from 'marked'
 import AtlasOrb from './AtlasOrb.jsx'
-import { useAuth } from '../context/AuthContext.jsx'
+import { useAssistant } from '../context/AssistantContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { assistantPrompts } from '../data.js'
 
 marked.use({ gfm: true, breaks: true })
-
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 // MCP tool name → what to show while it runs
 const TOOL_LABELS = {
@@ -39,7 +37,7 @@ const TOOL_LABELS = {
 
 const toolLabel = name => TOOL_LABELS[name] || name.replace(/_/g, ' ')
 
-function ToolTrace({ tools }) {
+function ToolTrace({ tools = [] }) {
   if (tools.length === 0) return null
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 8 }}>
@@ -57,18 +55,15 @@ function ToolTrace({ tools }) {
 const COLUMN = 720
 
 export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 }) {
-  const { token } = useAuth()
+  // Thread state lives in AssistantContext so it survives navigating away and back.
+  const { messages, busy, error, send, stop, clear } = useAssistant()
   // The mobile shell renders the assistant with no padding (it was built for the
   // centred orb), so the chat supplies its own gutters and safe-area inset there.
   const isMobile = useIsMobile()
   const gutter = isMobile ? 16 : 0
-  const [messages, setMessages] = useState([])   // { role, content, tools? }
   const [input, setInput] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState(null)
   const scrollRef = useRef(null)
   const taRef = useRef(null)
-  const abortRef = useRef(null)
 
   const empty = messages.length === 0
 
@@ -76,76 +71,14 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, busy])
 
-  useEffect(() => () => abortRef.current?.abort(), [])
-
-  const send = useCallback(async (text) => {
-    const prompt = text.trim()
-    if (!prompt || busy) return
-
-    // The agent is stateless — it gets the whole thread on every turn.
-    const history = [...messages, { role: 'user', content: prompt }]
-    setMessages([...history, { role: 'assistant', content: '', tools: [] }])
+  const submit = (text) => {
+    send(text)
     setInput('')
-    setError(null)
-    setBusy(true)
-
-    const patchLast = fn => setMessages(prev => {
-      const next = [...prev]
-      next[next.length - 1] = fn(next[next.length - 1])
-      return next
-    })
-
-    const controller = new AbortController()
-    abortRef.current = controller
-
-    try {
-      const res = await fetch(`${API}/assistant/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ messages: history.map(({ role, content }) => ({ role, content })) }),
-        signal: controller.signal,
-      })
-      if (!res.ok) throw new Error(res.status === 403 ? 'Not authorised to use the assistant.' : `Assistant error (${res.status})`)
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-
-        // SSE frames are separated by a blank line
-        const frames = buffer.split('\n\n')
-        buffer = frames.pop()
-
-        for (const frame of frames) {
-          const line = frame.split('\n').find(l => l.startsWith('data: '))
-          if (!line) continue
-          let ev
-          try { ev = JSON.parse(line.slice(6)) } catch { continue }
-
-          if (ev.type === 'token') patchLast(m => ({ ...m, content: m.content + ev.text }))
-          else if (ev.type === 'tool') patchLast(m => ({ ...m, tools: [...m.tools, ev.name] }))
-          else if (ev.type === 'error') setError(ev.message)
-        }
-      }
-    } catch (err) {
-      if (err.name !== 'AbortError') setError(err.message || 'Something went wrong.')
-    } finally {
-      setBusy(false)
-      abortRef.current = null
-      // Drop a turn that produced nothing so the thread doesn't show an empty bubble
-      setMessages(prev => {
-        const last = prev[prev.length - 1]
-        return last?.role === 'assistant' && !last.content && last.tools.length === 0 ? prev.slice(0, -1) : prev
-      })
-    }
-  }, [messages, busy, token])
+    if (taRef.current) taRef.current.style.height = 'auto'
+  }
 
   const onKeyDown = e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input) }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(input) }
   }
 
   const composer = (
@@ -164,7 +97,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 
         style={{ flex: 1, resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontSize: 14, fontFamily: 'inherit', color: 'var(--ink)', lineHeight: 1.5, maxHeight: 140 }}
       />
       <button
-        onClick={() => (busy ? abortRef.current?.abort() : send(input))}
+        onClick={() => (busy ? stop() : submit(input))}
         disabled={!busy && !input.trim()}
         style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 10, border: 'none', background: busy || input.trim() ? '#c15f3c' : 'var(--surface-3)', color: busy || input.trim() ? '#fff' : 'var(--faint)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: busy || input.trim() ? 'pointer' : 'default', transition: 'all .12s' }}
       >
@@ -189,7 +122,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center', maxWidth: 560, marginBottom: 26 }}>
           {assistantPrompts.map(p => (
-            <button key={p} onClick={() => send(p)}
+            <button key={p} onClick={() => submit(p)}
               style={{ padding: '9px 15px', borderRadius: 99, background: 'var(--surface)', border: '1px solid var(--bd)', fontSize: 13, fontFamily: 'inherit', color: 'var(--ink-2)', cursor: 'pointer' }}>
               {p}
             </button>
@@ -206,6 +139,14 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 
     // flex:1 + minHeight:0 rather than a hardcoded viewport calc — this component
     // is mounted inside desktop, tablet and mobile shells with different chrome.
     <div style={{ flex: 1, minHeight: 0, height: '100%', width: '100%', maxWidth: COLUMN, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
+      {/* Threads now persist across navigation and reloads, so there has to be a way out. */}
+      <div style={{ flex: 'none', display: 'flex', justifyContent: 'flex-end', padding: `6px ${gutter}px 0` }}>
+        <button onClick={clear}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 8, border: '1px solid var(--bd)', background: 'transparent', color: 'var(--muted)', fontSize: 12, fontFamily: 'inherit', cursor: 'pointer' }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New chat
+        </button>
+      </div>
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: `8px ${gutter}px 20px`, display: 'flex', flexDirection: 'column', gap: 20 }}>
         {messages.map((m, i) => m.role === 'user' ? (
           <div key={i} style={{ alignSelf: 'flex-end', maxWidth: '80%', padding: '10px 15px', borderRadius: 14, background: 'var(--surface)', border: '1px solid var(--bd)', fontSize: 14, lineHeight: 1.55, whiteSpace: 'pre-wrap', color: 'var(--ink)' }}>
@@ -216,7 +157,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 
             <ToolTrace tools={m.tools} />
             {m.content
               ? <div className="md-prose" style={{ fontSize: 14.5, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: marked.parse(m.content) }} />
-              : busy && i === messages.length - 1 && m.tools.length === 0 &&
+              : busy && i === messages.length - 1 && (m.tools?.length ?? 0) === 0 &&
                   <span style={{ fontSize: 13.5, color: 'var(--muted)' }}>Thinking…</span>}
           </div>
         ))}

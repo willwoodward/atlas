@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { useAuth } from './AuthContext.jsx'
+import { useRefresh } from './RefreshContext.jsx'
 
 export const GOAL_PALETTE = ['#c15f3c', '#6f8168', '#5f7591', '#b08a3e', '#9a6d84']
 
@@ -15,6 +16,8 @@ const Ctx = createContext(null)
 
 export function GoalsProvider({ children }) {
   const { token } = useAuth()
+  // Bumped when the assistant mutates data via MCP, forcing a refetch.
+  const { tick } = useRefresh()
   const [goals, setGoals] = useState([])
 
   const call = useCallback((path, opts = {}) => fetch(`${API}${path}`, {
@@ -24,7 +27,7 @@ export function GoalsProvider({ children }) {
 
   useEffect(() => {
     call('/api/goals').then(r => r.json()).then(rows => setGoals(rows.map(toInternal)))
-  }, [token])
+  }, [token, tick])
 
   const addGoal = useCallback(async (title, color) => {
     const id = crypto.randomUUID()

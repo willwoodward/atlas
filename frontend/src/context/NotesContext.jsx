@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { useAuth } from './AuthContext.jsx'
+import { useRefresh } from './RefreshContext.jsx'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -7,6 +8,8 @@ const Ctx = createContext(null)
 
 export function NotesProvider({ children }) {
   const { token } = useAuth()
+  // Bumped when the assistant mutates data via MCP, forcing a refetch.
+  const { tick } = useRefresh()
   const [notes, setNotes] = useState([])
 
   const call = useCallback((path, opts = {}) => fetch(`${API}${path}`, {
@@ -16,7 +19,7 @@ export function NotesProvider({ children }) {
 
   useEffect(() => {
     call('/api/notes').then(r => r.json()).then(setNotes)
-  }, [token])
+  }, [token, tick])
 
   const addNote = useCallback(async () => {
     const id = crypto.randomUUID()
