@@ -85,14 +85,6 @@ export default function MobileLayout() {
           </svg>
         </button>
 
-        {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 8, background: '#c15f3c', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--surface-2)' }} />
-          </div>
-          <span style={{ fontFamily: "'Newsreader', serif", fontSize: 17, fontWeight: 600, color: 'var(--ink)' }}>Atlas</span>
-        </div>
-
         {/* Current page label */}
         <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: 'var(--mid)', textAlign: 'center' }}>{activeLabel}</span>
 
