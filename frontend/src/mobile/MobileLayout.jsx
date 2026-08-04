@@ -86,12 +86,11 @@ export default function MobileLayout() {
           </svg>
         </button>
 
-        {/* Current page label */}
         <span style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', fontSize: 13, fontWeight: 500, color: 'var(--mid)', whiteSpace: 'nowrap' }}>{activeLabel}</span>
 
         {/* Avatar → accounts */}
         <div
-          style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,#c88a5f,#9a6d84)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 13, flex: 'none', cursor: 'pointer' }}
+          style={{ marginLeft: 'auto', width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,#c88a5f,#9a6d84)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 13, flex: 'none', cursor: 'pointer' }}
           onClick={() => navigate('accounts')}
         >
           {initial}
