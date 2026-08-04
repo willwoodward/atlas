@@ -69,6 +69,7 @@ export default function MobileLayout() {
       {/* Top bar */}
       <div style={{
         flex: 'none', display: 'flex', alignItems: 'center', gap: 12,
+        position: 'relative',
         padding: '12px 20px 10px',
         background: 'var(--surface-2)', borderBottom: '1px solid var(--bd)',
         paddingTop: 'max(12px, env(safe-area-inset-top))',
@@ -86,7 +87,7 @@ export default function MobileLayout() {
         </button>
 
         {/* Current page label */}
-        <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: 'var(--mid)', textAlign: 'center' }}>{activeLabel}</span>
+        <span style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', fontSize: 13, fontWeight: 500, color: 'var(--mid)', whiteSpace: 'nowrap' }}>{activeLabel}</span>
 
         {/* Avatar → accounts */}
         <div
