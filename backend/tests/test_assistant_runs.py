@@ -82,9 +82,32 @@ class TestRunLifecycle:
         assert resp.json()["events"][0]["text"] == "once"
 
     async def test_cancelling_marks_the_run_cancelled(self, client, auth, run_id):
+        """Cancelled by the time the endpoint answers, not eventually.
+
+        task.cancel() is only a request, so if the endpoint relied on the driver
+        unwinding, a client that cancels and immediately re-reads the run would
+        still be told it is running.
+        """
         resp = await client.post(f"/assistant/runs/{run_id}/cancel", headers=auth)
         assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
         assert await _status(run_id) == "cancelled"
+
+    async def test_cancelling_a_finished_run_does_not_rewrite_it(self, client, auth, run_id):
+        """A double-click after completion must not turn 'done' into 'cancelled'."""
+        import routers.assistant as assistant
+        db = await assistant._connect()
+        await assistant._finish(db, run_id, "done")
+        await db.close()
+
+        resp = await client.post(f"/assistant/runs/{run_id}/cancel", headers=auth)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "done"
+        assert await _status(run_id) == "done"
+
+    async def test_cancelling_an_unknown_run_is_404(self, client, auth):
+        resp = await client.post("/assistant/runs/does-not-exist/cancel", headers=auth)
+        assert resp.status_code == 404
 
     async def test_runs_are_listed_newest_first(self, client, auth, run_id):
         resp = await client.get("/assistant/runs", headers=auth)

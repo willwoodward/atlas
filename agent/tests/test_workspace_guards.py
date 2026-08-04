@@ -77,6 +77,44 @@ class TestProtectedBranches:
         assert count == "2", "the commit itself should have succeeded"
 
 
+class TestScratchDirectory:
+    """The layout harness lives in the clone but must never reach the PR.
+
+    `git add -A` is deliberately broad — it is what makes "commit whatever the
+    sandbox changed" work at all — so the only thing standing between a
+    throwaway HTML rig and the user's diff is the exclude pathspec.
+    """
+
+    async def test_scratch_only_changes_do_not_count_as_work(self, repo):
+        subprocess.run(["git", "checkout", "-q", "-b", "atlas/work"], cwd=repo, check=True)
+        scratch = repo / w.SCRATCH_DIR
+        scratch.mkdir()
+        (scratch / "harness.html").write_text("<div>rig</div>")
+
+        result = await w.commit_and_push("owner/repo", "should be a no-op")
+        assert result["committed"] is False
+        assert "No changes" in result["detail"]
+
+    async def test_scratch_is_left_out_of_a_real_commit(self, repo):
+        subprocess.run(["git", "checkout", "-q", "-b", "atlas/work"], cwd=repo, check=True)
+        scratch = repo / w.SCRATCH_DIR
+        scratch.mkdir()
+        (scratch / "harness.html").write_text("<div>rig</div>")
+        (repo / "b.txt").write_text("the actual change")
+
+        # No remote, so this reaches push and fails there — the commit is made.
+        with pytest.raises(w.WorkspaceError, match="git push"):
+            await w.commit_and_push("owner/repo", "Add b")
+
+        tracked = subprocess.run(["git", "show", "--name-only", "--pretty=", "HEAD"],
+                                 cwd=repo, capture_output=True, text=True).stdout
+        assert "b.txt" in tracked
+        assert w.SCRATCH_DIR not in tracked
+
+        # And it is still on disk — excluded, not cleaned up behind the agent.
+        assert (scratch / "harness.html").exists()
+
+
 class TestOwnershipHandling:
     """Regression: the clone is chowned to the sandbox uid so `coder` can edit
     it, but git here runs as root. Without safe.directory git refuses the repo
@@ -193,3 +231,164 @@ def _write_askpass(tmp_path: Path) -> Path:
         "esac\n"
     )
     return path
+
+
+class TestRefValidation:
+    """Branch names arriving from the GitHub API or the model are arguments to
+    git and path segments in API URLs, so they are validated rather than escaped."""
+
+    @pytest.mark.parametrize("bad", [
+        "", "--upload-pack=evil", "a..b", "feature/x.lock", "has space",
+        "trailing/", "semi;colon", "main", "MASTER",
+    ])
+    def test_unusable_refs_are_refused(self, bad):
+        with pytest.raises(w.WorkspaceError):
+            w._check_ref(bad)
+
+    @pytest.mark.parametrize("good", ["atlas/add-tests-ab12", "feature/x", "fix.1"])
+    def test_ordinary_refs_are_allowed(self, good):
+        w._check_ref(good)
+
+
+class TestResumeGuards:
+    """Revising a PR checks out an existing branch — the one path that touches a
+    branch this agent did not create."""
+
+    async def test_a_protected_branch_is_refused_before_any_clone(self, monkeypatch):
+        async def explode(*a, **k):
+            raise AssertionError("git must not run for a protected branch")
+        monkeypatch.setattr(w, "_git", explode)
+        with pytest.raises(w.WorkspaceError, match="protected branch"):
+            await w.resume_branch("owner/repo", "main")
+
+    async def test_a_malformed_repo_is_refused(self, monkeypatch):
+        async def explode(*a, **k):
+            raise AssertionError("git must not run for a malformed repo")
+        monkeypatch.setattr(w, "_git", explode)
+        with pytest.raises(w.WorkspaceError, match="owner/name"):
+            await w.resume_branch("not-a-repo", "atlas/x")
+
+
+def _stub_api(monkeypatch, responses: dict):
+    """Serve canned GitHub responses, matching on a substring of the path."""
+    calls = []
+
+    async def fake(path, *, method="GET", payload=None, timeout=60):
+        calls.append({"path": path, "method": method, "payload": payload})
+        for fragment, body in responses.items():
+            if fragment in path:
+                if isinstance(body, Exception):
+                    raise body
+                return body
+        return {}
+
+    monkeypatch.setattr(w, "_api", fake)
+    return calls
+
+
+def _pr(**over):
+    base = {"number": 7, "html_url": "https://github.com/owner/repo/pull/7",
+            "title": "t", "body": "b", "state": "open", "draft": True,
+            "head": {"ref": "atlas/x", "repo": {"full_name": "owner/repo"}},
+            "base": {"ref": "main"}}
+    base.update(over)
+    return base
+
+
+class TestPullRequestLookup:
+    async def test_an_open_pr_yields_its_branch_and_base(self, monkeypatch):
+        _stub_api(monkeypatch, {"/pulls/7": _pr()})
+        pr = await w.fetch_pr("owner/repo", 7)
+        assert pr["branch"] == "atlas/x"
+        assert pr["base"] == "main"
+        assert pr["draft"] is True
+
+    async def test_a_closed_pr_is_refused(self, monkeypatch):
+        _stub_api(monkeypatch, {"/pulls/7": _pr(state="closed")})
+        with pytest.raises(w.WorkspaceError, match="closed"):
+            await w.fetch_pr("owner/repo", 7)
+
+    async def test_a_merged_pr_says_merged(self, monkeypatch):
+        _stub_api(monkeypatch, {"/pulls/7": _pr(state="closed", merged=True)})
+        with pytest.raises(w.WorkspaceError, match="merged"):
+            await w.fetch_pr("owner/repo", 7)
+
+    async def test_a_fork_pr_is_refused(self, monkeypatch):
+        """The PAT has no write access to a fork, so this would fail after the
+        work was already done rather than before it started."""
+        _stub_api(monkeypatch, {"/pulls/7": _pr(
+            head={"ref": "x", "repo": {"full_name": "someone/repo"}})})
+        with pytest.raises(w.WorkspaceError, match="fork"):
+            await w.fetch_pr("owner/repo", 7)
+
+    async def test_a_missing_pr_is_reported_plainly(self, monkeypatch):
+        _stub_api(monkeypatch, {"/pulls/7": w.GitHubApiError(404, "Not Found")})
+        with pytest.raises(w.WorkspaceError, match="No pull request #7"):
+            await w.fetch_pr("owner/repo", 7)
+
+
+class TestPullRequestFeedback:
+    def _sources(self):
+        return {
+            "/reviews": [
+                {"body": "Needs a test.", "state": "CHANGES_REQUESTED",
+                 "user": {"login": "will"}, "submitted_at": "2026-01-02T00:00:00Z"},
+                {"body": "", "state": "APPROVED", "user": {"login": "will"},
+                 "submitted_at": "2026-01-03T00:00:00Z"},
+            ],
+            "/pulls/7/comments": [
+                {"body": "this leaks", "user": {"login": "will"},
+                 "created_at": "2026-01-01T00:00:00Z",
+                 "path": "agent/coding.py", "line": 42, "diff_hunk": "@@ -1 +1 @@"},
+            ],
+            "/issues/7/comments": [
+                {"body": f"Atlas is revising this\n\n{w.AGENT_COMMENT_MARKER}",
+                 "user": {"login": "will"}, "created_at": "2026-01-04T00:00:00Z"},
+                {"body": "also rename it", "user": {"login": "will"},
+                 "created_at": "2026-01-05T00:00:00Z"},
+            ],
+        }
+
+    async def test_feedback_is_ordered_oldest_first(self, monkeypatch):
+        _stub_api(monkeypatch, self._sources())
+        items = await w.fetch_pr_feedback("owner/repo", 7)
+        assert [i["body"] for i in items] == ["this leaks", "Needs a test.", "also rename it"]
+
+    async def test_the_agents_own_comments_are_not_fed_back_to_it(self, monkeypatch):
+        """The PAT acts as the user, so author login cannot tell them apart —
+        without the marker the agent would treat its own progress notes as review."""
+        _stub_api(monkeypatch, self._sources())
+        items = await w.fetch_pr_feedback("owner/repo", 7)
+        assert not any(w.AGENT_COMMENT_MARKER in i["body"] for i in items)
+
+    async def test_empty_review_bodies_are_dropped(self, monkeypatch):
+        _stub_api(monkeypatch, self._sources())
+        items = await w.fetch_pr_feedback("owner/repo", 7)
+        assert all(i["body"].strip() for i in items)
+
+    async def test_inline_comments_keep_their_anchor(self, monkeypatch):
+        """An inline "this is wrong" is unresolvable without the file and hunk."""
+        _stub_api(monkeypatch, self._sources())
+        inline = next(i for i in await w.fetch_pr_feedback("owner/repo", 7) if i["kind"] == "inline")
+        assert inline["path"] == "agent/coding.py"
+        assert inline["line"] == 42
+        assert inline["hunk"] == "@@ -1 +1 @@"
+
+    async def test_no_feedback_is_an_empty_list_not_an_error(self, monkeypatch):
+        _stub_api(monkeypatch, {"/reviews": [], "/comments": []})
+        assert await w.fetch_pr_feedback("owner/repo", 7) == []
+
+
+class TestPullRequestComments:
+    async def test_comments_are_marked_so_they_can_be_filtered_later(self, monkeypatch):
+        calls = _stub_api(monkeypatch, {})
+        await w.comment_on_pr("owner/repo", 7, "done")
+        assert calls[0]["method"] == "POST"
+        assert calls[0]["path"] == "/repos/owner/repo/issues/7/comments"
+        assert w.AGENT_COMMENT_MARKER in calls[0]["payload"]["body"]
+
+    async def test_a_failed_comment_never_fails_the_run(self, monkeypatch):
+        """The work is already pushed by then; losing a progress note is not a
+        reason to report the run as failed."""
+        _stub_api(monkeypatch, {"/comments": w.GitHubApiError(403, "denied")})
+        await w.comment_on_pr("owner/repo", 7, "done")  # must not raise

@@ -16,6 +16,12 @@ worst a bad generated command can do is corrupt a throwaway clone.
 Nothing here can merge. There is no merge call in workspace.py, PRs are opened
 as drafts, and main is refused at three separate points. Reaching main requires
 a human pressing the button on GitHub.
+
+A run is either new work or a revision of an open PR. A revision checks out that
+PR's branch instead of cutting a new one and is fed the review comments, so
+feedback lands on the same pull request rather than opening a second one next to
+it. A revision never changes the PR's draft/ready state — that flag is the user's
+signal, not ours.
 """
 import asyncio
 import logging
@@ -40,6 +46,7 @@ CODING_TIMEOUT = int(os.getenv("CODING_TIMEOUT", "1800"))  # 30 min, whole task
 CONTEXT_WINDOW_MESSAGES = 40   # source files are large; fewer turns fit than in research
 COMPRESSION_THRESHOLD = 0.6
 MAX_SUMMARY_CHARS = 6000
+MAX_FEEDBACK_CHARS = 20000  # a long review thread must not crowd out the code
 
 # One at a time. See module docstring.
 _slot = asyncio.Semaphore(1)
@@ -50,11 +57,17 @@ a checkout of {repo}, on branch `{branch}`.
 Your task:
 {task}
 
+{mode_note}
+
 {context}
 
 The environment:
 - You are in {path} on a Linux box with git, node 22, python3, ripgrep and jq.
 - Use bash and the file editor to explore, change, build and test.
+- When viewing a file, omit `view_range` unless you already know how long the \
+file is. The range is validated, not clamped: asking for lines past the end of \
+the file is an error and you will have to read it again. To read from a point to \
+the end, use -1 as the second element.
 - You have internet access, so dependencies can be installed.
 - You CANNOT reach the user's dashboard API or any of their data. Don't try.
 
@@ -67,6 +80,10 @@ surrounding code, reformat files, or fix unrelated problems you notice. Mention 
 them in your summary instead.
 - Run the tests. If the project has a test command, use it. If your change is \
 testable and the project has tests, add one.
+- Run build and test commands from the directory that contains the manifest \
+(package.json, pyproject.toml, Cargo.toml), not from the repository root. In a \
+repo with several sub-projects the root usually has no manifest at all, and \
+running there fails for a reason that has nothing to do with your change.
 - Verify your work actually runs. A change you have not executed is a guess.
 
 Verification is not optional. Before your final commit you MUST check that every \
@@ -82,6 +99,59 @@ A file that does not parse is not a partial success, it is a broken change, and 
 committing one wastes the reviewer's time entirely. If you could not run any \
 check at all, say so explicitly and say which files are unverified — never let \
 "I could not verify" quietly become "it works".
+
+Checking layout — ONLY for changes to how a page looks. Skip this entirely for \
+backend, CLI, config or logic work; starting a browser for those is wasted time.
+
+A build passing tells you a file parses, not that an element ended up where you \
+meant it to. If you moved, positioned, sized or removed something visual, prove \
+it with `render-probe`, measuring the REAL app:
+
+  VITE_MOCK_AUTH=1 npm run dev &        # from frontend/, then wait for the port
+  render-probe --url http://localhost:5173 --width 390 \
+      --measure ".topbar,.burger,.label,.avatar"
+
+`VITE_MOCK_AUTH=1` signs you in as a fixed user and stubs the API, which is what \
+makes the dashboard reachable — this sandbox has no route to the backend, so \
+without it every page renders the login screen. It is a dev-only flag and is \
+stripped from production builds.
+
+It prints JSON: x/y/width/height/right/centerX per selector, plus any overlaps \
+between them, whether the page scrolls sideways, and console errors. Assert \
+against the numbers — "avatar.right is 370 and the header is 390 wide with 20px \
+padding, so it is flush right" — rather than assuming.
+
+This codebase styles with inline objects, so there are almost no CSS classes to \
+select on. Use structural selectors instead — \
+`#root > div > div:first-child > div:last-child` is how you reach the avatar in \
+the mobile top bar. Anything the probe cannot find is named in a `warning` and \
+exits non-zero, so check every selector reported `found: true` before you draw \
+a conclusion from the numbers.
+
+Overlaps are the check you did not have to think of. Two elements sitting on top \
+of each other is the classic result of taking something out of the flex flow, \
+and it will not show up in a diff or a build. A pair reported here that was not \
+reported before your change is a regression.
+
+Measure BEFORE you edit as well as after. A single set of numbers tells you \
+where things are, not whether you moved something you did not intend to move. \
+The comparison is the point: every element you did not mean to touch should have \
+the same geometry in both runs, and any that shifted is a regression until you \
+can say why it was supposed to.
+
+Measure the running app, not a copy of it. Do NOT hand-write a static HTML \
+harness that imitates the component: you would be reconstructing it from the \
+same understanding that produced the change, so a mistake in the code gets \
+faithfully reproduced in the harness and the probe reports that all is well. \
+That is worse than not checking, because you will then say it was verified. If \
+you do need somewhere to put a throwaway file, use `{scratch}/` at the \
+repository root — it is never committed. Anything outside it WILL end up in the \
+pull request.
+
+If the probe cannot run — no browser in this sandbox, the dev server will not \
+start, or the page cannot be reached — say so in your summary and name exactly \
+what is visually unverified. Do not silently skip it and describe the change as \
+checked.
 
 Git — read this carefully, it is not what you are used to:
 - The branch `{branch}` has ALREADY been created for you and already exists on \
@@ -125,6 +195,69 @@ Finish with a summary for the user:
 Be honest about failure. A summary claiming success for work that does not run \
 is far worse than one saying you got stuck — the user will read the code either \
 way, and an inflated claim costs them the time they spent trusting it."""
+
+
+REVISION_NOTE = """This is a REVISION of an existing pull request (#{number}), not \
+a new piece of work. The branch already contains your earlier commits and the \
+pull request is already open — do not open another one, and do not start over.
+
+Read the review feedback below and address it, point by point. Do not make \
+unrelated changes while you are in here: a revision that also refactors \
+something else is much harder to re-review than the original.
+
+Your summary MUST account for every comment individually. List each one — quote \
+enough of it to be recognisable — and say exactly one of: what you changed for \
+it, or why you disagree and left it. An inline comment on a specific line counts \
+the same as a conversation comment; the small ones are the easiest to skim past \
+and the most annoying to have to ask for twice. Never write a blanket line like \
+"no comments remain unresolved" — the reviewer is reading your summary next to \
+their own comments and will check."""
+
+
+def _format_feedback(items: list[dict]) -> str:
+    """Render PR feedback as the reviewer wrote it, oldest first."""
+    if not items:
+        return ("No review comments were found on the pull request. Ask the user "
+                "what they want changed rather than guessing.")
+
+    lines = ["Review feedback to address:", ""]
+    for item in items:
+        where = ""
+        if item.get("path"):
+            where = f" on `{item['path']}`" + (f" line {item['line']}" if item.get("line") else "")
+        state = f" [{item['state']}]" if item.get("state") else ""
+        lines.append(f"--- {item['author']}{where}{state}")
+        # The hunk is what the comment is anchored to; without it an inline note
+        # like "this is wrong" is unresolvable.
+        if item.get("hunk"):
+            lines.append("```diff")
+            lines.append(item["hunk"][-1200:])
+            lines.append("```")
+        lines.append(item["body"][:4000])
+        lines.append("")
+    return "\n".join(lines)[:MAX_FEEDBACK_CHARS]
+
+
+SWEEP_UP_MESSAGE = "Work in progress (agent run ended)"
+
+
+def _pr_title(subjects: list[str], task: str) -> str:
+    """Title the PR the way the engineer described the work, not the way it was asked.
+
+    The task text is the orchestrator's restatement of a request — long, prefixed
+    with "Update the application so that...", and truncating it mid-word makes a
+    PR list unreadable. The first real commit subject is already a one-line
+    imperative description of the change, which is exactly what a title wants.
+    """
+    for subject in subjects:
+        if subject and subject != SWEEP_UP_MESSAGE:
+            return subject[:120]
+
+    # No commits, or only a sweep-up: fall back to the task, cut at a word.
+    first = (task or "").strip().splitlines()[0] if (task or "").strip() else ""
+    if len(first) <= 120:
+        return first or "Atlas change"
+    return first[:120].rsplit(" ", 1)[0].rstrip(" ,.;:-") + "…"
 
 
 def _coder_model() -> OpenAIResponsesModel:
@@ -187,7 +320,7 @@ def _tracer() -> ToolTracer:
 
 
 @tool
-async def delegate_coding(repo: str, task: str, context: str = "") -> dict:
+async def delegate_coding(repo: str, task: str, context: str = "", pr_number: int = 0) -> dict:
     """Hand a coding task to an engineer agent working in an isolated sandbox.
 
     Use this for anything that means changing code: implementing a feature,
@@ -195,15 +328,23 @@ async def delegate_coding(repo: str, task: str, context: str = "") -> dict:
     the repo, works on its own branch, commits as it goes, and opens a draft
     pull request. It cannot merge — you review and merge on GitHub yourself.
 
+    Set pr_number to revise an open pull request instead of starting fresh: the
+    agent checks out that PR's branch, reads the review comments on it, and
+    pushes fixes to the same branch, so the review thread is kept. Use this
+    whenever the user asks to change, fix or address feedback on an existing PR
+    — starting a new run instead would abandon their review.
+
     One task at a time; a second call waits for the first to finish. Give a
     self-contained instruction: the agent cannot see this conversation.
 
     Args:
         repo: Repository as "owner/name", e.g. "willwoodward/atlas".
         task: What to build or fix, stated fully. Include the acceptance
-            criteria — what "done" looks like.
+            criteria — what "done" looks like. When revising, say what the user
+            wants done about the feedback; the comments themselves are fetched.
         context: Background that helps: relevant files, constraints, prior
             decisions, how to run the tests.
+        pr_number: Open pull request to revise. Omit to start new work.
 
     Returns:
         The branch, the draft PR url, what the agent did, and what it could not
@@ -213,21 +354,53 @@ async def delegate_coding(repo: str, task: str, context: str = "") -> dict:
         return {"error": "Both a repository and a task description are required."}
 
     async with _slot:
-        try:
-            prepared = await workspace.prepare_repo(repo, task)
-        except workspace.WorkspaceError as exc:
-            return {"error": str(exc), "stage": "clone"}
+        revising = bool(pr_number)
+        pr: dict = {}
+        mode_note, feedback_block = "", ""
 
-        branch, path, base = prepared["branch"], prepared["path"], prepared["default_branch"]
-        _emit({"type": "coding_started", "repo": repo, "branch": branch, "task": task[:300]})
-        log.info("Coding on %s branch %s", repo, branch)
+        if revising:
+            # Everything that makes a PR unworkable — closed, merged, on a fork —
+            # is caught here, before a clone and a model run are spent on it.
+            try:
+                pr = await workspace.fetch_pr(repo, pr_number)
+                feedback = await workspace.fetch_pr_feedback(repo, pr["number"])
+                prepared = await workspace.resume_branch(repo, pr["branch"])
+            except workspace.WorkspaceError as exc:
+                return {"error": str(exc), "stage": "resume"}
+            base = pr["base"]
+            mode_note = REVISION_NOTE.format(number=pr["number"])
+            feedback_block = _format_feedback(feedback)
+        else:
+            try:
+                prepared = await workspace.prepare_repo(repo, task)
+            except workspace.WorkspaceError as exc:
+                return {"error": str(exc), "stage": "clone"}
+            base = prepared["default_branch"]
+
+        base_sha = prepared.get("base_sha", "")
+        branch, path = prepared["branch"], prepared["path"]
+        _emit({"type": "coding_started", "repo": repo, "branch": branch, "task": task[:300],
+               "pr_url": pr.get("url"), "pr_number": pr.get("number"),
+               "mode": "revision" if revising else "new"})
+        log.info("Coding on %s branch %s (revising=%s)", repo, branch, revising)
+
+        if revising:
+            await workspace.comment_on_pr(
+                repo, pr["number"],
+                f"Atlas is revising this pull request: {task[:500]}",
+            )
 
         sandbox = build_sandbox(working_dir=path)
         agent = Agent(
             model=_coder_model(),
             system_prompt=CODER_PROMPT.format(
                 repo=repo, branch=branch, path=path, task=task,
-                context=f"Context you were given:\n{context}" if context else "",
+                scratch=workspace.SCRATCH_DIR,
+                mode_note=mode_note,
+                context="\n\n".join(filter(None, [
+                    f"Context you were given:\n{context}" if context else "",
+                    feedback_block,
+                ])),
             ),
             tools=[*sandbox.get_tools(), _commit_tool(repo), ask_user],
             conversation_manager=SlidingWindowConversationManager(
@@ -261,7 +434,7 @@ async def delegate_coding(repo: str, task: str, context: str = "") -> dict:
         # Sweep up anything the agent changed but never committed — a timeout or
         # crash usually leaves real work sitting uncommitted in the tree.
         try:
-            final = await workspace.commit_and_push(repo, "Work in progress (agent run ended)")
+            final = await workspace.commit_and_push(repo, SWEEP_UP_MESSAGE)
             if final.get("committed"):
                 _emit({"type": "coding_commit", "sha": final.get("sha"),
                        "message": "uncommitted work swept up", "files": final.get("files_changed", 0),
@@ -275,19 +448,31 @@ async def delegate_coding(repo: str, task: str, context: str = "") -> dict:
         except workspace.WorkspaceError:
             pass
 
-        pr: dict = {}
         pr_error = None
-        try:
-            pr = await workspace.open_pull_request(
-                repo, branch,
-                title=task.strip().splitlines()[0][:120],
-                body=(f"{summary[:50000]}\n\n---\n*Opened by Atlas. "
-                      f"Draft — review and merge yourself.*"),
-                base=base,
+        if revising:
+            # The PR already exists and the commits are already on its branch.
+            # Report back in the thread, so the update is visible where the
+            # review is happening rather than only in the chat window.
+            # The draft state is left exactly as the user set it: marking a
+            # ready PR back to draft would override their decision.
+            await workspace.comment_on_pr(
+                repo, pr["number"],
+                f"**Atlas revision {'complete' if status == 'ok' else status}**\n\n"
+                f"{summary[:20000]}",
             )
-        except workspace.WorkspaceError as exc:
-            pr_error = str(exc)
-            log.warning("Could not open PR for %s: %s", branch, pr_error)
+        else:
+            try:
+                subjects = await workspace.commit_subjects(repo, base_sha)
+                pr = await workspace.open_pull_request(
+                    repo, branch,
+                    title=_pr_title(subjects, task),
+                    body=(f"{summary[:50000]}\n\n---\n*Opened by Atlas. "
+                          f"Draft — review and merge yourself.*"),
+                    base=base,
+                )
+            except workspace.WorkspaceError as exc:
+                pr_error = str(exc)
+                log.warning("Could not open PR for %s: %s", branch, pr_error)
 
         _emit({"type": "coding_done", "status": status, "branch": branch,
                "pr_url": pr.get("url"), "summary": summary[:MAX_SUMMARY_CHARS]})
@@ -296,8 +481,9 @@ async def delegate_coding(repo: str, task: str, context: str = "") -> dict:
             "repo": repo,
             "branch": branch,
             "status": status,
+            "mode": "revision" if revising else "new",
             "pull_request": pr.get("url") or f"not opened: {pr_error}",
-            "draft": True,
+            "draft": pr.get("draft", True),
             "changed_files": diff,
             "summary": summary[:MAX_SUMMARY_CHARS],
             "next_step": (
@@ -310,6 +496,9 @@ async def delegate_coding(repo: str, task: str, context: str = "") -> dict:
                 "say plainly what failed and what was left half-done (the work is "
                 "still committed on the branch). If the agent reported that it could "
                 "not verify its work, say so in your own words — the user needs to "
-                "know a diff is unchecked before they read it."
+                "know a diff is unchecked before they read it.\n\n"
+                "If mode is 'revision', the changes went onto the existing pull "
+                "request and a note was left in its thread. Its draft/ready state "
+                "was not changed — do not tell the user it is ready to merge."
             ),
         }

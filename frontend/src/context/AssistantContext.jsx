@@ -51,7 +51,11 @@ export function reduceMessage(msg, ev) {
         ? { ...msg, question: { ...msg.question, status: 'timeout' } }
         : msg
     case 'coding_started':
+      // A revision already has its PR, so the link is available from the start
+      // rather than only once the run finishes.
       return { ...msg, coding: { repo: ev.repo, branch: ev.branch, task: ev.task,
+                                 mode: ev.mode || 'new', prNumber: ev.pr_number,
+                                 prUrl: ev.pr_url,
                                  status: 'running', activity: [], commits: [] } }
     case 'coding_activity':
       return msg.coding
@@ -75,7 +79,8 @@ export function reduceMessage(msg, ev) {
       // calls are how you work out why a diff looks the way it does, and that
       // question is asked after the run, not during it.
       return msg.coding
-        ? { ...msg, coding: { ...msg.coding, status: ev.status, prUrl: ev.pr_url,
+        ? { ...msg, coding: { ...msg.coding, status: ev.status,
+                              prUrl: ev.pr_url || msg.coding.prUrl,
                               summary: ev.summary } }
         : msg
     case 'research_plan':

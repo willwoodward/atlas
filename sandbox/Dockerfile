@@ -30,6 +30,33 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Layout checking. Chromium is on disk but never runs unless the agent invokes
+# `render-probe`, so a backend task costs nothing at runtime — this is disk, not
+# RAM. Measured cost: the image goes from 977MB to 2.47GB (+1.49GB — 656MB of
+# that is the browser itself, the rest is the GTK/font stack pulled in by
+# `--with-deps`), plus roughly 520MB of RSS while a probe runs, against a 1g
+# mem_limit on a 2GB host.
+#
+# Default OFF. The probe is only trustworthy when it measures the real app,
+# which needs VITE_MOCK_AUTH (see docs/INFRA.md); pointed at a harness the agent
+# wrote itself it can report "layout verified" about a fiction, which is worse
+# than no check. Build with --build-arg INSTALL_BROWSER=1 to enable it.
+ARG INSTALL_BROWSER=0
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+
+COPY render-probe.mjs /opt/probe/render-probe.mjs
+RUN set -e; \
+    if [ "$INSTALL_BROWSER" = "1" ]; then \
+      cd /opt/probe \
+      && npm init -y > /dev/null \
+      && npm install --no-audit --no-fund --silent 'playwright@^1.49' \
+      && npx playwright install --with-deps chromium \
+      && chmod -R a+rX /opt/playwright-browsers; \
+    fi; \
+    chmod +x /opt/probe/render-probe.mjs; \
+    ln -sf /opt/probe/render-probe.mjs /usr/local/bin/render-probe; \
+    rm -rf /var/lib/apt/lists/*
+
 # Unprivileged user. The agent never gets root in here, so a runaway build
 # cannot reconfigure sshd or install a persistent backdoor into the image.
 #
