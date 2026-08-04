@@ -69,6 +69,7 @@ export default function MobileLayout() {
       {/* Top bar */}
       <div style={{
         flex: 'none', display: 'flex', alignItems: 'center', gap: 12,
+        position: 'relative',
         padding: '12px 20px 10px',
         background: 'var(--surface-2)', borderBottom: '1px solid var(--bd)',
         paddingTop: 'max(12px, env(safe-area-inset-top))',
@@ -85,20 +86,11 @@ export default function MobileLayout() {
           </svg>
         </button>
 
-        {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 8, background: '#c15f3c', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--surface-2)' }} />
-          </div>
-          <span style={{ fontFamily: "'Newsreader', serif", fontSize: 17, fontWeight: 600, color: 'var(--ink)' }}>Atlas</span>
-        </div>
-
-        {/* Current page label */}
-        <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: 'var(--mid)', textAlign: 'center' }}>{activeLabel}</span>
+        <span style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', fontSize: 13, fontWeight: 500, color: 'var(--mid)', whiteSpace: 'nowrap' }}>{activeLabel}</span>
 
         {/* Avatar → accounts */}
         <div
-          style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,#c88a5f,#9a6d84)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 13, flex: 'none', cursor: 'pointer' }}
+          style={{ marginLeft: 'auto', width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,#c88a5f,#9a6d84)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 13, flex: 'none', cursor: 'pointer' }}
           onClick={() => navigate('accounts')}
         >
           {initial}
