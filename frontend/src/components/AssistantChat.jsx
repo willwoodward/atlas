@@ -211,7 +211,8 @@ function CodingPanel({ coding }) {
   const [open, setOpen] = useState(false)
   if (!coding) return null
 
-  const { branch, status, commits = [], activity, prUrl, summary } = coding
+  const { branch, status, commits = [], activity, prUrl, prNumber, summary, mode } = coding
+  const revising = mode === 'revision'
   const saved = commits.filter(c => !c.failed)
   const failedCommits = commits.filter(c => c.failed)
   const running = status === 'running'
@@ -231,6 +232,12 @@ function CodingPanel({ coding }) {
         <span style={{ fontSize: 13, fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {branch}
         </span>
+        {revising && (
+          <span style={{ fontSize: 10.5, color: 'var(--muted)', border: '1px solid var(--bd-xl)',
+                         borderRadius: 5, padding: '1px 5px', flex: 'none' }}>
+            revising{prNumber ? ` #${prNumber}` : ''}
+          </span>
+        )}
         <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
           {saved.length} commit{saved.length === 1 ? '' : 's'}
           {failedCommits.length > 0 ? ` · ${failedCommits.length} failed` : ''}
@@ -260,7 +267,9 @@ function CodingPanel({ coding }) {
           )}
           {!running && summary && (
             <div style={{ fontSize: 12.5, color: 'var(--mid)', lineHeight: 1.5, marginTop: 4, whiteSpace: 'pre-wrap' }}>
-              {summary.slice(0, 1200)}
+              {/* Marked when cut, so a capped summary is not mistaken for an
+                  agent that stopped mid-sentence. The full text is on the PR. */}
+              {summary.length > 1200 ? summary.slice(0, 1200).trimEnd() + '…' : summary}
             </div>
           )}
         </div>
@@ -270,7 +279,9 @@ function CodingPanel({ coding }) {
         <a href={prUrl} target="_blank" rel="noopener noreferrer"
            style={{ display: 'block', padding: '8px 11px', borderTop: '1px solid var(--bd-xl)', fontSize: 12.5,
                     color: 'var(--ink)', textDecoration: 'none', background: 'var(--surface-2)' }}>
-          Review the draft pull request →
+          {revising
+            ? `Back to pull request${prNumber ? ` #${prNumber}` : ''} →`
+            : 'Review the draft pull request →'}
         </a>
       )}
     </div>

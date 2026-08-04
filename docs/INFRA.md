@@ -88,8 +88,14 @@ Fine-grained, restricted to the repos the agent may touch:
 | Permission | Setting | Why |
 |---|---|---|
 | Contents | Read and write | clone, push branches |
-| Pull requests | Read and write | open PRs |
+| Pull requests | Read and write | open PRs, read review comments, post progress notes |
 | **Workflows** | **Do not grant** | a merged agent-authored workflow can read repo secrets |
+
+A PR revision run posts two comments in the PR thread. Those go through the
+*issue* comments endpoint, which for a pull request is covered by Pull requests:
+write — no Issues permission is needed. Commenting is best effort: a 403 there
+logs a warning and never fails the run, so the symptom of a wrong scope is
+silence in the thread, not a broken run.
 
 Withholding Workflows makes a workflow-modifying push *fail at the API* rather
 than relying on the agent to behave. Prefer removing a capability to gating it.
@@ -164,8 +170,9 @@ PAT itself *is* capable of merging — merging a PR needs only `contents: write`
 so the guarantee cannot come from token scope:
 
 1. `workspace.py` has no merge call, no force-push, no branch delete, no rebase.
-2. `PROTECTED_BRANCHES` is checked in `prepare_repo`, `commit_and_push` and
-   `open_pull_request` — three separate points, all case-insensitive.
+2. `PROTECTED_BRANCHES` is checked in `prepare_repo`, `resume_branch`,
+   `commit_and_push` and `open_pull_request` — four separate points, all
+   case-insensitive.
 3. PRs open as **drafts**, which GitHub refuses to merge until marked ready.
 4. A **branch protection ruleset on the remote** (below) — the only layer that
    still holds if the agent is compromised or the code is changed.
@@ -180,12 +187,17 @@ Repo → **Settings** → **Rules** → **Rulesets** → **New branch ruleset**
 - Name: `protect-main`, Enforcement status: **Active**
 - Target branches: **Include default branch**
 - Rules to enable:
-  - **Require a pull request before merging** → Required approvals: **1**
+  - **Require a pull request before merging** → Required approvals: **0**
   - **Block force pushes**
   - **Restrict deletions**
 
+Zero approvals, not one. The PAT acts as *you*, so the agent's pull requests are
+authored by you — and GitHub does not let you approve your own pull request. Set
+it to 1 and every agent PR becomes unmergeable. The protection that matters here
+is "no direct push to main", which 0 approvals still gives you in full.
+
 With this on, a direct push to `main` is rejected by the server regardless of
-what any client does, and merging requires your approving review.
+what any client does.
 
 Verify:
 
@@ -217,6 +229,39 @@ git push origin HEAD:main --dry-run
 - **Set `mem_limit` per service.** Without it any container can consume all host
   RAM and the OOM killer may pick the wrong victim.
 
+### Layout checking in the sandbox
+
+The sandbox image carries Chromium (via Playwright) and a `render-probe` CLI so
+the coding agent can check *where things landed* rather than inferring it from a
+diff. It reports geometry as JSON — positions, sizes, overlaps, horizontal
+overflow — so a text-only model can assert against numbers instead of looking at
+a picture. This exists because a build passing, tests passing and the JSX parsing
+all said "fine" about a change that moved an avatar to the wrong side of a header.
+
+- **Default is `INSTALL_BROWSER=0` — off.** Enable with
+  `--build-arg INSTALL_BROWSER=1`. With it off, `render-probe` exits 3 with an
+  explanation instead of a module-resolution stack trace.
+- Chromium is **on disk, never resident**. It only starts when the agent invokes
+  `render-probe`, so a backend task costs nothing at runtime. The prompt gates it
+  to changes in how a page looks.
+- Measured cost: the sandbox image goes **977MB → 2.47GB** (+1.49GB; 656MB is
+  the browser, the rest is the GTK/font stack `playwright install --with-deps`
+  pulls in), plus ~520MB peak RSS during a probe run against `mem_limit: 1g` on
+  a 2GB host. It fits, but it leans on swap.
+- **Selectors must be structural.** The app styles with inline objects, so there
+  are almost no classes to target. What works:
+  `#root > div > div:first-child > div:last-child` for the mobile avatar. The
+  probe exits 1 and names anything it could not find, so a wrong selector fails
+  loudly rather than silently measuring nothing.
+- **Only turn it on once the probe can measure the real app.** Run the frontend
+  dev server in the sandbox with `VITE_MOCK_AUTH=1` and point the probe at it
+  (`--url http://localhost:5173`). Against a harness the agent wrote itself the
+  probe measures a reconstruction of the code it is already misunderstanding,
+  and reports "layout verified" about a fiction — worse than no check at all.
+- Harnesses go in `.atlas-scratch/` inside the clone. `commit_and_push` excludes
+  that path from both the change check and `git add -A`, so a throwaway rig can
+  never end up in the pull request. Covered by `TestScratchDirectory`.
+
 ---
 
 ## 7. CI/CD
@@ -233,7 +278,28 @@ silently keeps running old code.
 
 ---
 
-## 8. Backup
+## 8. Tests
+
+Run against the dev stack. The images ship runtime deps only, so the test deps
+are installed into the running container — they do not survive a recreate.
+
+```bash
+cd frontend && npm install && npm test          # vitest — reduceMessage reducer
+
+C=docker compose -f docker-compose.dev.yml
+$C exec api   sh -c "pip install -q -r requirements-dev.txt && cd /app && python -m pytest -q"
+$C exec agent sh -c "pip install -q -r requirements-dev.txt && cd /app && python -m pytest -q"
+```
+
+Currently 34 frontend / 21 api / 88 agent. The agent suite covers the workspace
+guards (protected branches, ref validation, repo-name validation, PAT redaction,
+scratch-dir exclusion), the PR revision path, and the question/answer plumbing;
+the api suite covers the durable-run state machine and the auth boundary between
+the session JWT and the MCP key.
+
+---
+
+## 9. Backup
 
 The only irreplaceable state is SQLite in the `sqlite_data` volume.
 

@@ -155,6 +155,27 @@ describe('coding lifecycle', () => {
     expect(m.coding).toMatchObject({ branch: 'atlas/add-tests', status: 'running', activity: [], commits: [] })
   })
 
+  it('shows a revision as such, with its PR known from the start', () => {
+    // A revision's PR already exists, so the link is available immediately —
+    // unlike new work, where it only appears once the run finishes.
+    const m = fold([{ ...start, mode: 'revision', pr_number: 7,
+                      pr_url: 'https://github.com/willwoodward/atlas/pull/7' }])
+    expect(m.coding).toMatchObject({ mode: 'revision', prNumber: 7 })
+    expect(m.coding.prUrl).toBe('https://github.com/willwoodward/atlas/pull/7')
+  })
+
+  it('defaults to new work when no mode is sent', () => {
+    expect(fold([start]).coding.mode).toBe('new')
+  })
+
+  it('does not lose the PR link if the done event omits it', () => {
+    const m = fold([
+      { ...start, mode: 'revision', pr_number: 7, pr_url: 'https://example.com/pr/7' },
+      { type: 'coding_done', status: 'ok', branch: 'atlas/add-tests', summary: 'done' },
+    ])
+    expect(m.coding.prUrl).toBe('https://example.com/pr/7')
+  })
+
   it('ignores coding events with no run started', () => {
     const m = fold([{ type: 'coding_activity', tool: 'sandbox_bash', status: 'success' }])
     expect(m.coding).toBeUndefined()
@@ -184,7 +205,10 @@ describe('coding lifecycle', () => {
     expect(m.coding.commits).toHaveLength(40)
   })
 
-  it('keeps the PR url and summary when done, and drops activity', () => {
+  it('keeps the PR url, summary and activity when done', () => {
+    // Unlike research_done, coding_done deliberately keeps the activity log:
+    // a finished PR is reviewed after the fact, and "what did it actually run"
+    // is the first question asked of a diff you did not write.
     const m = fold([
       start,
       { type: 'coding_activity', tool: 'sandbox_bash', status: 'success' },
@@ -193,7 +217,7 @@ describe('coding lifecycle', () => {
     ])
     expect(m.coding.status).toBe('ok')
     expect(m.coding.prUrl).toBe('https://github.com/willwoodward/atlas/pull/7')
-    expect(m.coding.activity).toBeUndefined()
+    expect(m.coding.activity).toHaveLength(1)
   })
 
   it('preserves commits through a failed run — the work is still on the branch', () => {

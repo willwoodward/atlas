@@ -1,9 +1,23 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react'
+
+import { installMockBackend } from '../dev/mockBackend.js'
 
 const Ctx = createContext(null)
 const JWT_KEY = 'atlas:jwt'
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
+
+// Renders the dashboard as a signed-in user without a backend, so a browser can
+// reach the actual pages. `App.jsx` gates every page behind `isAuthenticated`,
+// which is unreachable from the agent's sandbox — it has no route to the API.
+//
+// `import.meta.env.DEV` is replaced with the literal `false` in a production
+// build, so this constant folds to `false` and every branch below it is removed
+// by the bundler. The flag cannot be switched on in the deployed app, whatever
+// the environment says.
+const MOCK = import.meta.env.DEV && import.meta.env.VITE_MOCK_AUTH === '1'
+
+if (MOCK) installMockBackend()
 
 function decodeJwt(token) {
   try {
@@ -29,7 +43,30 @@ function loadStored() {
   }
 }
 
+function MockAuthProvider({ children }) {
+  // Fixed, not random: the avatar renders the first letter of the name, so a
+  // varying name would change the element's width between runs and every
+  // before/after comparison would show a phantom regression.
+  const value = useMemo(() => ({
+    token: 'mock-token',
+    user: { email: 'mock@atlas.local', name: 'Mock User' },
+    isAuthenticated: true,
+    loading: false,
+    error: null,
+    loginWithGoogle: () => {},
+    logout: () => {},
+  }), [])
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+}
+
 export function AuthProvider({ children }) {
+  return MOCK
+    ? <MockAuthProvider>{children}</MockAuthProvider>
+    : <RealAuthProvider>{children}</RealAuthProvider>
+}
+
+function RealAuthProvider({ children }) {
   const [auth, setAuth] = useState(loadStored)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)

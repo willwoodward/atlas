@@ -299,14 +299,34 @@ async def list_runs(limit: int = 10, user: dict = Depends(get_current_user)):
 
 @router.post("/runs/{run_id}/cancel")
 async def cancel_run(run_id: str, user: dict = Depends(get_current_user)):
+    """Stop a run and record it as cancelled before returning.
+
+    task.cancel() only *requests* cancellation — the CancelledError is raised the
+    next time the task reaches an await, so the driver's own status write lands
+    some time after this endpoint has already answered. Writing here as well
+    makes the returned status true at the moment it is returned, and means a run
+    still ends up cancelled even if the task never gets to unwind.
+
+    The write is guarded on a live status so cancelling a run that already
+    finished reports what actually happened instead of rewriting its history.
+    """
     task = _tasks.get(run_id)
     if task and not task.done():
         task.cancel()
-    else:
-        db = await _connect()
-        await _finish(db, run_id, "cancelled")
-        await db.close()
-    return {"ok": True, "status": "cancelled"}
+
+    db = await _connect()
+    await db.execute(
+        "UPDATE agent_runs SET status='cancelled', updated_at=? "
+        "WHERE id=? AND status IN ('running','awaiting_input')",
+        (_now(), run_id),
+    )
+    await db.commit()
+    async with db.execute("SELECT status FROM agent_runs WHERE id=?", (run_id,)) as c:
+        row = await c.fetchone()
+    await db.close()
+    if not row:
+        raise HTTPException(404, "No such run")
+    return {"ok": True, "status": row["status"]}
 
 
 @router.get("/health")
