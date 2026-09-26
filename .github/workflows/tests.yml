@@ -1,0 +1,80 @@
+name: Tests
+
+# Runs on pull requests so the branch ruleset can require it, and on main so a
+# broken merge is visible immediately rather than at the next PR.
+#
+# This exists because the coding agent reports its own results. "I ran the tests
+# and they pass" is a claim; a check run is evidence. Everything the agent opens
+# gets graded by something it cannot talk its way around.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push supersedes the run in progress for the same branch.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+      # The build is a test in its own right here: vitest runs the reducers, but
+      # only a build type-checks the JSX across every file the agent touched.
+      - run: npm run build
+        working-directory: frontend
+        env:
+          VITE_API_URL: https://example.invalid
+      # The mock-auth provider must never reach production. It is guarded by
+      # `import.meta.env.DEV`, which the bundler folds to false — but that is a
+      # property of the build, so it gets checked by the build.
+      - name: Mock auth is stripped from the bundle
+        working-directory: frontend
+        run: |
+          if grep -rq "mock@atlas.local" dist/; then
+            echo "::error::VITE_MOCK_AUTH code reached the production bundle"
+            exit 1
+          fi
+
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+        working-directory: backend
+      - run: python -m pytest
+        working-directory: backend
+
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: agent/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+        working-directory: agent
+      # These are the guards that keep the agent off main — protected branches,
+      # ref validation, PAT redaction, the absence of a merge call. They protect
+      # properties that are invisible in normal operation, so a run that skips
+      # them silently is the whole problem.
+      - run: python -m pytest
+        working-directory: agent
