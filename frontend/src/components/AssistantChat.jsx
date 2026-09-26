@@ -363,7 +363,7 @@ function ResearchPanel({ research }) {
 // Both states share this measure so the column doesn't jump width on first send.
 const COLUMN = 720
 
-export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 }) {
+export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240, showNewChat = true }) {
   // Thread state lives in AssistantContext so it survives navigating away and back.
   const { messages, busy, error, send, stop, clear, answer } = useAssistant()
   // The mobile shell renders the assistant with no padding (it was built for the
@@ -454,14 +454,16 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240 
     // The desktop and tablet shells provide the page-level scroll container;
     // mobile keeps it here because its shell deliberately hides page overflow.
     <div ref={scrollRef} style={{ flex: 1, minWidth: 0, minHeight: '100%', width: '100%', maxWidth: COLUMN, margin: '0 auto', display: 'flex', flexDirection: 'column', overflowY: isMobile ? 'auto' : 'visible', overflowX: 'hidden' }}>
-      {/* Threads now persist across navigation and reloads, so there has to be a way out. */}
-      <div style={{ flex: 'none', display: 'flex', justifyContent: 'flex-end', padding: `6px ${gutter}px 0` }}>
+      {/* Threads persist across navigation and reloads, so there has to be a way
+          out. Desktop and mobile get it from the header "+ New chat"; the tablet
+          deck has no header, so it keeps this one. */}
+      {showNewChat && <div style={{ flex: 'none', display: 'flex', justifyContent: 'flex-end', padding: `6px ${gutter}px 0` }}>
         <button onClick={clear}
           style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 8, border: '1px solid var(--bd)', background: 'transparent', color: 'var(--muted)', fontSize: 12, fontFamily: 'inherit', cursor: 'pointer' }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           New chat
         </button>
-      </div>
+      </div>}
       <div style={{ padding: `8px ${gutter}px 20px`, display: 'flex', flexDirection: 'column', gap: 20 }}>
         {messages.map((m, i) => m.role === 'user' ? (
           <div key={i} style={{ alignSelf: 'flex-end', maxWidth: '80%', padding: '10px 15px', borderRadius: 14, background: 'var(--surface)', border: '1px solid var(--bd)', fontSize: 14, lineHeight: 1.55, whiteSpace: 'pre-wrap', color: 'var(--ink)' }}>

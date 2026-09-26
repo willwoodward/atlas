@@ -9,6 +9,7 @@ import { IntegrationsProvider }  from './context/IntegrationsContext.jsx'
 import { FinancesProvider }      from './context/FinancesContext.jsx'
 import { EmploymentProvider }    from './context/EmploymentContext.jsx'
 import { FitnessProvider }       from './context/FitnessContext.jsx'
+import { QuickAddProvider }      from './context/QuickAddContext.jsx'
 import { LocalCalendarProvider } from './context/LocalCalendarContext.jsx'
 import { NotesProvider }         from './context/NotesContext.jsx'
 import { GitHubProvider }        from './context/GitHubContext.jsx'
@@ -77,8 +78,10 @@ function Dashboard() {
                   <GitHubProvider>
                     <NotesProvider>
                      <AssistantProvider>
+                      <QuickAddProvider>
                       <SyncManager />
                       {layout === 'desktop' ? <DesktopLayout /> : layout === 'tablet' ? <TabletLayout /> : <MobileLayout />}
+                      </QuickAddProvider>
                      </AssistantProvider>
                     </NotesProvider>
                   </GitHubProvider>

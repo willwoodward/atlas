@@ -8,6 +8,7 @@ export default function AssistantPage() {
       orbSize={isMobile ? 130 : 200}
       ring1={isMobile ? 200 : 300}
       ring2={isMobile ? 160 : 240}
+      showNewChat={false}
     />
   )
 }

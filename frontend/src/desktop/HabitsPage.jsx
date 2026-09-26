@@ -2,6 +2,7 @@ import { useState } from 'react'
 import CheckMark from '../components/CheckMark.jsx'
 import { useHabits, HABIT_PERIODS } from '../context/HabitsContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
+import { useQuickAdd } from '../context/QuickAddContext.jsx'
 
 const DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 
@@ -55,6 +56,7 @@ export default function HabitsPage() {
   const { habits, weekDates, last30, today, addHabit, removeHabit, toggleCompletion } = useHabits()
   const [open, setOpen] = useState({})
   const [adding, setAdding] = useState(false)
+  useQuickAdd('Add habit', () => setAdding(true))
 
   const todayIdx = weekDates.indexOf(today)
   const visibleCount = todayIdx === -1 ? 7 : todayIdx + 1
@@ -66,10 +68,6 @@ export default function HabitsPage() {
           <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>Habits</h1>
           <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>This week · consistency builds the compound.</p>
         </div>
-        <button onClick={() => setAdding(true)} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 15px', borderRadius: 11, border: 'none', background: '#c15f3c', color: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Add habit
-        </button>
       </div>
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: isMobile ? '8px 16px' : '8px 24px', overflowX: 'auto' }}>
@@ -96,7 +94,7 @@ export default function HabitsPage() {
 
         {habits.length === 0 && !adding && (
           <div style={{ padding: '36px 0', textAlign: 'center', fontSize: 13, color: 'var(--faint)' }}>
-            No habits yet — click <strong style={{ color: 'var(--mid)' }}>Add habit</strong> to start.
+            No habits yet — use <strong style={{ color: 'var(--mid)' }}>+ Add habit</strong> at the top to start.
           </div>
         )}
 

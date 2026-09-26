@@ -18,7 +18,7 @@ from strands.models.openai_responses import OpenAIResponsesModel
 from strands.tools.mcp import MCPClient
 from strands_tools import http_request, tavily
 
-from coding import delegate_coding
+from coding import CODING_ENABLED, delegate_coding
 from progress import set_progress_queue
 from questions import ask_user, set_run_id
 from research import delegate_research
@@ -28,11 +28,56 @@ log = logging.getLogger("atlas.agent")
 
 MCP_URL = os.getenv("ATLAS_MCP_URL", "http://api:8000/mcp/sse")
 MCP_KEY = os.getenv("ATLAS_MCP_KEY", "")
-MODEL_ID = os.getenv("AGENT_MODEL_ID", "gpt-5.6-luna")
+MODEL_ID = os.getenv("AGENT_MODEL_ID", "gpt-6-luna")
+
+# With coding off, the GitHub PAT has no legitimate use in this process, so it is
+# removed rather than merely unused: a credential that is not in the environment
+# cannot be read by any tool, including ones added later.
+if not CODING_ENABLED:
+    os.environ.pop("GITHUB_PAT", None)
 # Covers reasoning tokens too, so this needs more headroom than a visible-reply budget.
 MAX_TOKENS = int(os.getenv("AGENT_MAX_TOKENS", "8192"))
 TIMEZONE = os.getenv("TZ", "Europe/London")
 TOOL_DETAIL_CHARS = 2000  # cap on tool args/results echoed to the UI
+
+CODING_SECTION = """Coding: for anything that means changing code in a repository, use \
+delegate_coding. It clones the repo into an isolated sandbox, works on its own \
+branch, commits as it goes and opens a DRAFT pull request. Give it the full task \
+including what "done" looks like — it cannot see this conversation. One task \
+runs at a time.
+
+Two things to be straight with the user about. First, it cannot merge, and it \
+cannot push to main: they review and merge the PR on GitHub themselves. Always \
+give them the PR link. Second, if the result comes back with a status that is \
+not "ok", say so plainly and say what was left unfinished — the work is still \
+committed on the branch, but do not describe a timed-out run as a success.
+
+Revising a pull request: when the user asks to change, fix or address feedback \
+on a PR that already exists, call delegate_coding with pr_number set. The agent \
+then checks out that PR's branch, reads the review comments itself and pushes to \
+the same branch, keeping the review thread intact. Do not start a fresh run for \
+this — it would open a second pull request and abandon their review. If you do \
+not know the number, ask for it rather than guessing.
+
+Ask before delegating if the task is ambiguous in a way that would send the \
+engineer down the wrong path — which repo, which behaviour is wanted, what \
+counts as done. A misdirected coding run costs far more than a question.
+
+"""
+
+CODING_DISABLED_SECTION = """Code and repositories: you cannot change code, \
+repositories or pull requests — that ability is switched off on this server. If \
+asked, say so plainly and suggest they do it themselves. Do not try to get there \
+another way, such as calling a code-hosting API with http_request.
+
+"""
+
+def local_tools() -> list:
+    """Tools the orchestrator gets beyond the MCP dashboard tools. The coding
+    tool is only included when coding is switched on."""
+    return [delegate_research, ask_user, tavily.tavily_search, http_request.http_request,
+            *([delegate_coding] if CODING_ENABLED else [])]
+
 
 SYSTEM_PROMPT = """You are Atlas, {name}'s personal assistant inside their own \
 life dashboard. Today is {today}.
@@ -81,30 +126,7 @@ When research produces a plan the user will act on, offer to turn it into todos 
 and calendar entries — and where a step has a real deadline, put it in the \
 calendar rather than leaving it as an undated task.
 
-Coding: for anything that means changing code in a repository, use \
-delegate_coding. It clones the repo into an isolated sandbox, works on its own \
-branch, commits as it goes and opens a DRAFT pull request. Give it the full task \
-including what "done" looks like — it cannot see this conversation. One task \
-runs at a time.
-
-Two things to be straight with the user about. First, it cannot merge, and it \
-cannot push to main: they review and merge the PR on GitHub themselves. Always \
-give them the PR link. Second, if the result comes back with a status that is \
-not "ok", say so plainly and say what was left unfinished — the work is still \
-committed on the branch, but do not describe a timed-out run as a success.
-
-Revising a pull request: when the user asks to change, fix or address feedback \
-on a PR that already exists, call delegate_coding with pr_number set. The agent \
-then checks out that PR's branch, reads the review comments itself and pushes to \
-the same branch, keeping the review thread intact. Do not start a fresh run for \
-this — it would open a second pull request and abandon their review. If you do \
-not know the number, ask for it rather than guessing.
-
-Ask before delegating if the task is ambiguous in a way that would send the \
-engineer down the wrong path — which repo, which behaviour is wanted, what \
-counts as done. A misdirected coding run costs far more than a question.
-
-Calendar: you can create, reschedule and delete events in their real Google \
+{coding}Calendar: you can create, reschedule and delete events in their real Google \
 Calendar. Times are local decimal hours (14.5 = 2:30pm) and need the event's \
 date. Before scheduling anything, check what is already on that day so you do \
 not double-book them. To change or remove an event, first list events to get \
@@ -159,7 +181,10 @@ async def stream_reply(messages: list[dict], user_name: str, run_id: str | None 
     prompt, prior = history[-1]["content"], history[:-1]
 
     today = datetime.now(ZoneInfo(TIMEZONE)).strftime("%A %-d %B %Y")
-    system_prompt = SYSTEM_PROMPT.format(name=user_name or "the user", today=today)
+    system_prompt = SYSTEM_PROMPT.format(
+        name=user_name or "the user", today=today,
+        coding=CODING_SECTION if CODING_ENABLED else CODING_DISABLED_SECTION,
+    )
 
     client = _mcp_client()
     try:
@@ -187,8 +212,7 @@ async def stream_reply(messages: list[dict], user_name: str, run_id: str | None 
             system_prompt=system_prompt,
             # Dashboard tools over MCP, plus web access and the ability to
             # delegate to a research team it composes itself.
-            tools=[*tools, delegate_research, delegate_coding, ask_user,
-                   tavily.tavily_search, http_request.http_request],
+            tools=[*tools, *local_tools()],
             messages=prior,
             hooks=[ToolTracer(
                 emit=queue.put_nowait,

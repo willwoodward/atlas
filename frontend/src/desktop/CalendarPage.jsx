@@ -3,6 +3,7 @@ import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import { useLocalCalendar } from '../context/LocalCalendarContext.jsx'
 import { getWeekRange, localDateStr } from '../integrations/googleCalendar.js'
 import { useIsMobile } from '../hooks/useIsMobile.js'
+import { useQuickAdd } from '../context/QuickAddContext.jsx'
 
 const HOUR_H = 48
 const DAY_START = 0
@@ -156,6 +157,7 @@ export default function CalendarPage() {
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [addDraft, setAddDraft] = useState(null)
+  useQuickAdd('Add event', () => { setAddDraft(null); setShowAddModal(true) })
   const [ghost, setGhost] = useState(null)
   const [syncStatus, setSyncStatus] = useState(null)
   const dragRef = useRef(null)
@@ -284,11 +286,6 @@ export default function CalendarPage() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
           </div>
-
-          <button onClick={() => { setAddDraft(null); setShowAddModal(true) }} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 14px', borderRadius: 9, border: 'none', background: '#c15f3c', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(193,95,60,.28)' }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            {isMobile ? 'Add' : 'Add event'}
-          </button>
 
           {!isMobile && (
             <div style={{ display: 'flex', gap: 6, padding: 4, background: 'var(--surface-2)', border: '1px solid var(--bd)', borderRadius: 11 }}>

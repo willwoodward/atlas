@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useFitness } from '../context/FitnessContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
+import { useQuickAdd } from '../context/QuickAddContext.jsx'
 
 // Validated with the dataviz palette checker against the light (#fffdf9) and
 // dark (#22201a) surfaces — the same steps as the compensation chart. The
@@ -478,6 +479,7 @@ function GymCard() {
   const [addingTo, setAddingTo] = useState(null)
   const [newSection, setNewSection] = useState(null)
   const [renaming, setRenaming] = useState(null)
+  useQuickAdd('Add day', () => setNewSection(''))
 
   const nextColor = SECTION_COLORS[sections.length % SECTION_COLORS.length]
 
@@ -491,9 +493,6 @@ function GymCard() {
     <div style={{ ...card, padding: isMobile ? '18px 16px' : '20px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
         <h2 style={h2}>Lifts</h2>
-        {sections.length > 0 && newSection === null && (
-          <button onClick={() => setNewSection('')} style={linkBtn}>+ Day</button>
-        )}
       </div>
       <div style={{ fontSize: 11.5, color: 'var(--faint)', marginBottom: 8, lineHeight: 1.5 }}>
         Tap an exercise to update what you're on. A change to the weight or sets is

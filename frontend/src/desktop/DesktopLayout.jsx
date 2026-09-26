@@ -3,6 +3,7 @@ import { dateLabel } from '../data.js'
 import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import { useTheme } from '../context/ThemeContext.jsx'
 import { useUser } from '../context/UserContext.jsx'
+import { useQuickAddAction } from '../context/QuickAddContext.jsx'
 import HomePage      from './HomePage.jsx'
 import CalendarPage  from './CalendarPage.jsx'
 import HabitsPage    from './HabitsPage.jsx'
@@ -183,6 +184,7 @@ export default function DesktopLayout() {
   const [showAccountModal, setShowAccountModal] = useState(false)
   const [userHover, setUserHover] = useState(false)
   const { profile, initial } = useUser()
+  const quickAdd = useQuickAddAction(active, setActive)
 
   const pages = {
     home:      <HomePage />,
@@ -264,10 +266,13 @@ export default function DesktopLayout() {
             <span style={{ fontSize: 13 }}>Search everything…</span>
             <span style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 6px', borderRadius: 5, background: 'var(--surface-3)', color: 'var(--muted)', fontWeight: 600 }}>⌘K</span>
           </div>
-          <button style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 15px', borderRadius: 11, border: 'none', background: '#c15f3c', color: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, lineHeight: 1, cursor: 'pointer', boxShadow: '0 2px 8px rgba(193,95,60,.32)' }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Quick add
-          </button>
+          {/* The page's primary action. Hidden where a page has none (Accounts). */}
+          {quickAdd && (
+            <button onClick={quickAdd.run} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 15px', borderRadius: 11, border: 'none', background: '#c15f3c', color: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, lineHeight: 1, cursor: 'pointer', boxShadow: '0 2px 8px rgba(193,95,60,.32)', whiteSpace: 'nowrap' }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              {quickAdd.label}
+            </button>
+          )}
         </header>
         <div style={{ padding: active === 'assistant' ? '0px 34px 0' : '30px 34px 0px', flex: 1, minHeight: 0, overflowY: active === 'calendar' ? 'hidden' : 'auto', display: 'flex', flexDirection: 'column' }}>
           {pages[active]}

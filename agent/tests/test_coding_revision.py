@@ -69,6 +69,9 @@ def stub(monkeypatch):
                      ("commit_and_push", commit_and_push), ("diff_summary", diff_summary)]:
         monkeypatch.setattr(w, name, fn)
 
+    # These tests cover the coding machinery itself, so they run with the
+    # master switch on; test_coding_disabled.py covers the default.
+    monkeypatch.setattr(coding, "CODING_ENABLED", True)
     monkeypatch.setattr(coding, "Agent", _FakeAgent)
     monkeypatch.setattr(coding, "_coder_model", lambda: None)
     monkeypatch.setattr(coding, "build_sandbox",

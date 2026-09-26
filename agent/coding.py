@@ -42,6 +42,14 @@ from tool_trace import ToolTracer, summarise_args
 
 log = logging.getLogger("atlas.agent.coding")
 
+# Master switch, off unless explicitly turned on. When off, three independent
+# things hold: the tool is not given to the orchestrator (runtime.py), the tool
+# refuses if it is called anyway (below), and GITHUB_PAT is removed from this
+# process's environment at startup (runtime.py), so no other tool — including a
+# future one, or http_request with an auth_env_var allowlist added — can pick up
+# the credential that makes pushing possible.
+CODING_ENABLED = os.getenv("ATLAS_AGENT_CODING", "off").strip().lower() in ("on", "1", "true", "yes")
+
 CODING_TIMEOUT = int(os.getenv("CODING_TIMEOUT", "1800"))  # 30 min, whole task
 CONTEXT_WINDOW_MESSAGES = 40   # source files are large; fewer turns fit than in research
 COMPRESSION_THRESHOLD = 0.6
@@ -266,7 +274,7 @@ def _coder_model() -> OpenAIResponsesModel:
         client_args["base_url"] = os.environ["OPENAI_BASE_URL"]
     return OpenAIResponsesModel(
         client_args=client_args,
-        model_id=os.getenv("AGENT_MODEL_ID", "gpt-5.6-luna"),
+        model_id=os.getenv("AGENT_MODEL_ID", "gpt-6-luna"),
         params={
             # Coding is where thinking time is worth paying for: the failures
             # here have been reasoning failures, not knowledge ones — a change
@@ -360,6 +368,12 @@ async def delegate_coding(repo: str, task: str, context: str = "", pr_number: in
         The branch, the draft PR url, what the agent did, and what it could not
         do. Always report the PR link and any failures to the user verbatim.
     """
+    if not CODING_ENABLED:
+        # Belt and braces: runtime.py does not register this tool when coding is
+        # off, but nothing that clones, commits or pushes may run regardless.
+        return {"status": "disabled",
+                "summary": "Coding is switched off on this server (ATLAS_AGENT_CODING). "
+                           "No repository was cloned, changed or pushed."}
     if not (repo or "").strip() or not (task or "").strip():
         return {"error": "Both a repository and a task description are required."}
 

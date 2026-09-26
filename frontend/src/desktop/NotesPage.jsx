@@ -4,6 +4,7 @@ import { useNotes } from '../context/NotesContext.jsx'
 import { useGitHub } from '../context/GitHubContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
+import { useQuickAdd } from '../context/QuickAddContext.jsx'
 
 marked.use({ gfm: true, breaks: true })
 
@@ -322,6 +323,7 @@ export default function NotesPage() {
     setEditing(false)
     setFileMeta(null)
   }
+  useQuickAdd('New note', handleNewNote)
 
   const handleDelete = () => {
     if (!isQuick || !window.confirm('Delete this note?')) return
@@ -447,14 +449,9 @@ export default function NotesPage() {
 
         {/* Quick notes */}
         <div style={{ padding: '20px 10px 8px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px', marginBottom: 6 }}>
+          {/* New quick notes come from the header "+ New note". */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px', marginBottom: 6, minHeight: 20 }}>
             <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>Quick notes</span>
-            <button onClick={handleNewNote}
-              style={{ width: 20, height: 20, borderRadius: 6, border: 'none', background: 'var(--surface-3)', color: 'var(--mid)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
-            </button>
           </div>
           {notes.length === 0 && (
             <div style={{ padding: '4px 6px', fontSize: 12, color: 'var(--faint)' }}>No notes yet.</div>

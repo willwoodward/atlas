@@ -95,7 +95,7 @@ def _subagent_model() -> OpenAIResponsesModel:
         client_args["base_url"] = os.environ["OPENAI_BASE_URL"]
     return OpenAIResponsesModel(
         client_args=client_args,
-        model_id=os.getenv("AGENT_MODEL_ID", "gpt-5.6-luna"),
+        model_id=os.getenv("AGENT_MODEL_ID", "gpt-6-luna"),
         params={
             # Deliberately lower than the coder's. A researcher's job is to read
             # sources and report what they say; the expensive thinking belongs in

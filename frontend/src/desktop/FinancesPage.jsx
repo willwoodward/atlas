@@ -4,6 +4,7 @@ import GoalRing from '../components/GoalRing.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import CompensationPanel from '../components/CompensationPanel.jsx'
 import InsightsPanel from '../components/InsightsPanel.jsx'
+import { useQuickAdd } from '../context/QuickAddContext.jsx'
 
 const PAL = ['#6f8168','#c15f3c','#5f7591','#b08a3e','#9a6d84','#c88a5f']
 
@@ -487,6 +488,7 @@ export default function FinancesPage() {
   const [showAddTxn, setShowAddTxn]         = useState(false)
   const [showAddAcc, setShowAddAcc]         = useState(false)
   const [showImport, setShowImport]         = useState(false)
+  useQuickAdd('Import', () => setShowImport(true))
   const [activePot, setActivePot]           = useState(null)
 
   const { removeAccount, removeTransaction } = useFinances()
@@ -501,7 +503,6 @@ export default function FinancesPage() {
           <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>Net worth, cashflow, and savings pots.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <GhostBtn onClick={() => setShowImport(true)} style={{ fontSize: 13, padding: '8px 14px' }}>Import statement</GhostBtn>
           <GhostBtn onClick={() => setShowAddAcc(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Account</GhostBtn>
           <GhostBtn onClick={() => setShowAddTxn(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Transaction</GhostBtn>
           <PrimaryBtn onClick={() => setShowAddPot(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Pot</PrimaryBtn>

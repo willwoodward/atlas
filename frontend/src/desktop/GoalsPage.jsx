@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useGoals, GOAL_PALETTE } from '../context/GoalsContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
+import { useQuickAdd } from '../context/QuickAddContext.jsx'
 
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4']
 const QUARTER_LABELS = { Q1: 'Jan – Mar', Q2: 'Apr – Jun', Q3: 'Jul – Sep', Q4: 'Oct – Dec' }
@@ -158,6 +159,7 @@ export default function GoalsPage() {
   const isMobile = useIsMobile()
   const { goals, addGoal, removeGoal, updateGoal, setQuarterFocus } = useGoals()
   const [adding, setAdding] = useState(false)
+  useQuickAdd('Add goal', () => setAdding(true))
 
   const handleAdd = (title, color) => {
     addGoal(title, color)
@@ -171,19 +173,12 @@ export default function GoalsPage() {
           <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>Goals</h1>
           <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>The bigger arcs — where the days are pointing.</p>
         </div>
-        {!adding && (
-          <button onClick={() => setAdding(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 15px', borderRadius: 11, border: 'none', background: '#2b2820', color: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add goal
-          </button>
-        )}
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {goals.length === 0 && !adding && (
           <div style={{ padding: '60px 0', textAlign: 'center', fontSize: 14, color: 'var(--faint)' }}>
-            No goals yet — click <strong style={{ color: 'var(--mid)' }}>Add goal</strong> to start.
+            No goals yet — use <strong style={{ color: 'var(--mid)' }}>+ Add goal</strong> at the top to start.
           </div>
         )}
 

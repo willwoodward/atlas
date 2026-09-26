@@ -1,8 +1,9 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import CheckMark from '../components/CheckMark.jsx'
 import { useTodos } from '../context/TodosContext.jsx'
 import { useGoals } from '../context/GoalsContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
+import { useQuickAdd } from '../context/QuickAddContext.jsx'
 
 const BUCKETS = [
   { key: 'today',   label: 'Today',     color: '#c15f3c' },
@@ -102,8 +103,11 @@ function AddSubTodoInput({ parentId, onAdd, onCancel }) {
   )
 }
 
-function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddSub, dragState, onGripDown, todayStr, weekMonStr }) {
+function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddSub, dragState, onGripDown, todayStr, weekMonStr, openSignal = 0 }) {
   const [adding, setAdding] = useState(false)
+  // Bumped by the header "+ Add to-do" (Today only). A counter rather than a
+  // boolean so pressing it again re-opens the row after it was dismissed.
+  useEffect(() => { if (openSignal) setAdding(true) }, [openSignal])
   const [expanded, setExpanded] = useState({})   // { [todoId]: true }
   const [addingSubFor, setAddingSubFor] = useState(null)
 
@@ -234,7 +238,7 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddS
       {activeTodos.map((t, idx) => renderTodo(t, idx))}
 
       {adding
-        ? <AddTodoRow bucket={bucket.key} onAdd={onAdd} onCancel={() => setAdding(false)} />
+        ? <AddTodoRow key={openSignal} bucket={bucket.key} onAdd={onAdd} onCancel={() => setAdding(false)} />
         : (
           <button onClick={() => setAdding(true)}
             style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: activeTodos.length > 0 ? 8 : 0, color: 'var(--faint)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: 'inherit', padding: '4px 0' }}>
@@ -253,6 +257,8 @@ export default function TodoPage() {
   const { goals } = useGoals()
 
   const [showAllCompleted, setShowAllCompleted] = useState(false)
+  const [todaySignal, setTodaySignal] = useState(0)
+  useQuickAdd('Add to-do', () => setTodaySignal(n => n + 1))
   const [dragId,     setDragId]     = useState(null)
   const [dropTarget, setDropTarget] = useState(null)
   const dragDataRef = useRef({ id: null, active: false, startY: 0, startX: 0, dropTarget: null })
@@ -362,6 +368,7 @@ export default function TodoPage() {
             onGripDown={handleGripDown}
             todayStr={todayStr}
             weekMonStr={weekMonStr}
+            openSignal={b.key === 'today' ? todaySignal : 0}
           />
         ))}
       </div>

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useUser } from '../context/UserContext.jsx'
 import { useTheme } from '../context/ThemeContext.jsx'
+import { useQuickAddAction } from '../context/QuickAddContext.jsx'
 import HomePage      from '../desktop/HomePage.jsx'
 import CalendarPage  from '../desktop/CalendarPage.jsx'
 import HabitsPage    from '../desktop/HabitsPage.jsx'
@@ -59,6 +60,7 @@ export default function MobileLayout() {
   const { isDark, toggleTheme } = useTheme()
 
   const navigate = (id) => { setActive(id); setDrawerOpen(false) }
+  const quickAdd = useQuickAddAction(active, navigate)
 
   const ActivePage = PAGES.find(p => p.id === active)?.component ?? HomePage
   const activeLabel = PAGES.find(p => p.id === active)?.label ?? ''
@@ -98,6 +100,15 @@ export default function MobileLayout() {
 
         {/* Current page label */}
         <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: 'var(--mid)', textAlign: 'center' }}>{activeLabel}</span>
+
+        {/* The page's primary action — the same one desktop shows as "+ <label>".
+            Icon-only here for room, so the label goes to screen readers. */}
+        {quickAdd && (
+          <button onClick={quickAdd.run} aria-label={quickAdd.label} title={quickAdd.label}
+            style={{ width: 32, height: 32, borderRadius: 10, border: 'none', background: '#c15f3c', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', cursor: 'pointer', padding: 0, boxShadow: '0 2px 8px rgba(193,95,60,.32)' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        )}
 
         {/* Avatar → accounts */}
         <div
