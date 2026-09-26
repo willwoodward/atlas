@@ -9,6 +9,7 @@ import HabitsPage    from './HabitsPage.jsx'
 import TodoPage      from './TodoPage.jsx'
 import NotesPage     from './NotesPage.jsx'
 import FinancesPage  from './FinancesPage.jsx'
+import FitnessPage   from './FitnessPage.jsx'
 import GoalsPage     from './GoalsPage.jsx'
 import AssistantPage from './AssistantPage.jsx'
 import AccountsPage  from './AccountsPage.jsx'
@@ -23,6 +24,7 @@ const navIcons = {
   todos:     I(<rect x="4" y="4" width="16" height="16" rx="3" key="a"/>, <path d="M8 12l3 3 5-6" key="b"/>),
   notes:     I(<rect x="5" y="4" width="14" height="16" rx="2" key="a"/>, <line x1="9" y1="9" x2="15" y2="9" key="b"/>, <line x1="9" y1="13" x2="13" y2="13" key="c"/>),
   finances:  I(<path d="M4 15l5-5 4 3 7-8" key="a"/>, <line x1="4" y1="20" x2="20" y2="20" key="b"/>),
+  fitness:   I(<path d="M3 12h4l3-7 4 14 3-7h4" key="a"/>),
   goals:     I(<circle cx="12" cy="12" r="8" key="a"/>, <circle cx="12" cy="12" r="3.5" key="b"/>),
   assistant: I(<circle cx="12" cy="12" r="7" key="a"/>, <circle cx="12" cy="12" r="2.5" key="b"/>),
   accounts:  I(<circle cx="12" cy="8" r="4" key="a"/>, <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" key="b"/>),
@@ -38,6 +40,7 @@ const NAV_MAIN = [
 const NAV_APPS = [
   { id: 'notes',    label: 'Notes' },
   { id: 'finances', label: 'Finances' },
+  { id: 'fitness',  label: 'Fitness' },
 ]
 const NAV_BOTTOM = [
   { id: 'assistant', label: 'Assistant' },
@@ -188,6 +191,7 @@ export default function DesktopLayout() {
     todos:     <TodoPage />,
     notes:     <NotesPage />,
     finances:  <FinancesPage />,
+    fitness:   <FitnessPage />,
     goals:     <GoalsPage />,
     assistant: <AssistantPage />,
     accounts:  <AccountsPage />,

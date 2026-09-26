@@ -13,11 +13,25 @@ from urllib.parse import urlencode, urlparse
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from auth import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRE_DAYS
+from auth import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRE_DAYS, AUD_MCP, ATLAS_MCP_KEY
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
 BASE_URL = os.getenv("BASE_URL", "https://willwoodward-clan-manager.duckdns.org")
+
+# This flow mints a long-lived bearer token and has no user-interaction step —
+# there is no login screen and no consent, by design, because an MCP client
+# cannot show one. That makes the authorize endpoint itself the only place
+# identity can be proven, so it demands the MCP key. Off unless asked for.
+OAUTH_ENABLED = os.getenv("ATLAS_MCP_OAUTH", "off").strip().lower() in ("on", "1", "true")
+
+
+def _disabled():
+    return JSONResponse(
+        {"error": "invalid_request",
+         "error_description": "MCP OAuth is disabled. Use the static ATLAS_MCP_KEY as a bearer token."},
+        status_code=404,
+    )
 
 # In-memory storage (single-process; fine for single-user server)
 _clients: dict[str, dict] = {}
@@ -29,7 +43,9 @@ router = APIRouter()
 def _make_mcp_jwt() -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=JWT_EXPIRE_DAYS)
     return jwt.encode(
-        {"sub": "atlas-mcp-client", "name": "Atlas MCP", "exp": expire},
+        # The audience is what keeps this token out of the REST API. Without it
+        # this function hands out full access to every /api/* route.
+        {"sub": "atlas-mcp-client", "name": "Atlas MCP", "aud": AUD_MCP, "exp": expire},
         JWT_SECRET,
         algorithm=JWT_ALGORITHM,
     )
@@ -46,6 +62,8 @@ def _verify_pkce(code_verifier: str, code_challenge: str) -> bool:
 @router.get("/.well-known/oauth-authorization-server")
 @router.get("/.well-known/oauth-authorization-server/{path:path}")
 async def oauth_server_metadata(path: str = ""):
+    if not OAUTH_ENABLED:
+        return _disabled()
     return JSONResponse({
         "issuer": BASE_URL,
         "authorization_endpoint": f"{BASE_URL}/oauth/authorize",
@@ -63,6 +81,8 @@ async def oauth_server_metadata(path: str = ""):
 @router.post("/oauth/register")
 @router.post("/register")
 async def register_client(request: Request):
+    if not OAUTH_ENABLED:
+        return _disabled()
     try:
         body = await request.json()
     except Exception:
@@ -94,14 +114,37 @@ async def oauth_authorize(
     code_challenge_method: str = "S256",
     state: Optional[str] = None,
     scope: Optional[str] = None,
+    key: str = "",
 ):
+    if not OAUTH_ENABLED:
+        return _disabled()
+
+    # Proof of identity. There is no login step in this flow, so without this
+    # the endpoint hands an authorization code to anyone who asks.
+    if not ATLAS_MCP_KEY or not secrets.compare_digest(key, ATLAS_MCP_KEY):
+        return JSONResponse({"error": "access_denied",
+                             "error_description": "A valid key parameter is required"}, status_code=403)
+
     # Validate redirect_uri — only allow localhost for security
     parsed = urlparse(redirect_uri)
     if parsed.hostname not in ("localhost", "127.0.0.1"):
         return JSONResponse({"error": "invalid_request", "error_description": "Only localhost redirect URIs are allowed"}, status_code=400)
 
+    # The client must have registered, and must be asking for a URI it registered.
+    client = _clients.get(client_id)
+    if not client:
+        return JSONResponse({"error": "invalid_client"}, status_code=400)
+    if client["redirect_uris"] and redirect_uri not in client["redirect_uris"]:
+        return JSONResponse({"error": "invalid_request",
+                             "error_description": "redirect_uri does not match the registered set"}, status_code=400)
+
     if response_type != "code":
         return JSONResponse({"error": "unsupported_response_type"}, status_code=400)
+
+    # PKCE is mandatory, not opportunistic.
+    if code_challenge_method != "S256" or not code_challenge:
+        return JSONResponse({"error": "invalid_request",
+                             "error_description": "S256 code_challenge is required"}, status_code=400)
 
     # Generate single-use authorization code
     code = secrets.token_hex(32)
@@ -130,6 +173,8 @@ async def oauth_token(
     client_id: str = Form(None),
     code_verifier: str = Form(None),
 ):
+    if not OAUTH_ENABLED:
+        return _disabled()
     if grant_type != "authorization_code":
         return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
 
@@ -140,10 +185,14 @@ async def oauth_token(
     if time.time() > code_info["expires_at"]:
         return JSONResponse({"error": "invalid_grant", "error_description": "Authorization code expired"}, status_code=400)
 
-    # Verify PKCE
-    if code_verifier and code_info.get("code_challenge"):
-        if not _verify_pkce(code_verifier, code_info["code_challenge"]):
-            return JSONResponse({"error": "invalid_grant", "error_description": "PKCE verification failed"}, status_code=400)
+    # Verify PKCE. Unconditionally: guarding this on `if code_verifier` let a
+    # caller skip the check entirely just by omitting the field.
+    if not code_verifier or not _verify_pkce(code_verifier, code_info.get("code_challenge", "")):
+        return JSONResponse({"error": "invalid_grant", "error_description": "PKCE verification failed"}, status_code=400)
+
+    if redirect_uri != code_info["redirect_uri"] or client_id != code_info["client_id"]:
+        return JSONResponse({"error": "invalid_grant",
+                             "error_description": "Code was issued to a different client"}, status_code=400)
 
     access_token = _make_mcp_jwt()
     return JSONResponse({

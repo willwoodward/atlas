@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from auth import get_current_user
+from crypto import enc, dec
 from database import get_db
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
@@ -31,7 +32,7 @@ async def get_integrations(user: dict = Depends(get_current_user), db=Depends(ge
 
     gcal = {"connected": bool(row["gcal_refresh_token"])}
     github = (
-        {"token": row["github_token"], "repo": row["github_repo"]}
+        {"token": dec(row["github_token"]), "repo": row["github_repo"]}
         if row["github_token"]
         else None
     )
@@ -66,7 +67,7 @@ async def update_github(body: GitHubUpdate, user: dict = Depends(get_current_use
         """INSERT INTO user_integrations (email, github_token, github_repo)
            VALUES (?, ?, ?)
            ON CONFLICT(email) DO UPDATE SET github_token=excluded.github_token, github_repo=excluded.github_repo""",
-        (user["sub"], body.token, body.repo),
+        (user["sub"], enc(body.token), body.repo),
     )
     await db.commit()
     return {"ok": True}

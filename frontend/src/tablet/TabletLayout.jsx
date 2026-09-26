@@ -7,6 +7,7 @@ import HabitsPage    from './HabitsPage.jsx'
 import TodoPage      from './TodoPage.jsx'
 import NotesPage     from './NotesPage.jsx'
 import FinancesPage  from './FinancesPage.jsx'
+import FitnessPage   from './FitnessPage.jsx'
 import GoalsPage     from './GoalsPage.jsx'
 
 const PAGES = [
@@ -17,6 +18,7 @@ const PAGES = [
   { id: 'todos',     component: TodoPage },
   { id: 'notes',     component: NotesPage },
   { id: 'finances',  component: FinancesPage },
+  { id: 'fitness',   component: FitnessPage },
   { id: 'goals',     component: GoalsPage },
 ]
 const N = PAGES.length

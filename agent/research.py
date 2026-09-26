@@ -96,7 +96,13 @@ def _subagent_model() -> OpenAIResponsesModel:
     return OpenAIResponsesModel(
         client_args=client_args,
         model_id=os.getenv("AGENT_MODEL_ID", "gpt-5.6-luna"),
-        params={"max_output_tokens": int(os.getenv("SUBAGENT_MAX_TOKENS", "8192"))},
+        params={
+            # Deliberately lower than the coder's. A researcher's job is to read
+            # sources and report what they say; the expensive thinking belongs in
+            # the synthesis step, not in each of several parallel subagents.
+            "reasoning": {"effort": os.getenv("RESEARCH_REASONING_EFFORT", "high")},
+            "max_output_tokens": int(os.getenv("SUBAGENT_MAX_TOKENS", "8192")),
+        },
     )
 
 

@@ -267,7 +267,17 @@ def _coder_model() -> OpenAIResponsesModel:
     return OpenAIResponsesModel(
         client_args=client_args,
         model_id=os.getenv("AGENT_MODEL_ID", "gpt-5.6-luna"),
-        params={"max_output_tokens": int(os.getenv("CODING_MAX_TOKENS", "16384"))},
+        params={
+            # Coding is where thinking time is worth paying for: the failures
+            # here have been reasoning failures, not knowledge ones — a change
+            # that compiles and passes tests while quietly breaking a layout.
+            # Verified accepted by the endpoint alongside "xhigh" and "high";
+            # override if a future model rejects it.
+            "reasoning": {"effort": os.getenv("AGENT_REASONING_EFFORT", "max")},
+            # Reasoning tokens are billed against this budget, so raising effort
+            # without raising the ceiling just buys truncation mid-task.
+            "max_output_tokens": int(os.getenv("CODING_MAX_TOKENS", "32768")),
+        },
     )
 
 

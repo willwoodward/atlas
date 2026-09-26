@@ -2,6 +2,9 @@ fastapi==0.115.5
 uvicorn[standard]==0.32.1
 aiosqlite==0.20.0
 python-jose[cryptography]==3.3.0
+# Direct dependency for credential encryption at rest (crypto.py), not just a
+# transitive of python-jose — pinning it here keeps that guarantee explicit.
+cryptography>=42,<51
 httpx==0.27.2
 mcp==1.9.0
 tzdata==2024.2

@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 import aiosqlite
+from crypto import enc, dec
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
 from mcp.types import Tool, TextContent
@@ -29,6 +30,14 @@ GCAL_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GCAL_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
 TIMEZONE = os.getenv("TZ", "Europe/London")
 
+# How much transaction detail the assistant may see. The agent container talks
+# to a third-party model, so merchant-level spending history leaves this box the
+# moment the tool is callable — that is a deliberate choice, not a default.
+#   off      — the tool is not offered at all (default)
+#   redacted — dates, amounts and categories, but no merchant names
+#   full     — everything
+MCP_TRANSACTIONS = os.getenv("ATLAS_MCP_TRANSACTIONS", "off").strip().lower()
+
 
 def _gh_headers(token):
     return {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
@@ -41,7 +50,7 @@ async def _get_github_creds(db):
         row = await c.fetchone()
     if not row or not row["github_token"]:
         return None, None
-    return row["github_token"], row["github_repo"]
+    return dec(row["github_token"]), row["github_repo"]
 
 # ── Google Calendar ───────────────────────────────────────────────────────────
 # The frontend reads GCal directly from the browser, so those events never touch
@@ -61,13 +70,15 @@ async def _gcal_token(db) -> str | None:
 
     now = int(_time.time())
     if row["gcal_access_token"] and row["gcal_access_expires_at"] and row["gcal_access_expires_at"] > now + 300:
-        return row["gcal_access_token"]
+        cached = dec(row["gcal_access_token"])
+        if cached:
+            return cached
 
     if not GOOGLE_CLIENT_SECRET:
         return None
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.post(GCAL_TOKEN_URL, data={
-            "refresh_token": row["gcal_refresh_token"],
+            "refresh_token": dec(row["gcal_refresh_token"]),
             "client_id": GOOGLE_CLIENT_ID,
             "client_secret": GOOGLE_CLIENT_SECRET,
             "grant_type": "refresh_token",
@@ -79,7 +90,7 @@ async def _gcal_token(db) -> str | None:
     token = data["access_token"]
     await db.execute(
         "UPDATE user_integrations SET gcal_access_token=?, gcal_access_expires_at=? WHERE email=?",
-        (token, now + data.get("expires_in", 3600) - 60, row["email"]),
+        (enc(token), now + data.get("expires_in", 3600) - 60, row["email"]),
     )
     await db.commit()
     return token
@@ -177,7 +188,7 @@ async def _db():
 
 @server.list_tools()
 async def list_tools() -> list[Tool]:
-    return [
+    tools = [
         Tool(name="list_todos", description="List todos, optionally filtered by bucket (today/week/someday)", inputSchema={"type":"object","properties":{"bucket":{"type":"string","enum":["today","week","someday"]}},"required":[]}),
         Tool(name="add_todo", description="Add a new todo", inputSchema={"type":"object","properties":{"text":{"type":"string"},"bucket":{"type":"string","enum":["today","week","someday"]},"goal_id":{"type":"string"}},"required":["text","bucket"]}),
         Tool(name="complete_todo", description="Mark a todo as done", inputSchema={"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}),
@@ -187,7 +198,6 @@ async def list_tools() -> list[Tool]:
         Tool(name="log_habit", description="Toggle a habit completion for a date (defaults to today)", inputSchema={"type":"object","properties":{"id":{"type":"string"},"date":{"type":"string"}},"required":["id"]}),
         Tool(name="list_goals", description="List all annual goals with quarterly focus text", inputSchema={"type":"object","properties":{},"required":[]}),
         Tool(name="get_finances_summary", description="Get net worth, total saved in pots, income and spending", inputSchema={"type":"object","properties":{},"required":[]}),
-        Tool(name="list_transactions", description="List recent transactions", inputSchema={"type":"object","properties":{"limit":{"type":"integer","default":20}},"required":[]}),
         Tool(name="list_notes", description="List quick notes (local)", inputSchema={"type":"object","properties":{},"required":[]}),
         Tool(name="search_notes", description="Search notes by keyword", inputSchema={"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}),
         Tool(name="create_note", description="Create a new quick note", inputSchema={"type":"object","properties":{"body":{"type":"string"}},"required":["body"]}),
@@ -206,6 +216,17 @@ async def list_tools() -> list[Tool]:
         Tool(name="list_github_drafts", description="List all pending GitHub note drafts (created/edited via MCP, not yet published to GitHub)", inputSchema={"type":"object","properties":{},"required":[]}),
         Tool(name="read_github_draft", description="Read the content of a specific GitHub note draft by path", inputSchema={"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}),
     ]
+
+    if MCP_TRANSACTIONS in ("redacted", "full"):
+        detail = ("Merchant names are redacted." if MCP_TRANSACTIONS == "redacted"
+                  else "Includes merchant names.")
+        tools.append(Tool(
+            name="list_transactions",
+            description=f"List recent transactions. {detail}",
+            inputSchema={"type": "object", "properties": {"limit": {"type": "integer", "default": 20}}, "required": []},
+        ))
+
+    return tools
 
 
 @server.call_tool()
@@ -301,9 +322,17 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         return {"net_worth": net_worth, "total_saved": total_saved, "income": income, "spending": spending}
 
     if name == "list_transactions":
+        # Belt and braces: the tool is hidden when disabled, but a client that
+        # cached an older tool list could still call it.
+        if MCP_TRANSACTIONS not in ("redacted", "full"):
+            return {"error": "Transaction access is disabled. Set ATLAS_MCP_TRANSACTIONS to enable it."}
         limit = args.get("limit", 20)
         async with db.execute("SELECT * FROM finances_transactions ORDER BY date DESC LIMIT ?", (limit,)) as c:
-            return [dict(r) for r in await c.fetchall()]
+            rows = [dict(r) for r in await c.fetchall()]
+        if MCP_TRANSACTIONS == "redacted":
+            for r in rows:
+                r["merchant"] = "[redacted]"
+        return rows
 
     if name == "list_notes":
         async with db.execute("SELECT * FROM notes ORDER BY updated_at DESC") as c:
@@ -524,20 +553,31 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
 sse_transport = SseServerTransport("/messages/")
 
 
+# An unset key used to mean "open". That fails open: one missing variable in the
+# environment silently published every tool to the internet. It now fails closed,
+# and local dev has to say so explicitly.
+ALLOW_INSECURE = os.getenv("ATLAS_MCP_ALLOW_INSECURE", "").strip().lower() in ("1", "true", "yes")
+
+
 async def _check_auth(request: Request) -> bool:
+    import secrets as _secrets
+
     if not ATLAS_MCP_KEY:
-        return True  # no key configured → open (dev mode)
+        return ALLOW_INSECURE
+
     auth = request.headers.get("authorization", "")
     key = request.query_params.get("key", "")
-    # Accept static bearer key
-    if auth == f"Bearer {ATLAS_MCP_KEY}" or key == ATLAS_MCP_KEY:
+    if auth.startswith("Bearer ") and _secrets.compare_digest(auth[7:], ATLAS_MCP_KEY):
         return True
-    # Accept JWT issued by our OAuth server
+    if key and _secrets.compare_digest(key, ATLAS_MCP_KEY):
+        return True
+
+    # A JWT is accepted only if it was minted for MCP. Any token will otherwise
+    # do, including the app session token from a browser.
     if auth.startswith("Bearer "):
-        token = auth[7:]
         try:
-            from auth import decode_jwt
-            decode_jwt(token)
+            from auth import decode_jwt, AUD_MCP
+            decode_jwt(auth[7:], audience=AUD_MCP)
             return True
         except Exception:
             pass

@@ -25,16 +25,31 @@ export function FinancesProvider({ children }) {
   const { token } = useAuth()
   // Bumped when the assistant mutates data via MCP, forcing a refetch.
   const { tick } = useRefresh()
-  const [data, setData] = useState({ pots: [], transactions: [], accounts: [] })
+  const [data, setData] = useState({ pots: [], transactions: [], accounts: [], rules: [] })
+  const [insights, setInsights] = useState({ budgets: [], unbudgeted: [], recurring: [], surplus: {}, allocation: [] })
 
   const call = useCallback((path, opts = {}) => fetch(`${API}${path}`, {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     ...opts,
   }), [token])
 
+  // Insights are derived server-side from every transaction, so they are
+  // refetched rather than recomputed whenever the ledger changes.
+  const refreshInsights = useCallback(async () => {
+    const res = await call('/api/finances/insights')
+    if (res.ok) setInsights(await res.json())
+  }, [call])
+
+  useEffect(() => { if (token) refreshInsights() }, [token, tick, refreshInsights])
+
   useEffect(() => {
     call('/api/finances').then(r => r.json()).then(d => {
-      setData({ pots: d.pots.map(potToInternal), transactions: d.transactions, accounts: d.accounts })
+      setData({
+        pots: d.pots.map(potToInternal),
+        transactions: d.transactions,
+        accounts: d.accounts,
+        rules: d.rules || [],
+      })
     })
   }, [token, tick])
 
@@ -108,6 +123,74 @@ export function FinancesProvider({ children }) {
     await call(`/api/finances/accounts/${id}`, { method: 'DELETE' })
   }, [call])
 
+  const refetch = useCallback(async () => {
+    const d = await call('/api/finances').then(r => r.json())
+    setData({
+      pots: d.pots.map(potToInternal),
+      transactions: d.transactions,
+      accounts: d.accounts,
+      rules: d.rules || [],
+    })
+    await refreshInsights()
+  }, [call, refreshInsights])
+
+  // ─── Budgets ───────────────────────────────────────────────────────────────
+  const setBudget = useCallback(async (category, amount) => {
+    await call('/api/finances/budgets', {
+      method: 'POST',
+      body: JSON.stringify({ id: uid(), category, amount: Number(amount) || 0, period: 'monthly' }),
+    })
+    await refreshInsights()
+  }, [call, refreshInsights])
+
+  const removeBudget = useCallback(async (id) => {
+    await call(`/api/finances/budgets/${id}`, { method: 'DELETE' })
+    await refreshInsights()
+  }, [call, refreshInsights])
+
+  // Deliberately explicit: /insights only ever suggests an allocation, and this
+  // is the separate call that actually writes the deposits.
+  const allocateSurplus = useCallback(async (allocations, note) => {
+    await call('/api/finances/allocate', {
+      method: 'POST', body: JSON.stringify({ allocations, note }),
+    })
+    await refetch()
+  }, [call, refetch])
+
+  // ─── Import rules ──────────────────────────────────────────────────────────
+  const addRule = useCallback(async (pattern, category) => {
+    const id = uid()
+    setData(d => ({ ...d, rules: [...d.rules, { id, pattern, category }] }))
+    await call('/api/finances/rules', { method: 'POST', body: JSON.stringify({ id, pattern, category }) })
+  }, [call])
+
+  const removeRule = useCallback(async (id) => {
+    setData(d => ({ ...d, rules: d.rules.filter(r => r.id !== id) }))
+    await call(`/api/finances/rules/${id}`, { method: 'DELETE' })
+  }, [call])
+
+  // ─── Statement import ──────────────────────────────────────────────────────
+  // Two-step by design: preview never writes, so a wrong file or a wrong bank
+  // profile costs nothing but a second click.
+  const previewImport = useCallback(async (source, accountId, content) => {
+    const res = await call('/api/finances/import/preview', {
+      method: 'POST', body: JSON.stringify({ source, account_id: accountId, content }),
+    })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.detail || 'Could not read that file')
+    return body
+  }, [call])
+
+  const commitImport = useCallback(async (source, accountId, rows, fxRates = {}) => {
+    const res = await call('/api/finances/import/commit', {
+      method: 'POST',
+      body: JSON.stringify({ source, account_id: accountId, rows, fx_rates: fxRates }),
+    })
+    const body = await res.json()
+    await refetch()
+    return body
+  }, [call, refetch])
+
   // ─── Computed ──────────────────────────────────────────────────────────────
   const pots = data.pots.map(p => {
     const saved = (p.deposits||[]).reduce((s, d) => s + d.amount, 0)
@@ -116,13 +199,40 @@ export function FinancesProvider({ children }) {
   })
   const netWorth = data.accounts.reduce((s, a) => a.type === 'credit' ? s - a.balance : s + a.balance, 0)
   const totalSaved = pots.reduce((s, p) => s + p.saved, 0)
-  const income   = data.transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
-  const spending = data.transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+
+  // Value in GBP, using the rate captured at import time rather than today's —
+  // otherwise last year's spending silently changes every time sterling moves.
+  const inGBP = (t) => t.amount * (t.fx_rate ?? 1)
+
+  // Local month key, not toISOString — that shifts the boundary in UTC.
+  const now = new Date()
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const inMonth = (t, m) => (t.date || '').slice(0, 7) === m
+
+  const monthTxns = data.transactions.filter(t => inMonth(t, thisMonth))
+  const sum = (rows, type) => rows.filter(t => t.type === type).reduce((s, t) => s + inGBP(t), 0)
+
+  const income   = sum(monthTxns, 'income')
+  const spending = sum(monthTxns, 'expense')
+  const incomeAllTime   = sum(data.transactions, 'income')
+  const spendingAllTime = sum(data.transactions, 'expense')
+
+  // Spend per category this month — the basis for budgets in a later phase.
+  const byCategory = Object.entries(
+    monthTxns.filter(t => t.type === 'expense').reduce((acc, t) => {
+      const key = t.category || 'Uncategorised'
+      acc[key] = (acc[key] || 0) + inGBP(t)
+      return acc
+    }, {})
+  ).map(([category, total]) => ({ category, total })).sort((a, b) => b.total - a.total)
 
   return (
     <Ctx.Provider value={{
-      pots, accounts: data.accounts, transactions: data.transactions,
+      pots, accounts: data.accounts, transactions: data.transactions, rules: data.rules,
       netWorth, totalSaved, income, spending,
+      incomeAllTime, spendingAllTime, byCategory, thisMonth,
+      addRule, removeRule, previewImport, commitImport, refetch,
+      insights, setBudget, removeBudget, allocateSurplus, refreshInsights,
       addPot, removePot,
       addSubGoal, removeSubGoal,
       addDeposit, removeDeposit,

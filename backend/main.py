@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from database import init_db
 from mcp_server import mcp_app
-from routers import auth_router, habits, todos, goals, finances, notes, calendar, integrations, assistant
+from routers import auth_router, habits, todos, goals, finances, notes, calendar, integrations, assistant, employment, fitness
 from routers.github_drafts import router as github_drafts_router
 from routers.mcp_auth import router as mcp_auth_router
 
@@ -44,6 +44,8 @@ app.include_router(habits.router)
 app.include_router(todos.router)
 app.include_router(goals.router)
 app.include_router(finances.router)
+app.include_router(employment.router)
+app.include_router(fitness.router)
 app.include_router(notes.router)
 app.include_router(calendar.router)
 app.include_router(integrations.router)

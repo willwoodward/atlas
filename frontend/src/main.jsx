@@ -36,6 +36,36 @@ import './index.css'
     return
   }
 
+  // ── Strava authorization code flow ──────────────────────────────────────
+  // Strava redirects with ?code=&scope=&state=atlas-strava:<nonce>, or with
+  // ?error=access_denied if the user cancels. The nonce is checked server-side
+  // against the one issued to this signed-in user.
+  if (state && state.startsWith('atlas-strava:')) {
+    window.__ATLAS_POPUP_PENDING = true
+    const jwt = localStorage.getItem('atlas:jwt')
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    const reply = (msg) => window.opener?.postMessage(
+      { type: 'ATLAS_OAUTH', provider: 'strava', ...msg }, window.location.origin)
+
+    if (!code) {
+      reply({ connected: false, error: search.get('error') === 'access_denied' ? 'Cancelled on Strava.' : 'Strava sign-in failed.' })
+      window.close()
+      return
+    }
+    fetch(`${apiUrl}/api/fitness/strava/exchange`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwt}` },
+      body: JSON.stringify({ code, state, scope: search.get('scope') || '' }),
+    })
+      .then(async (r) => {
+        const body = await r.json().catch(() => ({}))
+        reply(r.ok ? { connected: true } : { connected: false, error: body.detail || 'Strava sign-in failed.' })
+      })
+      .catch(() => reply({ connected: false, error: 'Could not reach the server.' }))
+      .finally(() => window.close())
+    return
+  }
+
   // ── Implicit / hash-based flows (app login) ──────────────────────────────
   const hash = window.location.hash
   if (!hash) return

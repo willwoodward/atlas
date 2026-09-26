@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from auth import create_jwt, get_current_user, verify_google_token
+from crypto import enc, dec
 from database import get_db
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -69,7 +70,7 @@ async def gcal_exchange(body: GcalCodeIn, user=Depends(get_current_user), db=Dep
              gcal_refresh_token = COALESCE(excluded.gcal_refresh_token, gcal_refresh_token),
              gcal_access_token = excluded.gcal_access_token,
              gcal_access_expires_at = excluded.gcal_access_expires_at""",
-        (user["sub"], refresh_token, access_token, expires_at),
+        (user["sub"], enc(refresh_token), enc(access_token), expires_at),
     )
     await db.commit()
     return {"ok": True}
@@ -90,7 +91,9 @@ async def gcal_token(user=Depends(get_current_user), db=Depends(get_db)):
     now = int(time.time())
     # Return cached token if it has > 5 minutes left
     if row["gcal_access_token"] and row["gcal_access_expires_at"] and row["gcal_access_expires_at"] > now + 300:
-        return {"access_token": row["gcal_access_token"]}
+        cached = dec(row["gcal_access_token"])
+        if cached:
+            return {"access_token": cached}
 
     # Refresh the access token
     if not GOOGLE_CLIENT_SECRET:
@@ -98,7 +101,7 @@ async def gcal_token(user=Depends(get_current_user), db=Depends(get_db)):
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(GCAL_TOKEN_URL, data={
-            "refresh_token": row["gcal_refresh_token"],
+            "refresh_token": dec(row["gcal_refresh_token"]),
             "client_id": GOOGLE_CLIENT_ID,
             "client_secret": GOOGLE_CLIENT_SECRET,
             "grant_type": "refresh_token",
@@ -113,7 +116,7 @@ async def gcal_token(user=Depends(get_current_user), db=Depends(get_db)):
 
     await db.execute(
         "UPDATE user_integrations SET gcal_access_token = ?, gcal_access_expires_at = ? WHERE email = ?",
-        (access_token, expires_at, user["sub"]),
+        (enc(access_token), expires_at, user["sub"]),
     )
     await db.commit()
     return {"access_token": access_token}
@@ -133,7 +136,7 @@ async def gcal_disconnect(user=Depends(get_current_user), db=Depends(get_db)):
         try:
             async with httpx.AsyncClient() as client:
                 await client.post("https://oauth2.googleapis.com/revoke",
-                                  params={"token": row["gcal_refresh_token"]})
+                                  params={"token": dec(row["gcal_refresh_token"])})
         except Exception:
             pass
 

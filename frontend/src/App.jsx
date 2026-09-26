@@ -7,6 +7,8 @@ import { UserProvider }          from './context/UserContext.jsx'
 import { HabitsProvider }        from './context/HabitsContext.jsx'
 import { IntegrationsProvider }  from './context/IntegrationsContext.jsx'
 import { FinancesProvider }      from './context/FinancesContext.jsx'
+import { EmploymentProvider }    from './context/EmploymentContext.jsx'
+import { FitnessProvider }       from './context/FitnessContext.jsx'
 import { LocalCalendarProvider } from './context/LocalCalendarContext.jsx'
 import { NotesProvider }         from './context/NotesContext.jsx'
 import { GitHubProvider }        from './context/GitHubContext.jsx'
@@ -67,6 +69,8 @@ function Dashboard() {
       <HabitsProvider>
         <IntegrationsProvider>
           <FinancesProvider>
+          <EmploymentProvider>
+          <FitnessProvider>
             <LocalCalendarProvider>
               <GoalsProvider>
                 <TodosProvider>
@@ -81,6 +85,8 @@ function Dashboard() {
                 </TodosProvider>
               </GoalsProvider>
             </LocalCalendarProvider>
+          </FitnessProvider>
+          </EmploymentProvider>
           </FinancesProvider>
         </IntegrationsProvider>
       </HabitsProvider>

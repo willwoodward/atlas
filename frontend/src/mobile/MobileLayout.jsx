@@ -8,6 +8,7 @@ import TodoPage      from '../desktop/TodoPage.jsx'
 import GoalsPage     from '../desktop/GoalsPage.jsx'
 import NotesPage     from '../desktop/NotesPage.jsx'
 import FinancesPage  from '../desktop/FinancesPage.jsx'
+import FitnessPage   from '../desktop/FitnessPage.jsx'
 import AssistantPage from '../desktop/AssistantPage.jsx'
 import AccountsPage  from '../desktop/AccountsPage.jsx'
 
@@ -19,12 +20,13 @@ const PAGES = [
   { id: 'goals',     label: 'Goals',     component: GoalsPage },
   { id: 'notes',     label: 'Notes',     component: NotesPage },
   { id: 'finances',  label: 'Finances',  component: FinancesPage },
+  { id: 'fitness',   label: 'Fitness',   component: FitnessPage },
   { id: 'assistant', label: 'Assistant', component: AssistantPage },
   { id: 'accounts',  label: 'Accounts',  component: AccountsPage },
 ]
 
 // Pages shown in the drawer nav (excludes accounts — accessed via avatar)
-const NAV_PAGES = ['home', 'calendar', 'habits', 'todos', 'goals', 'notes', 'finances', 'assistant']
+const NAV_PAGES = ['home', 'calendar', 'habits', 'todos', 'goals', 'notes', 'finances', 'fitness', 'assistant']
 
 const I = (...kids) => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{kids}</svg>
@@ -37,6 +39,7 @@ const icons = {
   goals:     I(<circle cx="12" cy="12" r="8" key="a"/>, <circle cx="12" cy="12" r="3.5" key="b"/>),
   notes:     I(<rect x="5" y="4" width="14" height="16" rx="2" key="a"/>, <line x1="9" y1="9" x2="15" y2="9" key="b"/>, <line x1="9" y1="13" x2="13" y2="13" key="c"/>),
   finances:  I(<path d="M4 15l5-5 4 3 7-8" key="a"/>, <line x1="4" y1="20" x2="20" y2="20" key="b"/>),
+  fitness:   I(<path d="M3 12h4l3-7 4 14 3-7h4" key="a"/>),
   assistant: I(<circle cx="12" cy="12" r="7" key="a"/>, <circle cx="12" cy="12" r="2.5" key="b"/>),
   accounts:  I(<circle cx="12" cy="8" r="4" key="a"/>, <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" key="b"/>),
 }

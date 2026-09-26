@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useFinances } from '../context/FinancesContext.jsx'
 import GoalRing from '../components/GoalRing.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
+import CompensationPanel from '../components/CompensationPanel.jsx'
+import InsightsPanel from '../components/InsightsPanel.jsx'
 
 const PAL = ['#6f8168','#c15f3c','#5f7591','#b08a3e','#9a6d84','#c88a5f']
 
@@ -23,10 +25,27 @@ const inp = { padding: '9px 12px', borderRadius: 9, border: '1.5px solid var(--b
 const sel = { ...inp, cursor: 'pointer' }
 
 function Modal({ title, onClose, children }) {
+  const isMobile = useIsMobile()
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(43,40,32,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(43,40,32,.4)', display: 'flex',
+      alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center', zIndex: 50,
+      padding: isMobile ? 0 : 16,
+    }}
       onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ background: 'var(--surface)', borderRadius: 20, padding: 28, width: 440, maxWidth: '90vw', boxShadow: '0 24px 60px rgba(43,40,32,.22)' }}>
+      {/* maxHeight + scroll: the import preview can be a hundred rows, and
+          without this the confirm button sits below the fold with no way down. */}
+      <div style={{
+        background: 'var(--surface)',
+        borderRadius: isMobile ? '20px 20px 0 0' : 20,
+        padding: isMobile ? '22px 18px calc(22px + env(safe-area-inset-bottom))' : 28,
+        width: isMobile ? '100%' : 440,
+        maxWidth: '100%',
+        maxHeight: isMobile ? '92vh' : '88vh',
+        overflowY: 'auto',
+        WebkitOverflowScrolling: 'touch',
+        boxShadow: '0 24px 60px rgba(43,40,32,.22)',
+      }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
           <h3 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 22, fontWeight: 600 }}>{title}</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 20, lineHeight: 1, padding: 4 }}>×</button>
@@ -131,9 +150,9 @@ function PotPanel({ pot, onClose }) {
               <button onClick={() => removeSubGoal(pot.id, sg.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>×</button>
             </div>
           ))}
-          <form onSubmit={handleAddSub} style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <input value={subName} onChange={e => setSubName(e.target.value)} placeholder="Sub-goal name" style={{ ...inp, flex: 1 }} />
-            <input type="number" min="0" step="0.01" value={subTarget} onChange={e => setSubTarget(e.target.value)} placeholder="£0" style={{ ...inp, width: 80 }} />
+          <form onSubmit={handleAddSub} style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+            <input value={subName} onChange={e => setSubName(e.target.value)} placeholder="Sub-goal name" style={{ ...inp, flex: '1 1 140px' }} />
+            <input type="number" min="0" step="0.01" value={subTarget} onChange={e => setSubTarget(e.target.value)} placeholder="£0" style={{ ...inp, flex: '0 0 80px' }} />
             <PrimaryBtn type="submit" style={{ padding: '9px 14px', fontSize: 13 }}>Add</PrimaryBtn>
           </form>
         </div>
@@ -142,9 +161,9 @@ function PotPanel({ pot, onClose }) {
         <div>
           <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 10 }}>Log deposit</div>
           <form onSubmit={handleDeposit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input type="number" min="0.01" step="0.01" value={depAmt} onChange={e => setDepAmt(e.target.value)} placeholder="Amount (£)" required style={{ ...inp, flex: 1 }} />
-              <input type="date" value={depDate} onChange={e => setDepDate(e.target.value)} style={{ ...inp, width: 150 }} />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <input type="number" min="0.01" step="0.01" value={depAmt} onChange={e => setDepAmt(e.target.value)} placeholder="Amount (£)" required style={{ ...inp, flex: '1 1 130px' }} />
+              <input type="date" value={depDate} onChange={e => setDepDate(e.target.value)} style={{ ...inp, flex: '1 1 140px' }} />
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <input value={depNote} onChange={e => setDepNote(e.target.value)} placeholder="Note (optional)" style={{ ...inp, flex: 1 }} />
@@ -203,9 +222,13 @@ function AddTransactionModal({ onClose }) {
           ))}
         </div>
         <Field label="Description / Merchant"><input autoFocus value={merchant} onChange={e => setMerchant(e.target.value)} placeholder={type === 'income' ? 'e.g. Salary' : 'e.g. Tesco'} style={inp} /></Field>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <Field label="Amount (£)" style={{ flex: 1 }}><input type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" required style={inp} /></Field>
-          <Field label="Date"><input type="date" value={date} onChange={e => setDate(e.target.value)} style={sel} /></Field>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 130px' }}>
+            <Field label="Amount (£)"><input type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" required style={inp} /></Field>
+          </div>
+          <div style={{ flex: '1 1 130px' }}>
+            <Field label="Date"><input type="date" value={date} onChange={e => setDate(e.target.value)} style={sel} /></Field>
+          </div>
         </div>
         <Field label="Category"><input value={category} onChange={e => setCategory(e.target.value)} placeholder="e.g. Groceries" style={inp} /></Field>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
@@ -256,6 +279,201 @@ function AddAccountModal({ onClose }) {
   )
 }
 
+// ─── Import statement modal ───────────────────────────────────────────────────
+//
+// Neither Barclays nor Wise exposes a usable read-only API for a UK personal
+// account, so a CSV export is the ingest path. Two steps on purpose: the
+// preview writes nothing, so picking the wrong file or the wrong bank costs a
+// click rather than a corrupted ledger.
+
+const SOURCES = [
+  { id: 'barclays_csv', label: 'Barclays (CSV)' },
+  { id: 'wise_csv',     label: 'Wise (CSV)' },
+]
+
+function ImportModal({ onClose }) {
+  const { accounts, previewImport, commitImport } = useFinances()
+  const [source, setSource]     = useState(SOURCES[0].id)
+  const [accountId, setAccount] = useState(accounts[0]?.id || '')
+  const [fileName, setFileName] = useState('')
+  const [content, setContent]   = useState('')
+  const [preview, setPreview]   = useState(null)
+  const [rates, setRates]       = useState({})
+  const [busy, setBusy]         = useState(false)
+  const [error, setError]       = useState('')
+  const [done, setDone]         = useState(null)
+
+  const readFile = (file) => {
+    if (!file) return
+    setFileName(file.name)
+    setError('')
+    const reader = new FileReader()
+    reader.onload = () => setContent(String(reader.result || ''))
+    reader.onerror = () => setError('Could not read that file')
+    reader.readAsText(file)
+  }
+
+  const runPreview = async () => {
+    if (!content || !accountId) return
+    setBusy(true); setError('')
+    try {
+      const result = await previewImport(source, accountId, content)
+      setPreview(result)
+      setRates(Object.fromEntries(result.currencies.map(c => [c, ''])))
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const runCommit = async () => {
+    setBusy(true)
+    try {
+      const fresh = preview.rows.filter(r => !r.duplicate)
+      const fx = Object.fromEntries(
+        Object.entries(rates).map(([c, v]) => [c, Number(v) || 1])
+      )
+      setDone(await commitImport(source, accountId, fresh, fx))
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (done) {
+    return (
+      <Modal title="Import complete" onClose={onClose}>
+        <div style={{ fontSize: 14, color: 'var(--mid)', lineHeight: 1.6 }}>
+          Added <strong style={{ color: 'var(--ink)' }}>{done.inserted}</strong> transaction{done.inserted !== 1 ? 's' : ''}.
+          {done.skipped > 0 && <> Skipped {done.skipped} already imported.</>}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+          <PrimaryBtn onClick={onClose}>Done</PrimaryBtn>
+        </div>
+      </Modal>
+    )
+  }
+
+  if (accounts.length === 0) {
+    return (
+      <Modal title="Import statement" onClose={onClose}>
+        <div style={{ fontSize: 14, color: 'var(--mid)', lineHeight: 1.6 }}>
+          Add an account first — imported transactions are filed against one, so
+          balances and history stay tied together.
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+          <GhostBtn onClick={onClose}>Close</GhostBtn>
+        </div>
+      </Modal>
+    )
+  }
+
+  return (
+    <Modal title="Import statement" onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 150px' }}>
+            <Field label="Account">
+              <select value={accountId} onChange={e => { setAccount(e.target.value); setPreview(null) }} style={sel}>
+                {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div style={{ flex: '1 1 150px' }}>
+            <Field label="Format">
+              <select value={source} onChange={e => { setSource(e.target.value); setPreview(null) }} style={sel}>
+                {SOURCES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+            </Field>
+          </div>
+        </div>
+
+        <Field label="Statement file">
+          <label style={{ ...inp, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, color: fileName ? 'var(--ink)' : 'var(--faint)' }}>
+            <input type="file" accept=".csv,text/csv" style={{ display: 'none' }}
+              onChange={e => { readFile(e.target.files?.[0]); setPreview(null) }} />
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {fileName || 'Choose a CSV export…'}
+            </span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#c15f3c' }}>Browse</span>
+          </label>
+        </Field>
+
+        {error && (
+          <div style={{ fontSize: 13, color: '#c15f3c', background: 'var(--surface-2)', borderRadius: 9, padding: '10px 12px' }}>{error}</div>
+        )}
+
+        {!preview && (
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <GhostBtn type="button" onClick={onClose}>Cancel</GhostBtn>
+            <PrimaryBtn onClick={runPreview} disabled={!content || busy} style={{ opacity: !content || busy ? .5 : 1 }}>
+              {busy ? 'Reading…' : 'Preview'}
+            </PrimaryBtn>
+          </div>
+        )}
+
+        {preview && (
+          <>
+            <div style={{ display: 'flex', gap: 18, fontSize: 13, color: 'var(--mid)', paddingTop: 2 }}>
+              <span><strong style={{ color: '#6f8168', fontSize: 15 }}>{preview.new_count}</strong> new</span>
+              <span><strong style={{ color: 'var(--muted)', fontSize: 15 }}>{preview.duplicate_count}</strong> already imported</span>
+            </div>
+
+            {preview.currencies.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--muted)', letterSpacing: '.04em', textTransform: 'uppercase', marginBottom: 8 }}>
+                  Exchange rate to GBP
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--faint)', marginBottom: 8, lineHeight: 1.5 }}>
+                  Stored with each transaction, so past months keep the rate they were imported at.
+                </div>
+                {preview.currencies.map(c => (
+                  <div key={c} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <span style={{ fontSize: 13, width: 70 }}>1 {c} =</span>
+                    <input type="number" step="0.0001" min="0" placeholder="0.00" value={rates[c]}
+                      onChange={e => setRates(r => ({ ...r, [c]: e.target.value }))}
+                      style={{ ...inp, width: 110 }} />
+                    <span style={{ fontSize: 13, color: 'var(--muted)' }}>GBP</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ maxHeight: 260, overflowY: 'auto', borderTop: '1px solid var(--bd-sm)' }}>
+              {preview.rows.map(r => (
+                <div key={r.external_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--bd-xs)', opacity: r.duplicate ? .4 : 1 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', flex: 'none', background: r.type === 'income' ? '#6f8168' : '#c15f3c' }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.merchant}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                      {r.date}{r.category ? ` · ${r.category}` : ''}{r.duplicate ? ' · already imported' : ''}
+                    </div>
+                  </div>
+                  <div style={{ fontFamily: "'Newsreader', serif", fontSize: 14, fontWeight: 600, flex: 'none' }}>
+                    {r.type === 'income' ? '+' : '−'}{r.amount.toFixed(2)}
+                    {r.currency !== 'GBP' && <span style={{ fontSize: 11, color: 'var(--muted)' }}> {r.currency}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <GhostBtn type="button" onClick={() => setPreview(null)}>Back</GhostBtn>
+              <PrimaryBtn onClick={runCommit} disabled={busy || preview.new_count === 0}
+                style={{ opacity: busy || preview.new_count === 0 ? .5 : 1 }}>
+                {busy ? 'Importing…' : `Import ${preview.new_count}`}
+              </PrimaryBtn>
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
 // ─── Account type colours ─────────────────────────────────────────────────────
 
 const ACC_COLOR = { checking: '#6f8168', savings: '#5f7591', investment: '#b08a3e', credit: '#c15f3c' }
@@ -268,6 +486,7 @@ export default function FinancesPage() {
   const [showAddPot, setShowAddPot]         = useState(false)
   const [showAddTxn, setShowAddTxn]         = useState(false)
   const [showAddAcc, setShowAddAcc]         = useState(false)
+  const [showImport, setShowImport]         = useState(false)
   const [activePot, setActivePot]           = useState(null)
 
   const { removeAccount, removeTransaction } = useFinances()
@@ -282,6 +501,7 @@ export default function FinancesPage() {
           <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>Net worth, cashflow, and savings pots.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <GhostBtn onClick={() => setShowImport(true)} style={{ fontSize: 13, padding: '8px 14px' }}>Import statement</GhostBtn>
           <GhostBtn onClick={() => setShowAddAcc(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Account</GhostBtn>
           <GhostBtn onClick={() => setShowAddTxn(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Transaction</GhostBtn>
           <PrimaryBtn onClick={() => setShowAddPot(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Pot</PrimaryBtn>
@@ -295,11 +515,11 @@ export default function FinancesPage() {
           <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 22 : 32, fontWeight: 500 }}>{accounts.length > 0 ? fmt(netWorth) : '—'}</div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 22px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>Income</div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>Income · this month</div>
           <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 20 : 26, fontWeight: 500 }}>{income > 0 ? fmt(income) : '—'}</div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 22px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>Spending</div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>Spending · this month</div>
           <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 20 : 26, fontWeight: 500, color: spending > 0 ? '#c15f3c' : 'var(--ink)' }}>{spending > 0 ? fmt(spending) : '—'}</div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 22px' }}>
@@ -383,11 +603,14 @@ export default function FinancesPage() {
           </div>
         </div>
 
-        {/* RIGHT col: Transactions */}
+        {/* RIGHT col: Transactions + compensation */}
         <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 19, fontWeight: 600 }}>Transactions</h2>
+            <div style={{ display: 'flex', gap: 12 }}>
+            <button onClick={() => setShowImport(true)} style={{ fontSize: 12, fontWeight: 600, color: 'var(--mid)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>Import</button>
             <button onClick={() => setShowAddTxn(true)} style={{ fontSize: 12, fontWeight: 600, color: '#c15f3c', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>+ Add</button>
+            </div>
           </div>
           {transactions.length === 0 && <div style={{ padding: '24px 0', fontSize: 13, color: 'var(--faint)', textAlign: 'center' }}>No transactions yet</div>}
           {transactions.map(t => (
@@ -406,10 +629,19 @@ export default function FinancesPage() {
         </div>
       </div>
 
+      <div style={{ marginTop: 16 }}>
+        <InsightsPanel />
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <CompensationPanel />
+      </div>
+
       {/* Modals */}
       {showAddPot && <AddPotModal onClose={() => setShowAddPot(false)} />}
       {showAddTxn && <AddTransactionModal onClose={() => setShowAddTxn(false)} />}
       {showAddAcc && <AddAccountModal onClose={() => setShowAddAcc(false)} />}
+      {showImport && <ImportModal onClose={() => setShowImport(false)} />}
       {activePot  && <PotPanel pot={pots.find(p => p.id === activePot.id) || activePot} onClose={() => setActivePot(null)} />}
     </div>
   )

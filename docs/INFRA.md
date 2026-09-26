@@ -81,6 +81,21 @@ GITHUB_PAT=github_pat_...        # fine-grained, see below
 Changing this file requires **`docker compose up -d --force-recreate`** — a
 `restart` does *not* re-read `env_file`. This has bitten us twice.
 
+### Model tuning — all optional, all have defaults in code
+
+| Variable | Default | Notes |
+|---|---|---|
+| `AGENT_MODEL_ID` | `gpt-5.6-luna` | Both coder and researchers |
+| `AGENT_REASONING_EFFORT` | `max` | Coder. Endpoint accepts `max`, `xhigh`, `high` |
+| `RESEARCH_REASONING_EFFORT` | `high` | Researchers — several run in parallel |
+| `CODING_MAX_TOKENS` | `32768` | Reasoning tokens bill against this |
+| `SUBAGENT_MAX_TOKENS` | `8192` | Per researcher |
+
+Effort values were probed against the live endpoint, not taken from docs — an
+unsupported value fails the whole run, so change one only after checking it is
+accepted. Raising effort without raising the token ceiling buys truncation
+rather than better work: reasoning is billed against `max_output_tokens`.
+
 ### GitHub PAT scope
 
 Fine-grained, restricted to the repos the agent may touch:
