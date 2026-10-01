@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends
+import re
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from auth import get_current_user
@@ -27,10 +30,36 @@ class QuarterIn(BaseModel):
     text: str
 
 
+class ReflectionIn(BaseModel):
+    text: str
+
+
+PERIOD_RE = re.compile(r"^\d{4}-Q[1-4]$")
+
+
 @router.get("")
 async def list_goals(user=Depends(get_current_user), db=Depends(get_db)):
     async with db.execute("SELECT * FROM goals ORDER BY created_at") as cur:
         return [dict(r) for r in await cur.fetchall()]
+
+
+@router.get("/reflections")
+async def list_reflections(user=Depends(get_current_user), db=Depends(get_db)):
+    async with db.execute("SELECT * FROM goal_reflections ORDER BY period") as cur:
+        return [dict(r) for r in await cur.fetchall()]
+
+
+@router.put("/reflections/{period}")
+async def set_reflection(period: str, body: ReflectionIn, user=Depends(get_current_user), db=Depends(get_db)):
+    if not PERIOD_RE.match(period):
+        raise HTTPException(400, "period must look like 2026-Q3")
+    await db.execute(
+        """INSERT INTO goal_reflections (period, text, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(period) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at""",
+        (period, body.text, datetime.now(timezone.utc).isoformat()),
+    )
+    await db.commit()
+    return {"ok": True}
 
 
 @router.post("")

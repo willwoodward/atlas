@@ -14,6 +14,7 @@ function getQuarterFromDate(dateStr) {
   return 'Q4'
 }
 const CURRENT_Q = getQuarterFromDate(new Date().toISOString())
+const CURRENT_YEAR = new Date().getFullYear()
 const QUARTER_ORDER = { Q1: 0, Q2: 1, Q3: 2, Q4: 3 }
 
 function QuarterFocusInput({ value, onChange, color }) {
@@ -127,6 +128,186 @@ function GoalCard({ goal, onRemove, onUpdate, onQuarterFocus }) {
   )
 }
 
+const REVIEW_PROMPTS = [
+  'What actually moved forward this quarter?',
+  "What didn't happen, and why?",
+  'What am I proudest of?',
+  'Where did my time really go?',
+  'What would I do differently?',
+  'What should change for next quarter?',
+]
+
+// Debounced so typing a long reflection is not one PUT per keystroke. Pending
+// text is flushed when the quarter changes or the drawer closes.
+function ReflectionEditor({ period, initial, onSave }) {
+  const [text, setText] = useState(initial)
+  const timer = useRef(null)
+  const latest = useRef({ text: initial, dirty: false })
+
+  useEffect(() => () => {
+    clearTimeout(timer.current)
+    if (latest.current.dirty) onSave(period, latest.current.text)
+  }, [period, onSave])
+
+  const change = (value) => {
+    setText(value)
+    latest.current = { text: value, dirty: true }
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => {
+      latest.current.dirty = false
+      onSave(period, value)
+    }, 600)
+  }
+
+  // Appends the prompt as a line to write under, then puts the cursor after it.
+  const textareaRef = useRef(null)
+  const addPrompt = (prompt) => {
+    const sep = !text ? '' : text.endsWith('\n\n') ? '' : text.endsWith('\n') ? '\n' : '\n\n'
+    const next = `${text}${sep}${prompt}\n`
+    change(next)
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(next.length, next.length)
+      el.scrollTop = el.scrollHeight
+    })
+  }
+
+  return (
+    <>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {REVIEW_PROMPTS.map(p => {
+        const used = text.includes(p)
+        return (
+          <button key={p} onClick={() => !used && addPrompt(p)} disabled={used}
+            style={{ padding: '5px 11px', borderRadius: 99, border: '1px solid var(--bd-xl)',
+              background: 'transparent', fontFamily: 'inherit', fontSize: 12.5,
+              color: used ? 'var(--faint)' : 'var(--mid)', cursor: used ? 'default' : 'pointer',
+              textDecoration: used ? 'line-through' : 'none' }}
+          >
+            {p}
+          </button>
+        )
+      })}
+    </div>
+    <textarea
+      ref={textareaRef}
+      autoFocus
+      value={text}
+      onChange={e => change(e.target.value)}
+      placeholder="How did the quarter go? What moved, what didn't, what you'd change next time…"
+      style={{ width: '100%', minHeight: 260, flex: 1, resize: 'vertical', boxSizing: 'border-box',
+        padding: '14px 16px', borderRadius: 12, border: '1.5px solid var(--bd-xl)', outline: 'none',
+        background: 'var(--surface-2)', fontFamily: 'inherit', fontSize: 14.5, lineHeight: 1.65,
+        color: 'var(--ink)' }}
+    />
+    </>
+  )
+}
+
+function QuarterlyReviewDrawer({ onClose }) {
+  const { goals, reflections, setReflection } = useGoals()
+  const [year, setYear] = useState(CURRENT_YEAR)
+  const [quarter, setQuarter] = useState(CURRENT_Q)
+  const period = `${year}-${quarter}`
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const isFuture = (y, q) => y > CURRENT_YEAR || (y === CURRENT_YEAR && QUARTER_ORDER[q] > QUARTER_ORDER[CURRENT_Q])
+  const changeYear = (y) => {
+    setYear(y)
+    if (isFuture(y, quarter)) setQuarter(CURRENT_Q)
+  }
+
+  // Per-goal quarter focus is not stored by year, so it only describes the
+  // current year — showing it against an older review would be misleading.
+  const focuses = year === CURRENT_YEAR
+    ? goals.filter(g => g.quarters[quarter]?.trim())
+    : []
+
+  const arrow = (disabled) => ({
+    background: 'none', border: 'none', padding: '2px 8px', fontSize: 16, fontFamily: 'inherit',
+    cursor: disabled ? 'default' : 'pointer', color: disabled ? 'var(--bd-xl)' : 'var(--mid)',
+  })
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,.4)' }} />
+      <div role="dialog" aria-label="Quarterly review" style={{
+        position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 201, margin: '0 auto',
+        width: '100%', maxWidth: 760, boxSizing: 'border-box',
+        background: 'var(--surface)', borderRadius: '18px 18px 0 0',
+        boxShadow: '0 -8px 40px rgba(0,0,0,.18)',
+        height: '82vh', display: 'flex', flexDirection: 'column',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 20px 0' }}>
+          <div style={{ width: 36, height: 4, borderRadius: 99, background: 'var(--bd-xl)' }} />
+        </div>
+
+        <div style={{ padding: '14px 24px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 24, fontWeight: 500 }}>Quarterly review</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <button onClick={() => changeYear(year - 1)} style={arrow(false)} aria-label="Previous year">‹</button>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', minWidth: 40, textAlign: 'center' }}>{year}</span>
+            <button onClick={() => year < CURRENT_YEAR && changeYear(year + 1)} style={arrow(year >= CURRENT_YEAR)} aria-label="Next year">›</button>
+            <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '2px 4px 2px 12px', fontSize: 16, lineHeight: 1 }}>✕</button>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, padding: '16px 24px 0' }}>
+          {QUARTERS.map(q => {
+            const future = isFuture(year, q)
+            const active = q === quarter
+            const written = !!reflections[`${year}-${q}`]?.trim()
+            return (
+              <button key={q} disabled={future} onClick={() => setQuarter(q)}
+                style={{
+                  flex: 1, padding: '8px 4px', borderRadius: 10, border: 'none', position: 'relative',
+                  cursor: future ? 'default' : 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700,
+                  background: active ? 'var(--ink)' : 'var(--surface-2)',
+                  color: future ? 'var(--bd-xl)' : active ? 'var(--surface)' : 'var(--mid)',
+                  transition: 'all .12s',
+                }}
+              >
+                {q}
+                <span style={{ display: 'block', fontSize: 10.5, fontWeight: 500, marginTop: 1, opacity: .75 }}>{QUARTER_LABELS[q]}</span>
+                {written && !active && (
+                  <span style={{ position: 'absolute', top: 6, right: 8, width: 5, height: 5, borderRadius: '50%', background: '#c15f3c' }} />
+                )}
+              </button>
+            )
+          })}
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '18px 24px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {focuses.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 }}>
+                What you set out to do
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {focuses.map(g => (
+                  <div key={g.id} style={{ borderLeft: `3px solid ${g.color}`, padding: '2px 0 2px 10px' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{g.title}</div>
+                    <div style={{ fontSize: 13, color: 'var(--mid)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{g.quarters[quarter]}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <ReflectionEditor key={period} period={period} initial={reflections[period] ?? ''} onSave={setReflection} />
+        </div>
+      </div>
+    </>
+  )
+}
+
 function AddGoalForm({ onAdd, onCancel }) {
   const [title, setTitle] = useState('')
   const [color, setColor] = useState(GOAL_PALETTE[0])
@@ -159,6 +340,7 @@ export default function GoalsPage() {
   const isMobile = useIsMobile()
   const { goals, addGoal, removeGoal, updateGoal, setQuarterFocus } = useGoals()
   const [adding, setAdding] = useState(false)
+  const [reviewing, setReviewing] = useState(false)
   useQuickAdd('Add goal', () => setAdding(true))
 
   const handleAdd = (title, color) => {
@@ -189,7 +371,23 @@ export default function GoalsPage() {
         </div>
 
         {adding && <AddGoalForm onAdd={handleAdd} onCancel={() => setAdding(false)} />}
+
+        <button onClick={() => setReviewing(true)}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, width: '100%',
+            padding: '16px 22px', borderRadius: 18, border: '1px dashed var(--bd-xl)', background: 'transparent',
+            cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', color: 'var(--ink)' }}
+        >
+          <span>
+            <span style={{ display: 'block', fontFamily: "'Newsreader', serif", fontSize: 18, fontWeight: 500 }}>Quarterly review</span>
+            <span style={{ display: 'block', fontSize: 13, color: 'var(--mid)', marginTop: 2 }}>
+              Reflect on {CURRENT_Q} {CURRENT_YEAR}, or look back at earlier quarters.
+            </span>
+          </span>
+          <span style={{ fontSize: 18, color: 'var(--muted)' }}>↑</span>
+        </button>
       </div>
+
+      {reviewing && <QuarterlyReviewDrawer onClose={() => setReviewing(false)} />}
     </div>
   )
 }

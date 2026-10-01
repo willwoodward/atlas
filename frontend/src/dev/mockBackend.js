@@ -18,6 +18,7 @@ const EMPTY = {
   '/api/habits': [],
   '/api/todos': [],
   '/api/goals': [],
+  '/api/goals/reflections': [],
   '/api/notes': [],
   '/api/calendar': [],
   // pots/transactions/accounts destructured directly — must all be present.

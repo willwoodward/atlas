@@ -19,6 +19,8 @@ export function GoalsProvider({ children }) {
   // Bumped when the assistant mutates data via MCP, forcing a refetch.
   const { tick } = useRefresh()
   const [goals, setGoals] = useState([])
+  // Quarterly review text keyed by period, e.g. { '2026-Q3': '...' }.
+  const [reflections, setReflections] = useState({})
 
   const call = useCallback((path, opts = {}) => fetch(`${API}${path}`, {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -28,6 +30,16 @@ export function GoalsProvider({ children }) {
   useEffect(() => {
     call('/api/goals').then(r => r.json()).then(rows => setGoals(rows.map(toInternal)))
   }, [token, tick])
+
+  useEffect(() => {
+    call('/api/goals/reflections').then(r => r.json())
+      .then(rows => setReflections(Object.fromEntries(rows.map(r => [r.period, r.text]))))
+  }, [token, tick])
+
+  const setReflection = useCallback(async (period, text) => {
+    setReflections(prev => ({ ...prev, [period]: text }))
+    await call(`/api/goals/reflections/${period}`, { method: 'PUT', body: JSON.stringify({ text }) })
+  }, [call])
 
   const addGoal = useCallback(async (title, color) => {
     const id = crypto.randomUUID()
@@ -56,7 +68,7 @@ export function GoalsProvider({ children }) {
   }, [call])
 
   return (
-    <Ctx.Provider value={{ goals, addGoal, removeGoal, updateGoal, setQuarterFocus }}>
+    <Ctx.Provider value={{ goals, addGoal, removeGoal, updateGoal, setQuarterFocus, reflections, setReflection }}>
       {children}
     </Ctx.Provider>
   )

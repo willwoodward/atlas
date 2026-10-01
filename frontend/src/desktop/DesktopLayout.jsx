@@ -274,7 +274,7 @@ export default function DesktopLayout() {
             </button>
           )}
         </header>
-        <div style={{ padding: active === 'assistant' ? '0px 34px 0' : '30px 34px 0px', flex: 1, minHeight: 0, overflowY: active === 'calendar' ? 'hidden' : 'auto', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: active === 'assistant' ? '0px 34px 0' : '30px 34px 40px', flex: 1, minHeight: 0, overflowY: active === 'calendar' ? 'hidden' : 'auto', display: 'flex', flexDirection: 'column' }}>
           {pages[active]}
         </div>
       </main>

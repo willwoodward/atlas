@@ -53,6 +53,14 @@ async def init_db():
                 q4 TEXT NOT NULL DEFAULT ''
             );
 
+            -- One free-form review per calendar quarter, keyed 'YYYY-Qn'. Goals
+            -- themselves are not year-scoped, so the year lives here instead.
+            CREATE TABLE IF NOT EXISTS goal_reflections (
+                period TEXT PRIMARY KEY,
+                text TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS finances_pots (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
