@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react'
 
 import { installMockBackend } from '../dev/mockBackend.js'
+import { isAppToken, rejectsSession } from './sessionGuard.js'
 
 const Ctx = createContext(null)
 const JWT_KEY = 'atlas:jwt'
@@ -33,7 +34,9 @@ function loadStored() {
     const token = localStorage.getItem(JWT_KEY)
     if (!token) return null
     const payload = decodeJwt(token)
-    if (!payload || payload.exp * 1000 < Date.now()) {
+    // Expired, or minted before the API required an audience: either way every
+    // request would 401, so drop it and show the login page instead.
+    if (!isAppToken(payload)) {
       localStorage.removeItem(JWT_KEY)
       return null
     }
@@ -98,6 +101,26 @@ function RealAuthProvider({ children }) {
     localStorage.removeItem(JWT_KEY)
     setAuth(null)
   }, [])
+
+  // Every context builds its own fetch, so the 401 check wraps fetch itself
+  // rather than each caller. Without it a token the API has stopped accepting
+  // leaves the app looking signed in, with every page failing behind it.
+  const token = auth?.token ?? null
+  useEffect(() => {
+    if (!token) return
+    const apiOrigin = new URL(API, window.location.origin).origin
+    const realFetch = window.fetch
+    window.fetch = async (input, init) => {
+      const res = await realFetch.call(window, input, init)
+      if (rejectsSession({
+        input, init, status: res.status, token, apiOrigin, pageOrigin: window.location.origin,
+      })) {
+        logout()
+      }
+      return res
+    }
+    return () => { window.fetch = realFetch }
+  }, [token, logout])
 
   // Listen for the postMessage from the popup
   useEffect(() => {

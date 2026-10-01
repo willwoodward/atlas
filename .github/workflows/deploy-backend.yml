@@ -25,8 +25,11 @@ jobs:
           script: |
             cd ~/atlas
             git pull origin main
-            # Name every service. `sandbox` was missing here, so the coding
-            # agent had nothing to SSH into in production — it was only ever
-            # exercised locally. Adding a service to docker-compose.yml is not
-            # enough on its own; it has to be listed on this line too.
-            docker compose up -d --build api agent sandbox
+            # Services are named explicitly; adding one to docker-compose.yml is
+            # not enough on its own, it has to be listed on this line too.
+            #
+            # `sandbox` is deliberately left out while agent coding is switched
+            # off (ATLAS_AGENT_CODING): naming it here restarted it on every
+            # deploy, undoing `docker compose stop sandbox`. Add it back when
+            # turning coding on.
+            docker compose up -d --build api agent
