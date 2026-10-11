@@ -5,11 +5,47 @@ import { useIsMobile } from '../hooks/useIsMobile.js'
 import CompensationPanel from '../components/CompensationPanel.jsx'
 import InsightsPanel from '../components/InsightsPanel.jsx'
 import { useQuickAdd } from '../context/QuickAddContext.jsx'
+import { formatMoney, currencySymbol, DISPLAY_CURRENCIES } from '../lib/fx.js'
 
 const PAL = ['#6f8168','#c15f3c','#5f7591','#b08a3e','#9a6d84','#c88a5f']
 
-const fmt = (n) => new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 2 }).format(n)
-const fmtAbs = (n) => fmt(Math.abs(n))
+const ACCOUNT_CURRENCIES = ['EUR', 'GBP', 'USD']
+const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+
+// EUR | GBP switch for everything on the page (and the net worth on Home).
+function CurrencySwitch() {
+  const { displayCurrency, setDisplayCurrency } = useFinances()
+  return (
+    <div role="radiogroup" aria-label="Display currency"
+      style={{ display: 'flex', gap: 3, padding: 3, background: 'var(--surface-2)', border: '1px solid var(--bd)', borderRadius: 10 }}>
+      {DISPLAY_CURRENCIES.map(c => (
+        <button key={c} role="radio" aria-checked={displayCurrency === c} onClick={() => setDisplayCurrency(c)}
+          style={{ padding: '5px 11px', borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
+            background: displayCurrency === c ? 'var(--surface)' : 'transparent',
+            color: displayCurrency === c ? 'var(--ink)' : 'var(--muted)',
+            boxShadow: displayCurrency === c ? '0 1px 3px var(--bd)' : 'none' }}>
+          {currencySymbol(c)} {c}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// An amount in its own currency, with the display-currency value beside it
+// when they differ ("£90.00 · ≈ €106.18").
+function Money({ amount, currency, converted, sign = '', style }) {
+  const { displayCurrency, fmt } = useFinances()
+  return (
+    <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', ...style }}>
+      <span>{sign}{formatMoney(Math.abs(amount), currency)}</span>
+      {currency !== displayCurrency && (
+        <span style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11, fontWeight: 500, color: 'var(--muted)' }}>
+          ≈ {converted == null ? '—' : `${sign}${fmt(Math.abs(converted))}`}
+        </span>
+      )}
+    </span>
+  )
+}
 
 // ─── Modals / inline forms ────────────────────────────────────────────────────
 
@@ -67,7 +103,7 @@ function GhostBtn({ children, ...props }) {
 // ─── Add Pot Modal ────────────────────────────────────────────────────────────
 
 function AddPotModal({ onClose }) {
-  const { addPot } = useFinances()
+  const { addPot, displayCurrency } = useFinances()
   const [name, setName] = useState('')
   const [target, setTarget] = useState('')
   const [color, setColor] = useState(PAL[0])
@@ -84,7 +120,7 @@ function AddPotModal({ onClose }) {
     <Modal title="New savings pot" onClose={onClose}>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Field label="Name"><input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Camping Gear" style={inp} /></Field>
-        <Field label="Target amount (£)"><input type="number" min="0" step="0.01" value={target} onChange={e => setTarget(e.target.value)} placeholder="0.00" style={inp} /></Field>
+        <Field label={`Target amount (${currencySymbol(displayCurrency)})`}><input type="number" min="0" step="0.01" value={target} onChange={e => setTarget(e.target.value)} placeholder="0.00" style={inp} /></Field>
         <Field label="Colour">
           <div style={{ display: 'flex', gap: 8 }}>
             {PAL.map(c => <button key={c} type="button" onClick={() => setColor(c)} style={{ width: 28, height: 28, borderRadius: '50%', background: c, border: color === c ? '3px solid #2b2820' : '3px solid transparent', cursor: 'pointer', padding: 0 }} />)}
@@ -108,7 +144,9 @@ function PotPanel({ pot, onClose }) {
   const [subTarget, setSubTarget] = useState('')
   const [depAmt, setDepAmt]       = useState('')
   const [depNote, setDepNote]     = useState('')
-  const [depDate, setDepDate]     = useState(new Date().toISOString().slice(0, 10))
+  const [depDate, setDepDate]     = useState(localToday)
+  const pfmt = (n) => formatMoney(n, pot.currency)
+  const sym = currencySymbol(pot.currency)
 
   const handleAddSub = (e) => {
     e.preventDefault()
@@ -121,7 +159,7 @@ function PotPanel({ pot, onClose }) {
     e.preventDefault()
     if (!depAmt) return
     addDeposit(pot.id, depAmt, depNote.trim(), depDate)
-    setDepAmt(''); setDepNote(''); setDepDate(new Date().toISOString().slice(0, 10))
+    setDepAmt(''); setDepNote(''); setDepDate(localToday())
   }
 
   const totalSubTarget = (pot.subGoals || []).reduce((s, sg) => s + sg.targetAmount, 0)
@@ -134,26 +172,26 @@ function PotPanel({ pot, onClose }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
           <GoalRing pct={pot.pct} color={pot.color} size={72} />
           <div>
-            <div style={{ fontFamily: "'Newsreader', serif", fontSize: 28, fontWeight: 500, color: pot.color }}>{fmt(pot.saved)}</div>
-            {pot.targetAmount > 0 && <div style={{ fontSize: 13, color: 'var(--muted)' }}>of {fmt(pot.targetAmount)} target</div>}
+            <div style={{ fontFamily: "'Newsreader', serif", fontSize: 28, fontWeight: 500, color: pot.color }}>{pfmt(pot.saved)}</div>
+            {pot.targetAmount > 0 && <div style={{ fontSize: 13, color: 'var(--muted)' }}>of {pfmt(pot.targetAmount)} target</div>}
             {pot.notes && <div style={{ marginTop: 6, fontSize: 13, color: 'var(--mid)', fontStyle: 'italic' }}>{pot.notes}</div>}
           </div>
         </div>
 
         {/* Sub-goals */}
         <div>
-          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 10 }}>Sub-goals {totalSubTarget > 0 && <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>· {fmt(totalSubTarget)} total</span>}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 10 }}>Sub-goals {totalSubTarget > 0 && <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>· {pfmt(totalSubTarget)} total</span>}</div>
           {(pot.subGoals || []).map(sg => (
             <div key={sg.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--bd-sm)' }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: pot.color, flexShrink: 0 }} />
               <span style={{ flex: 1, fontSize: 13.5 }}>{sg.name}</span>
-              {sg.targetAmount > 0 && <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>{fmt(sg.targetAmount)}</span>}
+              {sg.targetAmount > 0 && <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--muted)' }}>{pfmt(sg.targetAmount)}</span>}
               <button onClick={() => removeSubGoal(pot.id, sg.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>×</button>
             </div>
           ))}
           <form onSubmit={handleAddSub} style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
             <input value={subName} onChange={e => setSubName(e.target.value)} placeholder="Sub-goal name" style={{ ...inp, flex: '1 1 140px' }} />
-            <input type="number" min="0" step="0.01" value={subTarget} onChange={e => setSubTarget(e.target.value)} placeholder="£0" style={{ ...inp, flex: '0 0 80px' }} />
+            <input type="number" min="0" step="0.01" value={subTarget} onChange={e => setSubTarget(e.target.value)} placeholder={`${sym}0`} style={{ ...inp, flex: '0 0 80px' }} />
             <PrimaryBtn type="submit" style={{ padding: '9px 14px', fontSize: 13 }}>Add</PrimaryBtn>
           </form>
         </div>
@@ -163,7 +201,7 @@ function PotPanel({ pot, onClose }) {
           <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 10 }}>Log deposit</div>
           <form onSubmit={handleDeposit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <input type="number" min="0.01" step="0.01" value={depAmt} onChange={e => setDepAmt(e.target.value)} placeholder="Amount (£)" required style={{ ...inp, flex: '1 1 130px' }} />
+              <input type="number" min="0.01" step="0.01" value={depAmt} onChange={e => setDepAmt(e.target.value)} placeholder={`Amount (${sym})`} required style={{ ...inp, flex: '1 1 130px' }} />
               <input type="date" value={depDate} onChange={e => setDepDate(e.target.value)} style={{ ...inp, flex: '1 1 140px' }} />
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -179,7 +217,7 @@ function PotPanel({ pot, onClose }) {
                 <div key={dep.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: '1px solid var(--bd-xs)' }}>
                   <span style={{ flex: 1, fontSize: 13, color: 'var(--mid)' }}>{dep.note || '—'}</span>
                   <span style={{ fontSize: 11, color: 'var(--faint)' }}>{dep.date}</span>
-                  <span style={{ fontFamily: "'Newsreader', serif", fontSize: 14, fontWeight: 600, color: '#6f8168' }}>+{fmt(dep.amount)}</span>
+                  <span style={{ fontFamily: "'Newsreader', serif", fontSize: 14, fontWeight: 600, color: '#6f8168' }}>+{pfmt(dep.amount)}</span>
                   <button onClick={() => removeDeposit(pot.id, dep.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 15, lineHeight: 1, padding: '0 2px' }}>×</button>
                 </div>
               ))}
@@ -198,17 +236,19 @@ function PotPanel({ pot, onClose }) {
 // ─── Add Transaction Modal ────────────────────────────────────────────────────
 
 function AddTransactionModal({ onClose }) {
-  const { addTransaction } = useFinances()
+  const { addTransaction, accounts, displayCurrency } = useFinances()
+  const [accountId, setAccountId] = useState(accounts[0]?.id || '')
+  const currency = accounts.find(a => a.id === accountId)?.currency || displayCurrency
   const [merchant, setMerchant] = useState('')
   const [category, setCategory] = useState('')
   const [amount, setAmount]     = useState('')
-  const [date, setDate]         = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate]         = useState(localToday)
   const [type, setType]         = useState('expense')
 
   const submit = (e) => {
     e.preventDefault()
     if (!merchant.trim() || !amount) return
-    addTransaction(merchant.trim(), category.trim(), amount, date, type)
+    addTransaction(merchant.trim(), category.trim(), amount, date, type, accountId || null)
     onClose()
   }
 
@@ -222,10 +262,17 @@ function AddTransactionModal({ onClose }) {
             </button>
           ))}
         </div>
+        {accounts.length > 0 && (
+          <Field label="Account">
+            <select value={accountId} onChange={e => setAccountId(e.target.value)} style={sel}>
+              {accounts.map(a => <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>)}
+            </select>
+          </Field>
+        )}
         <Field label="Description / Merchant"><input autoFocus value={merchant} onChange={e => setMerchant(e.target.value)} placeholder={type === 'income' ? 'e.g. Salary' : 'e.g. Tesco'} style={inp} /></Field>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 130px' }}>
-            <Field label="Amount (£)"><input type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" required style={inp} /></Field>
+            <Field label={`Amount (${currencySymbol(currency)})`}><input type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" required style={inp} /></Field>
           </div>
           <div style={{ flex: '1 1 130px' }}>
             <Field label="Date"><input type="date" value={date} onChange={e => setDate(e.target.value)} style={sel} /></Field>
@@ -249,11 +296,12 @@ function AddAccountModal({ onClose }) {
   const [inst, setInst]   = useState('')
   const [type, setType]   = useState('checking')
   const [bal, setBal]     = useState('')
+  const [currency, setCurrency] = useState('EUR')
 
   const submit = (e) => {
     e.preventDefault()
     if (!name.trim()) return
-    addAccount(name.trim(), inst.trim(), type, bal)
+    addAccount(name.trim(), inst.trim(), type, bal, currency)
     onClose()
   }
 
@@ -270,7 +318,12 @@ function AddAccountModal({ onClose }) {
             <option value="credit">Credit card</option>
           </select>
         </Field>
-        <Field label="Current balance (£)"><input type="number" step="0.01" value={bal} onChange={e => setBal(e.target.value)} placeholder="0.00" style={inp} /></Field>
+        <Field label="Currency">
+          <select value={currency} onChange={e => setCurrency(e.target.value)} style={sel}>
+            {ACCOUNT_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </Field>
+        <Field label={`Current balance (${currencySymbol(currency)})`}><input type="number" step="0.01" value={bal} onChange={e => setBal(e.target.value)} placeholder="0.00" style={inp} /></Field>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
           <GhostBtn type="button" onClick={onClose}>Cancel</GhostBtn>
           <PrimaryBtn type="submit">Add account</PrimaryBtn>
@@ -299,7 +352,6 @@ function ImportModal({ onClose }) {
   const [fileName, setFileName] = useState('')
   const [content, setContent]   = useState('')
   const [preview, setPreview]   = useState(null)
-  const [rates, setRates]       = useState({})
   const [busy, setBusy]         = useState(false)
   const [error, setError]       = useState('')
   const [done, setDone]         = useState(null)
@@ -320,7 +372,6 @@ function ImportModal({ onClose }) {
     try {
       const result = await previewImport(source, accountId, content)
       setPreview(result)
-      setRates(Object.fromEntries(result.currencies.map(c => [c, ''])))
     } catch (e) {
       setError(e.message)
     } finally {
@@ -332,10 +383,7 @@ function ImportModal({ onClose }) {
     setBusy(true)
     try {
       const fresh = preview.rows.filter(r => !r.duplicate)
-      const fx = Object.fromEntries(
-        Object.entries(rates).map(([c, v]) => [c, Number(v) || 1])
-      )
-      setDone(await commitImport(source, accountId, fresh, fx))
+      setDone(await commitImport(source, accountId, fresh))
     } catch (e) {
       setError(e.message)
     } finally {
@@ -424,22 +472,9 @@ function ImportModal({ onClose }) {
             </div>
 
             {preview.currencies.length > 0 && (
-              <div>
-                <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--muted)', letterSpacing: '.04em', textTransform: 'uppercase', marginBottom: 8 }}>
-                  Exchange rate to GBP
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--faint)', marginBottom: 8, lineHeight: 1.5 }}>
-                  Stored with each transaction, so past months keep the rate they were imported at.
-                </div>
-                {preview.currencies.map(c => (
-                  <div key={c} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                    <span style={{ fontSize: 13, width: 70 }}>1 {c} =</span>
-                    <input type="number" step="0.0001" min="0" placeholder="0.00" value={rates[c]}
-                      onChange={e => setRates(r => ({ ...r, [c]: e.target.value }))}
-                      style={{ ...inp, width: 110 }} />
-                    <span style={{ fontSize: 13, color: 'var(--muted)' }}>GBP</span>
-                  </div>
-                ))}
+              <div style={{ fontSize: 12.5, color: 'var(--mid)', background: 'var(--surface-2)', borderRadius: 9, padding: '10px 12px', lineHeight: 1.55 }}>
+                Rows in {preview.currencies.join(', ')} will be stored in {preview.account_currency} (this account's currency),
+                converted at the ECB rate on each transaction's date. The original amount is kept too.
               </div>
             )}
 
@@ -454,8 +489,8 @@ function ImportModal({ onClose }) {
                     </div>
                   </div>
                   <div style={{ fontFamily: "'Newsreader', serif", fontSize: 14, fontWeight: 600, flex: 'none' }}>
-                    {r.type === 'income' ? '+' : '−'}{r.amount.toFixed(2)}
-                    {r.currency !== 'GBP' && <span style={{ fontSize: 11, color: 'var(--muted)' }}> {r.currency}</span>}
+                    {r.type === 'income' ? '+' : '−'}{formatMoney(r.amount, r.currency)}
+                    {r.converted_amount != null && <div style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11, fontWeight: 500, color: 'var(--muted)', textAlign: 'right' }}>→ {formatMoney(r.converted_amount, preview.account_currency)}</div>}
                   </div>
                 </div>
               ))}
@@ -483,7 +518,7 @@ const ACC_COLOR = { checking: '#6f8168', savings: '#5f7591', investment: '#b08a3
 
 export default function FinancesPage() {
   const isMobile = useIsMobile()
-  const { pots, accounts, transactions, netWorth, income, spending } = useFinances()
+  const { pots, accounts, transactions, netWorth, income, spending, totalSaved, fmt, txnValue, displayCurrency, missingRates, updateAccount } = useFinances()
   const [showAddPot, setShowAddPot]         = useState(false)
   const [showAddTxn, setShowAddTxn]         = useState(false)
   const [showAddAcc, setShowAddAcc]         = useState(false)
@@ -493,8 +528,6 @@ export default function FinancesPage() {
 
   const { removeAccount, removeTransaction } = useFinances()
 
-  const totalSaved = pots.reduce((s, p) => s + p.saved, 0)
-
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 24 }}>
@@ -502,12 +535,19 @@ export default function FinancesPage() {
           <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>Finances</h1>
           <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>Net worth, cashflow, and savings pots.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
+          <CurrencySwitch />
           <GhostBtn onClick={() => setShowAddAcc(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Account</GhostBtn>
           <GhostBtn onClick={() => setShowAddTxn(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Transaction</GhostBtn>
           <PrimaryBtn onClick={() => setShowAddPot(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Pot</PrimaryBtn>
         </div>
       </div>
+
+      {missingRates.length > 0 && (
+        <div style={{ fontSize: 13, color: '#c15f3c', background: 'rgba(193,95,60,.08)', borderRadius: 10, padding: '10px 14px', marginBottom: 16 }}>
+          No exchange rate available yet for {missingRates.join(', ')} — those amounts are left out of the {displayCurrency} totals.
+        </div>
+      )}
 
       {/* Summary strip */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : '1.3fr 1fr 1fr 1fr', gap: isMobile ? 10 : 14, marginBottom: 24 }}>
@@ -573,8 +613,8 @@ export default function FinancesPage() {
                   </div>
 
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontFamily: "'Newsreader', serif", fontSize: 16, fontWeight: 600, color: pot.color }}>{fmt(pot.saved)}</div>
-                    {pot.targetAmount > 0 && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>of {fmt(pot.targetAmount)}</div>}
+                    <div style={{ fontFamily: "'Newsreader', serif", fontSize: 16, fontWeight: 600, color: pot.color }}>{fmt(pot.savedDisplay)}</div>
+                    {pot.targetAmount > 0 && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>of {fmt(pot.targetDisplay)}</div>}
                   </div>
                 </div>
               ))}
@@ -593,11 +633,18 @@ export default function FinancesPage() {
                 <span style={{ width: 9, height: 9, borderRadius: 3, background: ACC_COLOR[a.type] || 'var(--muted)', flex: 'none' }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 500 }}>{a.name}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{a.institution} · {a.type}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    {a.institution ? `${a.institution} · ` : ''}{a.type} ·
+                    {/* The account's own currency — what its transactions are recorded in */}
+                    <select value={a.currency} onChange={e => updateAccount(a.id, { currency: e.target.value })}
+                      aria-label={`${a.name} currency`}
+                      style={{ border: 'none', background: 'transparent', color: 'var(--muted)', fontSize: 11.5, fontFamily: 'inherit', padding: 0, cursor: 'pointer' }}>
+                      {ACCOUNT_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
                 </div>
-                <div style={{ fontFamily: "'Newsreader', serif", fontSize: 15, fontWeight: 600, color: a.type === 'credit' ? '#c15f3c' : 'var(--ink)' }}>
-                  {a.type === 'credit' ? `−${fmtAbs(a.balance)}` : fmt(a.balance)}
-                </div>
+                <Money amount={a.balance} currency={a.currency} converted={a.balanceDisplay} sign={a.type === 'credit' ? '−' : ''}
+                  style={{ fontFamily: "'Newsreader', serif", fontSize: 15, fontWeight: 600, color: a.type === 'credit' ? '#c15f3c' : 'var(--ink)' }} />
                 <button onClick={() => window.confirm(`Remove "${a.name}"?`) && removeAccount(a.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>×</button>
               </div>
             ))}
@@ -619,11 +666,13 @@ export default function FinancesPage() {
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.type === 'income' ? '#6f8168' : '#c15f3c', flex: 'none' }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 500 }}>{t.merchant}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t.category ? `${t.category} · ` : ''}{t.date}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+                  {t.category ? `${t.category} · ` : ''}{t.date}
+                  {t.orig_currency && <> · was {formatMoney(t.orig_amount, t.orig_currency)}</>}
+                </div>
               </div>
-              <div style={{ fontFamily: "'Newsreader', serif", fontSize: 14.5, fontWeight: 600, color: t.type === 'income' ? '#6f8168' : 'var(--ink)' }}>
-                {t.type === 'income' ? '+' : '−'}{fmtAbs(t.amount)}
-              </div>
+              <Money amount={t.amount} currency={t.currency || 'GBP'} converted={txnValue(t)} sign={t.type === 'income' ? '+' : '−'}
+                style={{ fontFamily: "'Newsreader', serif", fontSize: 14.5, fontWeight: 600, color: t.type === 'income' ? '#6f8168' : 'var(--ink)' }} />
               <button onClick={() => removeTransaction(t.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>×</button>
             </div>
           ))}

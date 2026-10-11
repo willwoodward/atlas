@@ -2,12 +2,18 @@ import { useState } from 'react'
 import { useFinances } from '../context/FinancesContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 
-const fmt = (n) => new Intl.NumberFormat('en-GB', {
-  style: 'currency', currency: 'GBP', maximumFractionDigits: 0,
-}).format(n || 0)
-const fmt2 = (n) => new Intl.NumberFormat('en-GB', {
-  style: 'currency', currency: 'GBP', maximumFractionDigits: 2,
-}).format(n || 0)
+import { formatMoney, currencySymbol } from '../lib/fx.js'
+
+// Insights arrive already converted into the currency they were requested in.
+function useMoney() {
+  const { insights, displayCurrency } = useFinances()
+  const cur = insights.currency || displayCurrency
+  return {
+    cur,
+    fmt: (n) => formatMoney(n || 0, cur, 0),
+    fmt2: (n) => formatMoney(n || 0, cur, 2),
+  }
+}
 
 // Pace is spend-so-far against month-elapsed. Under 1 is ahead, over 1 is behind.
 const paceColor = (b) => (b.over ? '#c15f3c' : b.pace > 1.15 ? '#b8860b' : '#4f7f45')
@@ -26,6 +32,7 @@ const CADENCE_LABEL = {
 // ─── Budgets ──────────────────────────────────────────────────────────────────
 
 function BudgetRow({ b, onRemove, isMobile }) {
+  const { fmt } = useMoney()
   const width = Math.min(b.pct, 100)
   return (
     <div style={{ padding: '12px 0', borderTop: '1px solid var(--bd-xs)' }}>
@@ -56,6 +63,7 @@ function BudgetRow({ b, onRemove, isMobile }) {
 }
 
 function BudgetsCard({ isMobile }) {
+  const { fmt2, cur } = useMoney()
   const { insights, setBudget, removeBudget } = useFinances()
   const [adding, setAdding] = useState(false)
   const [category, setCategory] = useState('')
@@ -77,8 +85,8 @@ function BudgetsCard({ isMobile }) {
         <button onClick={() => setAdding(a => !a)} style={linkBtn}>{adding ? 'Cancel' : '+ Add'}</button>
       </div>
       <div style={{ fontSize: 11.5, color: 'var(--faint)', marginBottom: 6, lineHeight: 1.5 }}>
-        Monthly, per category. Progress is coloured by pace — £90 of £100 reads
-        differently on the 3rd than on the 28th.
+        Monthly, per category. Progress is coloured by pace — {currencySymbol(cur)}90 of {currencySymbol(cur)}100
+        reads differently on the 3rd than on the 28th.
       </div>
 
       {budgets.length === 0 && !adding && (
@@ -94,7 +102,7 @@ function BudgetsCard({ isMobile }) {
           <input autoFocus value={category} onChange={e => setCategory(e.target.value)}
             placeholder="Category" style={{ ...inp, flex: '1 1 130px' }} />
           <input type="number" min="0" step="1" value={amount} onChange={e => setAmount(e.target.value)}
-            placeholder="£ / month" style={{ ...inp, flex: '0 1 110px' }} />
+            placeholder={`${currencySymbol(cur)} / month`} style={{ ...inp, flex: '0 1 110px' }} />
           <button type="submit" style={{ ...linkBtn, padding: '0 4px' }}>Save</button>
         </form>
       )}
@@ -117,6 +125,7 @@ function BudgetsCard({ isMobile }) {
 // ─── Recurring ────────────────────────────────────────────────────────────────
 
 function RecurringCard({ isMobile }) {
+  const { fmt, fmt2 } = useMoney()
   const { insights } = useFinances()
   const [showAll, setShowAll] = useState(false)
   const recurring = insights.recurring || []
@@ -179,6 +188,7 @@ function RecurringCard({ isMobile }) {
 // ─── Surplus ──────────────────────────────────────────────────────────────────
 
 function SurplusCard({ isMobile }) {
+  const { fmt } = useMoney()
   const { insights, allocateSurplus } = useFinances()
   const [amounts, setAmounts] = useState({})
   const [busy, setBusy] = useState(false)

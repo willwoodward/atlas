@@ -109,13 +109,16 @@ async def ensure(db, currencies: Iterable[str], since: Optional[str] = None) -> 
             backfill.append(since)
         elif table.latest_date(c) < today:
             catch_up.append((date.fromisoformat(table.latest_date(c)) + timedelta(days=1)).isoformat())
-    if not backfill:
-        if not catch_up:
-            return table
-        key = ",".join(wanted)
-        if time.time() - _last_attempt.get(key, 0) < _RETRY_SECONDS:
-            return table
-        _last_attempt[key] = time.time()
+    if not backfill and not catch_up:
+        return table
+    # Any fetch runs through to today, so it also counts as a catch-up. A
+    # backfill is throttled per start date, in case the API has nothing that
+    # early (a holiday, or before the series begins) and it would repeat.
+    key = ",".join(wanted)
+    throttle_key = f"{key}|{min(backfill)}" if backfill else key
+    if time.time() - _last_attempt.get(throttle_key, 0) < _RETRY_SECONDS:
+        return table
+    _last_attempt[throttle_key] = _last_attempt[key] = time.time()
     starts = backfill + catch_up
 
     try:

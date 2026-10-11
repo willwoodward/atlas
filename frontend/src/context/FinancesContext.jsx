@@ -1,16 +1,27 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from './AuthContext.jsx'
 import { useRefresh } from './RefreshContext.jsx'
+import { makeFx, formatMoney, DISPLAY_CURRENCIES } from '../lib/fx.js'
+
+// The EUR/GBP switch. Per device: it's a viewing preference, not data.
+const CURRENCY_KEY = 'atlas:display-currency'
+function loadDisplayCurrency() {
+  try {
+    const v = localStorage.getItem(CURRENCY_KEY)
+    return DISPLAY_CURRENCIES.includes(v) ? v : 'EUR'
+  } catch { return 'EUR' }
+}
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 function uid() { return crypto.randomUUID() }
-function today() { return new Date().toISOString().slice(0, 10) }
+// Local date — toISOString would give yesterday's date late in the evening.
+function today() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 
 // Convert API pot row → internal shape (camelCase keys)
 const potToInternal = (p) => ({
   id: p.id, name: p.name, color: p.color,
-  targetAmount: p.target_amount, notes: p.notes,
+  targetAmount: p.target_amount, notes: p.notes, currency: p.currency || 'GBP',
   subGoals: (p.subGoals || []).map(sg => ({
     id: sg.id, name: sg.name, targetAmount: sg.target_amount, notes: sg.notes,
   })),
@@ -27,6 +38,13 @@ export function FinancesProvider({ children }) {
   const { tick } = useRefresh()
   const [data, setData] = useState({ pots: [], transactions: [], accounts: [], rules: [] })
   const [insights, setInsights] = useState({ budgets: [], unbudgeted: [], recurring: [], surplus: {}, allocation: [] })
+  const [fxRates, setFxRates] = useState({})
+  const [displayCurrency, setDisplayCurrencyState] = useState(loadDisplayCurrency)
+  const setDisplayCurrency = useCallback((c) => {
+    setDisplayCurrencyState(c)
+    try { localStorage.setItem(CURRENCY_KEY, c) } catch {}
+  }, [])
+  const fxTable = useMemo(() => makeFx(fxRates), [fxRates])
 
   const call = useCallback((path, opts = {}) => fetch(`${API}${path}`, {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -35,12 +53,20 @@ export function FinancesProvider({ children }) {
 
   // Insights are derived server-side from every transaction, so they are
   // refetched rather than recomputed whenever the ledger changes.
+  // Insights come back already converted into the display currency.
   const refreshInsights = useCallback(async () => {
-    const res = await call('/api/finances/insights')
+    const res = await call(`/api/finances/insights?currency=${displayCurrency}`)
     if (res.ok) setInsights(await res.json())
+  }, [call, displayCurrency])
+
+  // Rates for every currency in use; refetched after imports add new ones.
+  const refreshFx = useCallback(async () => {
+    const res = await call('/api/finances/fx')
+    if (res.ok) setFxRates((await res.json()).rates || {})
   }, [call])
 
   useEffect(() => { if (token) refreshInsights() }, [token, tick, refreshInsights])
+  useEffect(() => { if (token) refreshFx() }, [token, tick, refreshFx])
 
   useEffect(() => {
     call('/api/finances').then(r => r.json()).then(d => {
@@ -54,12 +80,13 @@ export function FinancesProvider({ children }) {
   }, [token, tick])
 
   // ─── Pots ──────────────────────────────────────────────────────────────────
+  // A pot keeps the currency it was created in (the display currency then).
   const addPot = useCallback(async (name, color, targetAmount, notes = '') => {
     const id = uid()
-    const pot = { id, name, color, targetAmount: Number(targetAmount)||0, notes, subGoals: [], deposits: [] }
+    const pot = { id, name, color, targetAmount: Number(targetAmount)||0, notes, currency: displayCurrency, subGoals: [], deposits: [] }
     setData(d => ({ ...d, pots: [...d.pots, pot] }))
-    await call('/api/finances/pots', { method: 'POST', body: JSON.stringify({ id, name, color, target_amount: pot.targetAmount, notes }) })
-  }, [call])
+    await call('/api/finances/pots', { method: 'POST', body: JSON.stringify({ id, name, color, target_amount: pot.targetAmount, notes, currency: displayCurrency }) })
+  }, [call, displayCurrency])
 
   const removePot = useCallback(async (id) => {
     setData(d => ({ ...d, pots: d.pots.filter(p => p.id !== id) }))
@@ -93,12 +120,16 @@ export function FinancesProvider({ children }) {
   }, [call])
 
   // ─── Transactions ──────────────────────────────────────────────────────────
-  const addTransaction = useCallback(async (merchant, category, amount, date, type) => {
+  // Recorded in the account's currency; with no account, the display currency.
+  const addTransaction = useCallback(async (merchant, category, amount, date, type, accountId = null) => {
     const id = uid()
-    const txn = { id, merchant, category, amount: Number(amount), date, type }
-    setData(d => ({ ...d, transactions: [txn, ...d.transactions] }))
+    const account = data.accounts.find(a => a.id === accountId)
+    const currency = account?.currency || displayCurrency
+    const txn = { id, merchant, category, amount: Number(amount), date, type, account_id: account?.id ?? null, currency }
+    setData(d => ({ ...d, transactions: [txn, ...d.transactions].sort((a, b) => (b.date || '').localeCompare(a.date || '')) }))
     await call('/api/finances/transactions', { method: 'POST', body: JSON.stringify(txn) })
-  }, [call])
+    refreshInsights()
+  }, [call, data.accounts, displayCurrency, refreshInsights])
 
   const removeTransaction = useCallback(async (id) => {
     setData(d => ({ ...d, transactions: d.transactions.filter(t => t.id !== id) }))
@@ -106,9 +137,9 @@ export function FinancesProvider({ children }) {
   }, [call])
 
   // ─── Accounts ──────────────────────────────────────────────────────────────
-  const addAccount = useCallback(async (name, institution, type, balance) => {
+  const addAccount = useCallback(async (name, institution, type, balance, currency = 'EUR') => {
     const id = uid()
-    const acc = { id, name, institution, type, balance: Number(balance)||0 }
+    const acc = { id, name, institution, type, balance: Number(balance)||0, currency }
     setData(d => ({ ...d, accounts: [...d.accounts, acc] }))
     await call('/api/finances/accounts', { method: 'POST', body: JSON.stringify(acc) })
   }, [call])
@@ -135,13 +166,14 @@ export function FinancesProvider({ children }) {
   }, [call, refreshInsights])
 
   // ─── Budgets ───────────────────────────────────────────────────────────────
+  // Entered in the display currency, and kept in it.
   const setBudget = useCallback(async (category, amount) => {
     await call('/api/finances/budgets', {
       method: 'POST',
-      body: JSON.stringify({ id: uid(), category, amount: Number(amount) || 0, period: 'monthly' }),
+      body: JSON.stringify({ id: uid(), category, amount: Number(amount) || 0, period: 'monthly', currency: displayCurrency }),
     })
     await refreshInsights()
-  }, [call, refreshInsights])
+  }, [call, refreshInsights, displayCurrency])
 
   const removeBudget = useCallback(async (id) => {
     await call(`/api/finances/budgets/${id}`, { method: 'DELETE' })
@@ -152,10 +184,10 @@ export function FinancesProvider({ children }) {
   // is the separate call that actually writes the deposits.
   const allocateSurplus = useCallback(async (allocations, note) => {
     await call('/api/finances/allocate', {
-      method: 'POST', body: JSON.stringify({ allocations, note }),
+      method: 'POST', body: JSON.stringify({ allocations, note, currency: displayCurrency }),
     })
     await refetch()
-  }, [call, refetch])
+  }, [call, refetch, displayCurrency])
 
   // ─── Import rules ──────────────────────────────────────────────────────────
   const addRule = useCallback(async (pattern, category) => {
@@ -192,21 +224,30 @@ export function FinancesProvider({ children }) {
       throw new Error(detail || `Import failed (${res.status})`)
     }
     await refetch()
+    refreshFx()
     return body
-  }, [call, refetch])
+  }, [call, refetch, refreshFx])
 
-  // ─── Computed ──────────────────────────────────────────────────────────────
+  // ─── Computed (all in the display currency) ────────────────────────────────
+  // Balances convert at the latest rate; a transaction at the rate on its own
+  // date, so past months don't drift as the exchange rate moves.
+  const missingRates = new Set()
+  const toDisplay = (amount, currency, on) => {
+    const v = fxTable.convert(amount, currency || displayCurrency, displayCurrency, on)
+    if (v == null) missingRates.add(currency)
+    return v
+  }
+  const sumOf = (vals) => vals.reduce((s, v) => s + (v ?? 0), 0)
+  const txnValue = (t) => toDisplay(t.amount, t.currency, t.date)
+
   const pots = data.pots.map(p => {
     const saved = (p.deposits||[]).reduce((s, d) => s + d.amount, 0)
     const pct = p.targetAmount > 0 ? Math.min(Math.round(saved / p.targetAmount * 100), 100) : 0
-    return { ...p, saved, pct }
+    return { ...p, saved, pct, savedDisplay: toDisplay(saved, p.currency), targetDisplay: toDisplay(p.targetAmount, p.currency) }
   })
-  const netWorth = data.accounts.reduce((s, a) => a.type === 'credit' ? s - a.balance : s + a.balance, 0)
-  const totalSaved = pots.reduce((s, p) => s + p.saved, 0)
-
-  // Value in GBP, using the rate captured at import time rather than today's —
-  // otherwise last year's spending silently changes every time sterling moves.
-  const inGBP = (t) => t.amount * (t.fx_rate ?? 1)
+  const accounts = data.accounts.map(a => ({ ...a, currency: a.currency || 'GBP', balanceDisplay: toDisplay(a.balance, a.currency || 'GBP') }))
+  const netWorth = sumOf(accounts.map(a => a.balanceDisplay == null ? null : a.type === 'credit' ? -a.balanceDisplay : a.balanceDisplay))
+  const totalSaved = sumOf(pots.map(p => p.savedDisplay))
 
   // Local month key, not toISOString — that shifts the boundary in UTC.
   const now = new Date()
@@ -214,7 +255,7 @@ export function FinancesProvider({ children }) {
   const inMonth = (t, m) => (t.date || '').slice(0, 7) === m
 
   const monthTxns = data.transactions.filter(t => inMonth(t, thisMonth))
-  const sum = (rows, type) => rows.filter(t => t.type === type).reduce((s, t) => s + inGBP(t), 0)
+  const sum = (rows, type) => sumOf(rows.filter(t => t.type === type).map(txnValue))
 
   const income   = sum(monthTxns, 'income')
   const spending = sum(monthTxns, 'expense')
@@ -225,14 +266,18 @@ export function FinancesProvider({ children }) {
   const byCategory = Object.entries(
     monthTxns.filter(t => t.type === 'expense').reduce((acc, t) => {
       const key = t.category || 'Uncategorised'
-      acc[key] = (acc[key] || 0) + inGBP(t)
+      acc[key] = (acc[key] || 0) + (txnValue(t) ?? 0)
       return acc
     }, {})
   ).map(([category, total]) => ({ category, total })).sort((a, b) => b.total - a.total)
 
+  const fmt = useCallback((n, digits = 2) => formatMoney(n, displayCurrency, digits), [displayCurrency])
+
   return (
     <Ctx.Provider value={{
-      pots, accounts: data.accounts, transactions: data.transactions, rules: data.rules,
+      pots, accounts, transactions: data.transactions, rules: data.rules,
+      displayCurrency, setDisplayCurrency, fmt, toDisplay, txnValue, fx: fxTable,
+      missingRates: [...missingRates].filter(Boolean),
       netWorth, totalSaved, income, spending,
       incomeAllTime, spendingAllTime, byCategory, thisMonth,
       addRule, removeRule, previewImport, commitImport, refetch,

@@ -15,7 +15,6 @@ import { useCalendarEvents } from '../hooks/useCalendarEvents.js'
 import { currentWeekTodos, staysInBucket } from '../lib/week.js'
 import { goalTime, fmtHours } from '../lib/goalTime.js'
 
-const fmtGBP = n => new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 }).format(n)
 
 function getCurrentPeriod() {
   const h = new Date().getHours()
@@ -209,7 +208,7 @@ export default function HomePage() {
   const { habits, last30 } = useHabits()
   const { goals } = useGoals()
   const { todos, toggleTodo } = useTodos()
-  const { netWorth, accounts } = useFinances()
+  const { netWorth, accounts, fmt: fmtMoney } = useFinances()
   const allEvents = useCalendarEvents()
   const [openStat, setOpenStat] = useState(null)
   const [selectedEvent, setSelectedEvent] = useState(null)
@@ -256,7 +255,7 @@ export default function HomePage() {
     },
     {
       key: 'net', label: 'Net worth',
-      value: accounts.length === 0 ? '—' : fmtGBP(netWorth),
+      value: accounts.length === 0 ? '—' : fmtMoney(netWorth, 0),
       sub: accounts.length === 0 ? '' : `${accounts.length} account${accounts.length !== 1 ? 's' : ''}`,
       tone: '#9a9488',
     },
