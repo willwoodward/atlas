@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useFinances } from '../context/FinancesContext.jsx'
 import GoalRing from '../components/GoalRing.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import CompensationPanel from '../components/CompensationPanel.jsx'
 import InsightsPanel from '../components/InsightsPanel.jsx'
+import CategoryCharts from '../components/CategoryCharts.jsx'
+import { suggestPattern, UNCATEGORISED } from '../lib/categories.js'
 import { useQuickAdd } from '../context/QuickAddContext.jsx'
 import { formatMoney, currencySymbol, DISPLAY_CURRENCIES } from '../lib/fx.js'
 
@@ -341,6 +343,72 @@ function AddAccountModal({ onClose }) {
   )
 }
 
+// ─── Category editor ──────────────────────────────────────────────────────────
+
+function CategoryModal({ txn, onClose }) {
+  const { transactions, setTransactionCategory, categoriseMatching } = useFinances()
+  const [category, setCategory] = useState(txn.category || '')
+  const [pattern, setPattern] = useState(suggestPattern(txn.merchant))
+  // Defaults on for an uncategorised row: the usual case is "Tesco is groceries".
+  const [applyAll, setApplyAll] = useState(!(txn.category || '').trim())
+  const [busy, setBusy] = useState(false)
+
+  // Existing categories, most used first, as one-tap choices.
+  const counts = {}
+  for (const t of transactions) { const c = (t.category || '').trim(); if (c) counts[c] = (counts[c] || 0) + 1 }
+  const known = Object.keys(counts).sort((a, b) => counts[b] - counts[a])
+  const p = pattern.trim().toLowerCase()
+  const matches = p ? transactions.filter(t => t.id !== txn.id && !(t.category || '').trim() && (t.merchant || '').toLowerCase().includes(p)).length : 0
+
+  const save = async (e) => {
+    e.preventDefault()
+    const c = category.trim()
+    if (!c) return
+    setBusy(true)
+    try {
+      await setTransactionCategory(txn.id, c)
+      if (applyAll && p) await categoriseMatching(p, c)
+      onClose()
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <Modal title="Category" onClose={onClose}>
+      <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ fontSize: 13.5, color: 'var(--mid)' }}>
+          <strong style={{ color: 'var(--ink)', fontWeight: 600 }}>{txn.merchant}</strong> · {txn.date} · {formatMoney(txn.amount, txn.currency || 'GBP')}
+        </div>
+        <Field label="Category">
+          <input autoFocus list="atlas-categories" value={category} onChange={e => setCategory(e.target.value)}
+            placeholder="e.g. Groceries, Rent, Eating out" style={inp} />
+          <datalist id="atlas-categories">{known.map(c => <option key={c} value={c} />)}</datalist>
+        </Field>
+        {known.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: -4 }}>
+            {known.slice(0, 12).map(c => (
+              <button key={c} type="button" onClick={() => setCategory(c)}
+                style={{ padding: '4px 10px', borderRadius: 99, border: `1px solid ${category === c ? '#c15f3c' : 'var(--bd-xl)'}`, background: category === c ? 'rgba(193,95,60,.1)' : 'transparent',
+                  color: category === c ? '#c15f3c' : 'var(--mid)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>{c}</button>
+            ))}
+          </div>
+        )}
+        <label style={{ display: 'flex', gap: 9, alignItems: 'flex-start', fontSize: 13, color: 'var(--mid)', lineHeight: 1.45, cursor: 'pointer' }}>
+          <input type="checkbox" checked={applyAll} onChange={e => setApplyAll(e.target.checked)} style={{ marginTop: 3, width: 'auto' }} />
+          <span>Also categorise other transactions containing{' '}
+            <input value={pattern} onChange={e => setPattern(e.target.value)} onClick={e => e.preventDefault()}
+              style={{ ...inp, display: 'inline-block', width: 130, padding: '3px 8px', fontSize: 12.5 }} />
+            {' '}— {matches} uncategorised now, and future imports.
+          </span>
+        </label>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
+          <GhostBtn type="button" onClick={onClose}>Cancel</GhostBtn>
+          <PrimaryBtn type="submit" disabled={busy || !category.trim()} style={{ opacity: busy || !category.trim() ? .5 : 1 }}>{busy ? 'Saving…' : 'Save'}</PrimaryBtn>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 // ─── Edit Account Modal ───────────────────────────────────────────────────────
 
 function EditAccountModal({ account, onClose }) {
@@ -618,11 +686,31 @@ export default function FinancesPage() {
   const [activePot, setActivePot]           = useState(null)
   const [editAccount, setEditAccount]       = useState(null)
   const [txnPage, setTxnPage]               = useState(0)
+  const [catTxn, setCatTxn]                 = useState(null)
+  // Set by clicking a chart slice: { type, label, categories, range }
+  const [txnFilter, setTxnFilter]           = useState(null)
+  const txnCardRef = useRef(null)
 
   const { removeTransaction } = useFinances()
   // Clamped, so deleting the last row on the final page, or a smaller ledger
   // after a refresh, never leaves an empty page showing.
-  const pageCount = Math.max(1, Math.ceil(transactions.length / TXN_PAGE))
+  const shown = txnFilter
+    ? transactions.filter(t => t.type === txnFilter.type
+        && txnFilter.categories.includes((t.category || '').trim() || UNCATEGORISED)
+        && (!txnFilter.range?.from || t.date >= txnFilter.range.from)
+        && (!txnFilter.range?.to || t.date <= txnFilter.range.to))
+    : transactions
+  const filterBy = (f) => {
+    setTxnFilter(f); setTxnPage(0)
+    txnCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  // "Oct 2026" / "Aug – Oct 2026"; nothing for all time.
+  const rangeLabel = (range) => {
+    if (!range?.from) return ''
+    const m = (d) => new Date(d + 'T12:00').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+    return m(range.from) === m(range.to) ? m(range.from) : `${m(range.from).split(' ')[0]} – ${m(range.to)}`
+  }
+  const pageCount = Math.max(1, Math.ceil(shown.length / TXN_PAGE))
   const page = Math.min(txnPage, pageCount - 1)
 
   return (
@@ -746,7 +834,7 @@ export default function FinancesPage() {
         </div>
 
         {/* RIGHT col: Transactions + compensation */}
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 24px' }}>
+        <div ref={txnCardRef} style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 24px', scrollMarginTop: 90 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 19, fontWeight: 600 }}>Transactions</h2>
             <div style={{ display: 'flex', gap: 12 }}>
@@ -754,14 +842,30 @@ export default function FinancesPage() {
             <button onClick={() => setShowAddTxn(true)} style={{ fontSize: 12, fontWeight: 600, color: '#c15f3c', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>+ Add</button>
             </div>
           </div>
+          {txnFilter && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 6px 4px 11px', borderRadius: 99, background: 'var(--surface-2)', border: '1px solid var(--bd-xl)', fontSize: 12.5, color: 'var(--ink)' }}>
+                {txnFilter.label} · {txnFilter.type === 'income' ? 'income' : 'spending'}{rangeLabel(txnFilter.range) && ` · ${rangeLabel(txnFilter.range)}`}
+                <button onClick={() => { setTxnFilter(null); setTxnPage(0) }} aria-label="Clear filter"
+                  style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 14, lineHeight: 1, padding: '0 4px' }}>×</button>
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>{shown.length} transaction{shown.length !== 1 ? 's' : ''}</span>
+            </div>
+          )}
           {transactions.length === 0 && <div style={{ padding: '24px 0', fontSize: 13, color: 'var(--faint)', textAlign: 'center' }}>No transactions yet</div>}
-          {transactions.slice(page * TXN_PAGE, (page + 1) * TXN_PAGE).map(t => (
+          {transactions.length > 0 && shown.length === 0 && <div style={{ padding: '24px 0', fontSize: 13, color: 'var(--faint)', textAlign: 'center' }}>All done — nothing left here.</div>}
+          {shown.slice(page * TXN_PAGE, (page + 1) * TXN_PAGE).map(t => (
             <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderTop: '1px solid var(--bd-xs)' }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.type === 'income' ? '#6f8168' : '#c15f3c', flex: 'none' }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 500 }}>{t.merchant}</div>
                 <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
-                  {t.category ? `${t.category} · ` : ''}{t.date}
+                  <button onClick={() => setCatTxn(t)} title="Set category"
+                    style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5,
+                      color: t.category ? 'var(--mid)' : '#c15f3c', fontWeight: t.category ? 500 : 600, textDecoration: 'underline', textDecorationColor: 'var(--bd-xl)', textUnderlineOffset: 2 }}>
+                    {t.category || '+ Category'}
+                  </button>
+                  {' · '}{t.date}
                   {t.orig_currency && <> · was {formatMoney(t.orig_amount, t.orig_currency)}</>}
                 </div>
               </div>
@@ -772,7 +876,7 @@ export default function FinancesPage() {
           ))}
           {pageCount > 1 && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 12, borderTop: '1px solid var(--bd-xs)', fontSize: 12.5, color: 'var(--muted)' }}>
-              <span>{page * TXN_PAGE + 1}–{Math.min((page + 1) * TXN_PAGE, transactions.length)} of {transactions.length}</span>
+              <span>{page * TXN_PAGE + 1}–{Math.min((page + 1) * TXN_PAGE, shown.length)} of {shown.length}</span>
               <div style={{ display: 'flex', gap: 6 }}>
                 <GhostBtn onClick={() => setTxnPage(page - 1)} disabled={page === 0} aria-label="Newer transactions"
                   style={{ padding: '5px 12px', fontSize: 12.5, opacity: page === 0 ? .4 : 1 }}>‹ Newer</GhostBtn>
@@ -782,6 +886,10 @@ export default function FinancesPage() {
             </div>
           )}
         </div>
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <CategoryCharts selected={txnFilter} onSelect={filterBy} />
       </div>
 
       <div style={{ marginTop: 16 }}>
@@ -797,6 +905,7 @@ export default function FinancesPage() {
       {showAddTxn && <AddTransactionModal onClose={() => setShowAddTxn(false)} />}
       {showAddAcc && <AddAccountModal onClose={() => setShowAddAcc(false)} />}
       {showImport && <ImportModal onClose={() => setShowImport(false)} />}
+      {catTxn && <CategoryModal txn={transactions.find(t => t.id === catTxn.id) || catTxn} onClose={() => setCatTxn(null)} />}
       {editAccount && <EditAccountModal account={accounts.find(a => a.id === editAccount.id) || editAccount} onClose={() => setEditAccount(null)} />}
       {activePot  && <PotPanel pot={pots.find(p => p.id === activePot.id) || activePot} onClose={() => setActivePot(null)} />}
     </div>

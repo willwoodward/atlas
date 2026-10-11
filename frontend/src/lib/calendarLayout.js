@@ -39,3 +39,19 @@ export function layoutOverlaps(events, minDur = 0.25) {
 
 // Events that sit on the hour grid (not all-day, not the derived wake-up hint).
 export const isTimed = ev => !ev.isAllDay && !ev.isSleepWakeUp && ev.start >= 0 && ev.start < 24
+
+// The calendar's smallest block: 15 minutes.
+export const SLOT = 0.25
+
+// Where an event block sits in a column. Height is the event's real length
+// (never padded out, so back-to-back 15-minute blocks stack instead of
+// overlapping), with 1px of air above and below so adjacent blocks read as
+// two. Under ~34px there's room for one line only.
+export function eventBox(ev, hourH) {
+  const dur = Math.max(ev.dur, SLOT)
+  const height = dur * hourH - 2
+  return { top: ev.start * hourH + 1, height, compact: height < 34 }
+}
+
+// Floor a pointer position (in hours) to the 15-minute slot it's in.
+export const floorToSlot = h => Math.floor(h / SLOT) * SLOT

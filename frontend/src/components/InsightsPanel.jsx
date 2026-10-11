@@ -185,92 +185,6 @@ function RecurringCard({ isMobile }) {
   )
 }
 
-// ─── Surplus ──────────────────────────────────────────────────────────────────
-
-function SurplusCard({ isMobile }) {
-  const { fmt } = useMoney()
-  const { insights, allocateSurplus } = useFinances()
-  const [amounts, setAmounts] = useState({})
-  const [busy, setBusy] = useState(false)
-  const { surplus = {}, allocation = [] } = insights
-
-  const value = (a) => (amounts[a.pot_id] ?? a.suggested)
-  const total = allocation.reduce((s, a) => s + (Number(value(a)) || 0), 0)
-
-  const submit = async () => {
-    const items = allocation
-      .map(a => ({ pot_id: a.pot_id, amount: Number(value(a)) || 0 }))
-      .filter(a => a.amount > 0)
-    if (!items.length) return
-    setBusy(true)
-    try { await allocateSurplus(items, `${surplus.month} surplus`) }
-    finally { setBusy(false); setAmounts({}) }
-  }
-
-  const positive = (surplus.surplus || 0) > 0
-
-  return (
-    <div style={{ ...card, padding: isMobile ? '18px 16px' : '20px 24px' }}>
-      <h2 style={{ ...h2, marginBottom: 12 }}>This month</h2>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
-        {[['In', surplus.income, '#4f7f45'], ['Out', surplus.spending, '#c15f3c'],
-          ['Left', surplus.surplus, positive ? '#4f7f45' : '#c15f3c']].map(([label, v, color]) => (
-          <div key={label}>
-            <div style={eyebrow}>{label}</div>
-            <div style={{ marginTop: 3, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 18 : 21, fontWeight: 500, color }}>
-              {v ? fmt(v) : '—'}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {!positive && (
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 }}>
-          {surplus.income ? 'Nothing spare to move into pots this month.' : 'No income recorded this month yet.'}
-        </div>
-      )}
-
-      {positive && allocation.length === 0 && (
-        <div style={{ fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 }}>
-          {fmt(surplus.surplus)} spare, but every pot has hit its target.
-        </div>
-      )}
-
-      {positive && allocation.length > 0 && (
-        <>
-          <div style={{ ...eyebrow, marginBottom: 8 }}>Suggested split</div>
-          <div style={{ fontSize: 11.5, color: 'var(--faint)', marginBottom: 10, lineHeight: 1.5 }}>
-            Proportional to what each pot still needs. Nothing is saved until you
-            confirm — edit any figure first.
-          </div>
-          {allocation.map(a => (
-            <div key={a.pot_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--bd-xs)' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
-                <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{fmt(a.shortfall)} to go</div>
-              </div>
-              <input type="number" min="0" step="1" value={value(a)}
-                onChange={e => setAmounts(m => ({ ...m, [a.pot_id]: e.target.value }))}
-                aria-label={`Amount for ${a.name}`}
-                style={{ ...inp, width: 92, flex: 'none' }} />
-            </div>
-          ))}
-          <button onClick={submit} disabled={busy || total <= 0}
-            style={{
-              marginTop: 14, width: '100%', padding: '11px', borderRadius: 10, border: 'none',
-              background: '#c15f3c', color: '#fff', fontSize: 14, fontWeight: 600,
-              cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit',
-              opacity: busy || total <= 0 ? .5 : 1,
-            }}>
-            {busy ? 'Saving…' : `Move ${fmt(total)} into pots`}
-          </button>
-        </>
-      )}
-    </div>
-  )
-}
-
 // ─── Panel ────────────────────────────────────────────────────────────────────
 
 export default function InsightsPanel() {
@@ -283,7 +197,6 @@ export default function InsightsPanel() {
     }}>
       <BudgetsCard isMobile={isMobile} />
       <RecurringCard isMobile={isMobile} />
-      <SurplusCard isMobile={isMobile} />
     </div>
   )
 }

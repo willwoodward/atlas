@@ -142,7 +142,7 @@ function GoalTagsInput({ goal, onUpdate }) {
   }
   return (
     <div style={{ padding: '10px 22px 14px 20px', borderTop: '1px solid var(--bd-xs)', display: 'flex', alignItems: 'center', gap: 10 }}>
-      <span title="Calendar events containing these words count towards this goal's time on Home"
+      <span title="Calendar events containing these words count towards this goal's time on Home. Use * for any text, e.g. dinner w/*"
         style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', flex: 'none', cursor: 'help' }}>
         Calendar tags
       </span>
@@ -151,7 +151,7 @@ function GoalTagsInput({ goal, onUpdate }) {
         onChange={e => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-        placeholder="e.g. gym, swim, run"
+        placeholder="e.g. gym, swim, dinner w/*"
         style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'inherit', fontSize: 13, color: 'var(--mid)', padding: 0 }}
       />
     </div>

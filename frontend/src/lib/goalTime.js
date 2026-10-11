@@ -3,9 +3,27 @@ import { localDateStr, mondayOf, addDays } from './week.js'
 export const parseTags = (tags = '') =>
   tags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
 
+const escapeRe = s => s.replace(/[.+?^${}()|[\]\\/-]/g, '\\$&')
+
+// A tag with * is a pattern, * meaning "any text": "dinner w/*" matches
+// "Dinner w/ Sam". Edges without a * stay anchored to word boundaries like a
+// plain tag, so "*run" matches "Long run" but not "Brunch" (the "c" after
+// "run" fails the end anchor).
+const patternCache = new Map()
+function wildcardRe(tag) {
+  if (!patternCache.has(tag)) {
+    const body = tag.split('*').map(escapeRe).join('.*')
+    const start = tag.startsWith('*') ? '' : '(?:^|[^a-z0-9])'
+    const end = tag.endsWith('*') ? '' : '(?:$|[^a-z0-9])'
+    patternCache.set(tag, new RegExp(start + body + end))
+  }
+  return patternCache.get(tag)
+}
+
 // Whole-word, case-insensitive match that also works for tags like "[masters]",
 // where \b would fail next to the brackets.
-function matchesTag(title, tag) {
+export function matchesTag(title, tag) {
+  if (tag.includes('*')) return tag.replace(/\*/g, '') !== '' && wildcardRe(tag).test(title.toLowerCase())
   const t = title.toLowerCase()
   let i = t.indexOf(tag)
   while (i !== -1) {
@@ -58,4 +76,14 @@ export const fmtHours = h => {
   if (h === 0) return '0h'
   if (h < 1) return `${Math.round(h * 60)}m`
   return `${Math.round(h * 10) / 10}h`.replace('.0h', 'h')
+}
+
+// Props for a calendar event block that belongs to a goal: the shine class and
+// a stable per-event delay (so events shine at different moments, and the same
+// event keeps its rhythm across re-renders).
+export function goalShine(ev, goals) {
+  if (!ev || ev.isBedtime || ev.isSleepWakeUp || !goalForEvent(ev.title, goals)) return {}
+  let h = 0
+  for (const c of String(ev.id ?? ev.title)) h = (h * 31 + c.charCodeAt(0)) >>> 0
+  return { className: 'goal-shine', shineDelay: `${(h % 90) / 10}s` }
 }

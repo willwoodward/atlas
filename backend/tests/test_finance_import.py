@@ -276,3 +276,29 @@ async def test_editing_an_account_stamps_the_balance_date(client, auth, accounts
     assert acc["balance_as_of"]  # today
     bad = await client.patch("/api/finances/accounts/acc2", headers=auth, json={"type": "bogus"})
     assert bad.status_code == 400
+
+
+# ── Categorising ──────────────────────────────────────────────────────────────
+
+async def test_set_a_transactions_category(client, auth, accounts):
+    await _import(client, auth, WISE_BAL)
+    txns = (await client.get("/api/finances", headers=auth)).json()["transactions"]
+    pret = next(t for t in txns if t["merchant"] == "Pret")
+    await client.patch(f"/api/finances/transactions/{pret['id']}", headers=auth, json={"category": " Eating out "})
+    txns = (await client.get("/api/finances", headers=auth)).json()["transactions"]
+    assert next(t for t in txns if t["id"] == pret["id"])["category"] == "Eating out"
+
+
+async def test_applying_a_rule_fills_only_uncategorised_matches(client, auth, accounts):
+    for i, (m, cat) in enumerate([("TESCO STORES 1", ""), ("Tesco Express", ""), ("tesco petrol", "Car"), ("Spar", "")]):
+        await client.post("/api/finances/transactions", headers=auth, json={
+            "id": f"t{i}", "merchant": m, "category": cat, "amount": 5, "date": "2026-10-01", "currency": "EUR"})
+    r = (await client.post("/api/finances/rules/apply", headers=auth, json={"pattern": "TESCO", "category": "Groceries"})).json()
+    assert r["updated"] == 2
+    cats = {t["merchant"]: t["category"] for t in (await client.get("/api/finances", headers=auth)).json()["transactions"]}
+    assert cats == {"TESCO STORES 1": "Groceries", "Tesco Express": "Groceries", "tesco petrol": "Car", "Spar": ""}
+    r = (await client.post("/api/finances/rules/apply", headers=auth,
+                           json={"pattern": "tesco", "category": "Groceries", "overwrite": True})).json()
+    assert r["updated"] == 3
+    empty = await client.post("/api/finances/rules/apply", headers=auth, json={"pattern": "  ", "category": "X"})
+    assert empty.status_code == 400

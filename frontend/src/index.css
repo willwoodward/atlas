@@ -22,6 +22,13 @@ html, body { margin: 0; padding: 0; height: 100%; }
   --bd-2xs: rgba(43,40,32,.05);
 
   --bg-blur: rgba(239,234,224,.82);
+
+  --shine: rgba(255,255,255,.65);
+
+  /* Category chart slices: the brand hues, saturated enough to tell apart. */
+  --cat-1: #3a6fb5;  --cat-2: #c8552b;  --cat-3: #2f8f6a;  --cat-4: #b07d0a;  --cat-5: #b0508a;
+  --cat-other: #a8a194;
+  --cat-none:  #d6d0c4;
 }
 
 [data-theme="dark"] {
@@ -44,6 +51,13 @@ html, body { margin: 0; padding: 0; height: 100%; }
   --bd-2xs: rgba(240,236,226,.04);
 
   --bg-blur: rgba(18,16,14,.88);
+
+  /* White at full strength glares on dark tints; keep it a glint. */
+  --shine: rgba(255,255,255,.13);
+
+  --cat-1: #5b8bd0;  --cat-2: #d9633a;  --cat-3: #37a07a;  --cat-4: #b9852a;  --cat-5: #c46aa3;
+  --cat-other: #6f685e;
+  --cat-none:  #3a3631;
 }
 
 body {
@@ -102,3 +116,28 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 @keyframes blobB    { 0%,100%{transform:translate(12px,14px) scale(1.12)} 50%{transform:translate(-14px,-10px) scale(.88)} }
 @keyframes blobC    { 0%,100%{transform:translate(6px,-14px) scale(.95)}  50%{transform:translate(-10px,14px) scale(1.1)} }
 @keyframes eq       { 0%,100%{transform:scaleY(.35)} 50%{transform:scaleY(1)} }
+
+/* ─── Goal shine ──────────────────────────────────────────────────────────── */
+/* A light sweep that crosses calendar events matching a goal every so often.
+   The element must clip (overflow: hidden) and be positioned; calendar event
+   blocks already are. --shine-delay staggers events so they don't flash in
+   unison. */
+.goal-shine::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 30%, var(--shine) 50%, transparent 70%);
+  transform: translateX(-130%);
+  animation: goal-shine 9s ease-in-out infinite;
+  animation-delay: var(--shine-delay, 0s);
+}
+
+@keyframes goal-shine {
+  0%        { transform: translateX(-130%); }
+  16%, 100% { transform: translateX(130%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .goal-shine::after { animation: none; display: none; }
+}

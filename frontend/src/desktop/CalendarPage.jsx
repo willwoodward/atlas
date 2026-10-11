@@ -2,14 +2,18 @@ import { useEffect, useState, useRef } from 'react'
 import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import { useLocalCalendar } from '../context/LocalCalendarContext.jsx'
 import { getWeekRange, localDateStr } from '../integrations/googleCalendar.js'
-import { layoutOverlaps } from '../lib/calendarLayout.js'
+import { layoutOverlaps, eventBox, floorToSlot, SLOT } from '../lib/calendarLayout.js'
+import EventLabel from '../components/EventLabel.jsx'
 import { mondayOf, parseLocalDate, addDays } from '../lib/week.js'
 import { useCalendarEvents, fmtH } from '../hooks/useCalendarEvents.js'
 import DaySchedule from '../components/DaySchedule.jsx'
+import { useGoals } from '../context/GoalsContext.jsx'
+import { goalShine } from '../lib/goalTime.js'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { useQuickAdd } from '../context/QuickAddContext.jsx'
 
-const HOUR_H = 48
+// 64px an hour gives a 15-minute block 16px — one readable line.
+const HOUR_H = 64
 const DAY_START = 0
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
 const DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
@@ -174,6 +178,7 @@ export default function CalendarPage() {
   const { gcal, connectGoogle, refetchEvents, createGcalEvent, removeGcalEvent } = useIntegrations()
   const { addEvent, removeEvent } = useLocalCalendar()
   const allEvents = useCalendarEvents()
+  const { goals } = useGoals()
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -250,7 +255,7 @@ export default function CalendarPage() {
     dragRef.current = null
     const moved = Math.abs(e.clientY - d.startY)
     if (moved < 8) {
-      const snapped = snapTo(hourFromEl(d.el, e.clientY), 0.5)
+      const snapped = floorToSlot(hourFromEl(d.el, e.clientY))
       setAddDraft({ date: d.date, startH: snapped, endH: snapped + 1 })
     } else if (ghost) {
       setAddDraft({ date: ghost.date, startH: ghost.startH, endH: ghost.endH })
@@ -381,31 +386,28 @@ export default function CalendarPage() {
                 {/* Timed events — overlapping ones sit side by side */}
                 {(() => {
                   const timed = d.events.filter(ev => !ev.isAllDay && !ev.isSleepWakeUp && ev.start >= DAY_START && ev.start < 24)
-                  const layout = layoutOverlaps(timed, 22 / HOUR_H)
+                  const layout = layoutOverlaps(timed, SLOT)
                   return timed.map((ev, i) => {
-                    const top = (ev.start - DAY_START) * HOUR_H
-                    const height = Math.max(ev.dur * HOUR_H - 4, 20)
+                    const { top, height, compact } = eventBox({ ...ev, start: ev.start - DAY_START }, HOUR_H)
                     const { left, width } = layout.get(ev)
+                    const shine = goalShine(ev, goals)
                     return (
-                      <div key={ev.id || i} data-event="true"
+                      <div key={ev.id || i} data-event="true" className={shine.className}
                         onClick={e => { e.stopPropagation(); setSelectedEvent(ev) }}
                         style={{
-                          position: 'absolute', top, height,
+                          position: 'absolute', top, height, '--shine-delay': shine.shineDelay,
                           left: `calc(${left * 100}% + 4px)`,
                           width: `calc(${width * 100}% - ${left + width >= 1 ? 8 : 6}px)`,
                           zIndex: 1,
                           boxShadow: left > 0 ? '0 0 0 1px var(--surface)' : 'none',
                           background: ev.tint,
                           borderLeft: `3px solid ${ev.color}`,
-                          borderRadius: 8, padding: '5px 8px', overflow: 'hidden', cursor: 'pointer', transition: 'filter .1s',
+                          borderRadius: compact ? 5 : 8, padding: compact ? '0 6px' : '5px 8px', overflow: 'hidden', cursor: 'pointer', transition: 'filter .1s',
                         }}
                         onMouseEnter={e => e.currentTarget.style.filter = 'brightness(.94)'}
                         onMouseLeave={e => e.currentTarget.style.filter = ''}
                       >
-                        <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.2, color: ev.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {ev.title}
-                        </div>
-                        {height > 28 && <div style={{ fontSize: 10, color: ev.color, opacity: .8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.timeDisplay}</div>}
+                        <EventLabel ev={ev} height={height} compact={compact} size={11.5} />
                       </div>
                     )
                   })

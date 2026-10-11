@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { layoutOverlaps, isTimed } from '../lib/calendarLayout.js'
+import { layoutOverlaps, isTimed, eventBox, floorToSlot, SLOT } from '../lib/calendarLayout.js'
+import EventLabel from './EventLabel.jsx'
+import { useGoals } from '../context/GoalsContext.jsx'
+import { goalShine } from '../lib/goalTime.js'
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
 const LABEL_W = 46
-const MIN_PX = 22
 
 const nowHours = () => { const d = new Date(); return d.getHours() + d.getMinutes() / 60 }
 const hourLabel = h => h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`
@@ -13,8 +15,9 @@ const hourLabel = h => h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 P
  * Scrolls to an hour before now on today (everything earlier is faded),
  * otherwise to just before the first event.
  */
-export default function DaySchedule({ dateStr, events, isToday, isPast, onEventClick, onSlotClick, hourHeight = 52, style }) {
+export default function DaySchedule({ dateStr, events, isToday, isPast, onEventClick, onSlotClick, hourHeight = 64, style }) {
   const scrollRef = useRef(null)
+  const { goals } = useGoals()
   const [now, setNow] = useState(nowHours)
 
   useEffect(() => {
@@ -25,7 +28,7 @@ export default function DaySchedule({ dateStr, events, isToday, isPast, onEventC
 
   const allDay = events.filter(ev => ev.isAllDay)
   const timed = events.filter(isTimed)
-  const layout = layoutOverlaps(timed, MIN_PX / hourHeight)
+  const layout = layoutOverlaps(timed, SLOT)
 
   // Initial position per day shown — not on every minute tick.
   useEffect(() => {
@@ -41,8 +44,8 @@ export default function DaySchedule({ dateStr, events, isToday, isPast, onEventC
   const handleColClick = (e) => {
     if (!onSlotClick || e.target.closest('[data-event]')) return
     const rect = e.currentTarget.getBoundingClientRect()
-    const h = Math.floor(((e.clientY - rect.top) / hourHeight) * 2) / 2
-    onSlotClick(Math.min(Math.max(h, 0), 23))
+    const h = floorToSlot((e.clientY - rect.top) / hourHeight)
+    onSlotClick(Math.min(Math.max(h, 0), 23.75))
   }
 
   return (
@@ -74,26 +77,23 @@ export default function DaySchedule({ dateStr, events, isToday, isPast, onEventC
             {HOURS.map(h => <div key={h} style={{ height: hourHeight, borderTop: '1px solid var(--bd-2xs)' }} />)}
 
             {timed.map((ev, i) => {
-              const top = ev.start * hourHeight
-              const height = Math.max(ev.dur * hourHeight - 3, MIN_PX)
+              const { top, height, compact } = eventBox(ev, hourHeight)
               const { left, width } = layout.get(ev)
               const isSleep = ev.isBedtime
+              const shine = goalShine(ev, goals)
               return (
-                <div key={`${ev.id || i}`} data-event="true"
+                <div key={`${ev.id || i}`} data-event="true" className={shine.className}
                   onClick={() => onEventClick?.(ev)}
                   style={{
-                    position: 'absolute', top, height,
+                    position: 'absolute', top, height, '--shine-delay': shine.shineDelay,
                     left: `calc(${left * 100}% + 4px)`,
                     width: `calc(${width * 100}% - ${left + width >= 1 ? 8 : 6}px)`,
                     background: ev.tint, borderLeft: `3px solid ${ev.color}`,
-                    borderRadius: 8, padding: '4px 8px', overflow: 'hidden', cursor: 'pointer',
+                    borderRadius: compact ? 5 : 8, padding: compact ? '0 7px' : '4px 8px', overflow: 'hidden', cursor: 'pointer',
                     boxShadow: left > 0 ? '0 0 0 1px var(--surface)' : 'none',
                     opacity: isSleep ? 0.75 : 1, zIndex: 1,
                   }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.25, color: ev.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: height < 40 ? 'nowrap' : 'normal', display: height < 40 ? 'block' : '-webkit-box', WebkitLineClamp: Math.max(1, Math.floor((height - 18) / 16)), WebkitBoxOrient: 'vertical' }}>
-                    {isSleep ? '🌙 ' : ''}{ev.title}
-                  </div>
-                  {height >= 40 && <div style={{ fontSize: 11, color: ev.color, opacity: .8, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ev.time || ev.timeDisplay}</div>}
+                  <EventLabel ev={ev} height={height} compact={compact} size={12.5} prefix={isSleep ? '🌙 ' : ''} />
                 </div>
               )
             })}

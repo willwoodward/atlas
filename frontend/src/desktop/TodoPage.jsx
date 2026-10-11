@@ -205,8 +205,10 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddS
           <AddSubTodoInput parentId={t.id} onAdd={onAddSub} onCancel={() => setAddingSubFor(null)} />
         )}
 
-        {/* Add sub-task link — shown at bottom when expanded and not already adding */}
-        {isExpanded && addingSubFor !== t.id && (
+        {/* Add sub-task link — only under a to-do that has sub-tasks; for one
+            without, tapping the row opens the input, and dismissing it empty
+            shouldn't leave this behind. */}
+        {isExpanded && hasChildren && addingSubFor !== t.id && (
           <button
             onClick={() => setAddingSubFor(t.id)}
             style={{ display: 'flex', alignItems: 'center', gap: 5, paddingLeft: 28, paddingBottom: 4, color: 'var(--faint)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit' }}>

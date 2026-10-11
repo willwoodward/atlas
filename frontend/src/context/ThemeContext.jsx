@@ -23,8 +23,10 @@ export function ThemeProvider({ children }) {
     const root = document.documentElement
     root.setAttribute('data-theme', theme)
     root.style.colorScheme = theme
-    // Keep the PWA title bar / browser chrome in sync with the app background
-    const bg = getComputedStyle(root).getPropertyValue('--bg').trim()
+    // PWA title bar / browser chrome: --surface-2, the colour of the desktop
+    // sidebar and the mobile top bar, so the bar reads as part of the app's
+    // chrome rather than a strip of page background.
+    const bg = getComputedStyle(root).getPropertyValue('--surface-2').trim()
     document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.remove())
     const meta = document.createElement('meta')
     meta.name = 'theme-color'

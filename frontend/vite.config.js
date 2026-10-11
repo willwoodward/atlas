@@ -13,7 +13,7 @@ export default defineConfig({
         name: 'Atlas',
         short_name: 'Atlas',
         description: 'Your personal operating system',
-        theme_color: '#efeae0',
+        theme_color: '#f6f2ea',
         background_color: '#efeae0',
         display: 'standalone',
         start_url: '/atlas/',

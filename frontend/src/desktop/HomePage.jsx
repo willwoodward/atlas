@@ -326,7 +326,7 @@ export default function HomePage() {
               events={allEvents.filter(ev => ev.date === todayStr)}
               isToday
               onEventClick={setSelectedEvent}
-              hourHeight={46}
+              hourHeight={56}
               style={{ height: 380 }}
             />
           )}

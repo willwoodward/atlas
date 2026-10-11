@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { weekKey, shiftWeek, formatWeekRange, staysInBucket, currentWeekTodos, mondayOf } from '../week.js'
 import { goalTime, goalForEvent } from '../goalTime.js'
-import { layoutOverlaps } from '../calendarLayout.js'
+import { layoutOverlaps, eventBox, floorToSlot, SLOT } from '../calendarLayout.js'
 
 // Thursday 8 Oct 2026, 14:30 local
 const NOW = new Date(2026, 9, 8, 14, 30)
@@ -60,6 +60,16 @@ describe('goal time', () => {
     expect(goalForEvent('[MASTERS] write-up', goals)?.id).toBe('swe')
     expect(goalForEvent('Trust fall', goals)).toBe(null) // "rust" inside a word
   })
+  it('treats * in a tag as "any text"', () => {
+    const social = [{ id: 'friends', title: 'Settled in', tags: 'dinner w/*, *run, coffee * catch-up' }]
+    expect(goalForEvent('Dinner w/ Sam', social)?.id).toBe('friends')
+    expect(goalForEvent('dinner w/the team', social)?.id).toBe('friends')
+    expect(goalForEvent('Dinner', social)).toBe(null)
+    expect(goalForEvent('Long run', social)?.id).toBe('friends')
+    expect(goalForEvent('Brunch', social)).toBe(null)          // end still anchored
+    expect(goalForEvent('Coffee with Jo catch-up', social)?.id).toBe('friends')
+    expect(goalForEvent('anything', [{ id: 'x', title: 'X', tags: '*' }])).toBe(null) // bare * matches nothing
+  })
   it('splits elapsed and planned time across the week', () => {
     const ev = (date, start, dur, title) => ({ date, start, dur, title })
     const r = goalTime([
@@ -86,5 +96,32 @@ describe('overlap layout', () => {
     expect(out.A).toEqual({ left: 0, width: 1 / 3 })
     expect(out.E.width).toBeCloseTo(2 / 3)
     expect(out.D).toEqual({ left: 0, width: 1 })
+  })
+})
+
+describe('15-minute blocks', () => {
+  const e = (title, start, dur) => ({ title, start, dur })
+  it('stacks back-to-back 15-minute blocks instead of splitting them', () => {
+    const evs = [e('A', 9, 0.25), e('B', 9.25, 0.25), e('C', 9.5, 0.25)]
+    for (const [, l] of layoutOverlaps(evs, SLOT)) expect(l).toEqual({ left: 0, width: 1 })
+  })
+  it('still puts genuinely overlapping short blocks side by side', () => {
+    const out = [...layoutOverlaps([e('A', 9, 0.25), e('B', 9.1, 0.25)], SLOT).values()]
+    expect(out.map(l => l.width)).toEqual([0.5, 0.5])
+  })
+  it('treats a sub-15-minute event as one slot, for drawing and for overlap', () => {
+    const out = [...layoutOverlaps([e('A', 9, 0.05), e('B', 9.2, 0.25)], SLOT).values()]
+    expect(out.map(l => l.width)).toEqual([0.5, 0.5]) // A is drawn 9:00–9:15, so it meets B
+    expect(eventBox(e('A', 9, 0.05), 64)).toEqual({ top: 577, height: 14, compact: true })
+  })
+  it('sizes blocks by their real length with a 2px gap between neighbours', () => {
+    const a = eventBox(e('A', 9, 0.25), 64), b = eventBox(e('B', 9.25, 0.25), 64)
+    expect(b.top - (a.top + a.height)).toBe(2)
+    expect(eventBox(e('Long', 9, 1), 64)).toMatchObject({ height: 62, compact: false })
+  })
+  it('snaps clicks to the 15-minute slot under the pointer', () => {
+    expect(floorToSlot(9.2)).toBe(9)
+    expect(floorToSlot(9.3)).toBe(9.25)
+    expect(floorToSlot(9.99)).toBe(9.75)
   })
 })

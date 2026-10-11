@@ -131,6 +131,12 @@ export function FinancesProvider({ children }) {
     refreshInsights()
   }, [call, data.accounts, displayCurrency, refreshInsights])
 
+  const setTransactionCategory = useCallback(async (id, category) => {
+    setData(d => ({ ...d, transactions: d.transactions.map(t => t.id === id ? { ...t, category } : t) }))
+    await call(`/api/finances/transactions/${id}`, { method: 'PATCH', body: JSON.stringify({ category }) })
+    refreshInsights()
+  }, [call, refreshInsights])
+
   const removeTransaction = useCallback(async (id) => {
     setData(d => ({ ...d, transactions: d.transactions.filter(t => t.id !== id) }))
     await call(`/api/finances/transactions/${id}`, { method: 'DELETE' })
@@ -166,6 +172,18 @@ export function FinancesProvider({ children }) {
     })
     await refreshInsights()
   }, [call, refreshInsights])
+
+  // "Everything like this": saves a rule (so future imports are categorised
+  // too) and applies it to existing uncategorised transactions now.
+  const categoriseMatching = useCallback(async (pattern, category) => {
+    const p = pattern.trim().toLowerCase()
+    setData(d => ({ ...d, transactions: d.transactions.map(t =>
+      !(t.category || '').trim() && (t.merchant || '').toLowerCase().includes(p) ? { ...t, category } : t) }))
+    await call('/api/finances/rules', { method: 'POST', body: JSON.stringify({ id: uid(), pattern: p, category }) })
+    const res = await call('/api/finances/rules/apply', { method: 'POST', body: JSON.stringify({ pattern: p, category }) })
+    await refetch()
+    return res.ok ? (await res.json()).updated : 0
+  }, [call, refetch])
 
   // ─── Budgets ───────────────────────────────────────────────────────────────
   // Entered in the display currency, and kept in it.
@@ -289,7 +307,7 @@ export function FinancesProvider({ children }) {
       addPot, removePot,
       addSubGoal, removeSubGoal,
       addDeposit, removeDeposit,
-      addTransaction, removeTransaction,
+      addTransaction, removeTransaction, setTransactionCategory, categoriseMatching,
       addAccount, updateAccount, removeAccount,
     }}>
       {children}

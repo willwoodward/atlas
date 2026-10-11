@@ -212,6 +212,43 @@ async def add_transaction(body: TransactionIn, user=Depends(get_current_user), d
     return {"ok": True}
 
 
+class TransactionUpdate(BaseModel):
+    category: Optional[str] = None
+
+
+@router.patch("/transactions/{txn_id}")
+async def update_transaction(txn_id: str, body: TransactionUpdate, user=Depends(get_current_user), db=Depends(get_db)):
+    if body.category is not None:
+        await db.execute("UPDATE finances_transactions SET category = ? WHERE id = ?",
+                         (body.category.strip(), txn_id))
+    await db.commit()
+    return {"ok": True}
+
+
+class ApplyRuleIn(BaseModel):
+    pattern: str
+    category: str
+    # False: only fill in uncategorised rows, so a rule never silently undoes a
+    # category you chose by hand. True: recategorise every match.
+    overwrite: bool = False
+
+
+@router.post("/rules/apply")
+async def apply_rule(body: ApplyRuleIn, user=Depends(get_current_user), db=Depends(get_db)):
+    """Categorise existing transactions the way a rule would at import time:
+    case-insensitive substring on the merchant / bank description."""
+    pattern = body.pattern.strip().lower()
+    if not pattern:
+        raise HTTPException(400, "Pattern is empty")
+    where = "INSTR(LOWER(merchant), ?) > 0"
+    if not body.overwrite:
+        where += " AND TRIM(COALESCE(category, '')) = ''"
+    cur = await db.execute(f"UPDATE finances_transactions SET category = ? WHERE {where}",
+                           (body.category.strip(), pattern))
+    await db.commit()
+    return {"updated": cur.rowcount}
+
+
 @router.delete("/transactions/{txn_id}")
 async def remove_transaction(txn_id: str, user=Depends(get_current_user), db=Depends(get_db)):
     await db.execute("DELETE FROM finances_transactions WHERE id = ?", (txn_id,))
