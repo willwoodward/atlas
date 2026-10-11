@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
-import { buildAuthUrl, fetchEvents, toCalendarEvents, insertGcalEvent } from '../integrations/googleCalendar.js'
+import { buildAuthUrl, fetchEvents, toCalendarEvents, insertGcalEvent, deleteGcalEvent } from '../integrations/googleCalendar.js'
 import { useAuth } from './AuthContext.jsx'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -80,6 +80,15 @@ export function IntegrationsProvider({ children }) {
     return result
   }, [gcalConnected, getAccessToken])
 
+  const removeGcalEvent = useCallback(async (eventId) => {
+    if (!gcalConnected) throw new Error('Not connected')
+    const accessToken = await getAccessToken()
+    await deleteGcalEvent(accessToken, eventId)
+    // Sleep events also emit a derived `<id>_wakeup` entry
+    setGcalEvents(prev => prev.filter(e => e.id !== eventId && e.id !== `${eventId}_wakeup`))
+    setGcalMutatedAt(Date.now())
+  }, [gcalConnected, getAccessToken])
+
   const refetchEvents = useCallback(async (weekStart, weekEnd) => {
     if (!gcalConnected) return
     setGcalLoading(true)
@@ -109,6 +118,7 @@ export function IntegrationsProvider({ children }) {
       disconnectGoogle,
       refetchEvents,
       createGcalEvent,
+      removeGcalEvent,
     }}>
       {children}
     </Ctx.Provider>

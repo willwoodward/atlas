@@ -25,6 +25,44 @@ function toTimeStr(h) {
 }
 function snapTo(h, step) { return Math.round(h / step) * step }
 
+// Google-Calendar-style layout for overlapping timed events. Events that
+// (transitively) overlap form a cluster; each gets the first free column in
+// its cluster, then widens rightwards over columns it doesn't collide with.
+// Returns Map(event → { left, width }) as fractions of the day column.
+function layoutOverlaps(events) {
+  const MIN_DUR = 22 / HOUR_H // matches the minimum rendered height
+  const items = events
+    .map(ev => ({ ev, start: ev.start, end: ev.start + Math.max(ev.dur, MIN_DUR) }))
+    .sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start))
+  const out = new Map()
+  const overlaps = (a, b) => a.start < b.end && b.start < a.end
+
+  let cluster = [], clusterEnd = -Infinity
+  const flush = () => {
+    const cols = [] // cols[i] = items in column i
+    for (const it of cluster) {
+      let c = cols.findIndex(col => col.every(o => !overlaps(o, it)))
+      if (c === -1) { c = cols.length; cols.push([]) }
+      cols[c].push(it)
+      it.col = c
+    }
+    const n = cols.length
+    for (const it of cluster) {
+      let span = 1
+      while (it.col + span < n && cols[it.col + span].every(o => !overlaps(o, it))) span++
+      out.set(it.ev, { left: it.col / n, width: span / n })
+    }
+    cluster = []
+  }
+  for (const it of items) {
+    if (it.start >= clusterEnd) flush()
+    cluster.push(it)
+    clusterEnd = Math.max(clusterEnd, it.end)
+  }
+  flush()
+  return out
+}
+
 const inputStyle = {
   width: '100%', padding: '8px 12px', borderRadius: 9, fontSize: 13.5,
   border: '1px solid var(--bd)', background: 'var(--surface-2)', color: 'var(--ink)',
@@ -34,6 +72,24 @@ const labelStyle = { display: 'block', fontSize: 11.5, fontWeight: 600, color: '
 
 // ─── Event detail modal ───────────────────────────────────────────────────
 function EventDetailModal({ event, onClose, onDelete }) {
+  const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState(null)
+  const canDelete = !event.isSleepWakeUp
+
+  const handleDelete = async () => {
+    if (!confirming) { setConfirming(true); return }
+    setDeleting(true)
+    setError(null)
+    try {
+      await onDelete(event)
+      onClose()
+    } catch (err) {
+      setError(err.message)
+      setDeleting(false)
+    }
+  }
+
   return (
     <>
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,.35)' }} />
@@ -70,10 +126,17 @@ function EventDetailModal({ event, onClose, onDelete }) {
           </div>
           {event.description && <p style={{ margin: '0 0 16px', fontSize: 13.5, color: 'var(--mid)', lineHeight: 1.55, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 9 }}>{event.description}</p>}
           {event.notes && <p style={{ margin: '0 0 16px', fontSize: 13.5, color: 'var(--mid)', lineHeight: 1.55, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 9 }}>{event.notes}</p>}
-          {event.isLocal && (
-            <button onClick={() => { onDelete(event.id); onClose() }} style={{ fontSize: 13, color: '#c15f3c', background: 'rgba(193,95,60,.09)', border: 'none', borderRadius: 9, padding: '8px 14px', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
-              Delete event
-            </button>
+          {canDelete && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <button onClick={handleDelete} disabled={deleting} style={{ fontSize: 13, color: confirming ? '#fff' : '#c15f3c', background: confirming ? '#c15f3c' : 'rgba(193,95,60,.09)', border: 'none', borderRadius: 9, padding: '8px 14px', cursor: deleting ? 'default' : 'pointer', fontFamily: 'inherit', fontWeight: 500, opacity: deleting ? .6 : 1 }}>
+                {deleting ? 'Deleting…' : confirming ? 'Confirm delete' : 'Delete event'}
+              </button>
+              {confirming && !deleting && (
+                <button onClick={() => setConfirming(false)} style={{ fontSize: 13, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+              )}
+              {!event.isLocal && !confirming && <span style={{ fontSize: 11.5, color: 'var(--faint)' }}>Removes it from Google Calendar</span>}
+              {error && <span style={{ fontSize: 12, color: '#c15f3c' }}>⚠ {error}</span>}
+            </div>
           )}
         </div>
       </div>
@@ -151,7 +214,7 @@ function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00'
 // ─── Calendar page ────────────────────────────────────────────────────────
 export default function CalendarPage() {
   const isMobile = useIsMobile()
-  const { gcal, connectGoogle, refetchEvents, createGcalEvent } = useIntegrations()
+  const { gcal, connectGoogle, refetchEvents, createGcalEvent, removeGcalEvent } = useIntegrations()
   const { events: localEvents, addEvent, removeEvent } = useLocalCalendar()
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedEvent, setSelectedEvent] = useState(null)
@@ -195,6 +258,8 @@ export default function CalendarPage() {
       addEvent(eventData)
     }
   }
+
+  const handleDeleteEvent = (ev) => ev.isLocal ? removeEvent(ev.id) : removeGcalEvent(ev.id)
 
   // ─── Drag-to-create helpers ─────────────────────────────────────────────
   const hourFromEl = (el, clientY) => {
@@ -391,17 +456,23 @@ export default function CalendarPage() {
               >
                 {HOURS.map(h => <div key={h} style={{ height: HOUR_H, borderTop: '1px solid var(--bd-2xs)' }} />)}
 
-                {/* Timed events */}
-                {d.events
-                  .filter(ev => !ev.isAllDay && !ev.isSleepWakeUp && ev.start >= DAY_START && ev.start < 24)
-                  .map((ev, i) => {
+                {/* Timed events — overlapping ones sit side by side */}
+                {(() => {
+                  const timed = d.events.filter(ev => !ev.isAllDay && !ev.isSleepWakeUp && ev.start >= DAY_START && ev.start < 24)
+                  const layout = layoutOverlaps(timed)
+                  return timed.map((ev, i) => {
                     const top = (ev.start - DAY_START) * HOUR_H
                     const height = Math.max(ev.dur * HOUR_H - 4, 20)
+                    const { left, width } = layout.get(ev)
                     return (
                       <div key={ev.id || i} data-event="true"
                         onClick={e => { e.stopPropagation(); setSelectedEvent(ev) }}
                         style={{
-                          position: 'absolute', left: 4, right: 4, top, height,
+                          position: 'absolute', top, height,
+                          left: `calc(${left * 100}% + 4px)`,
+                          width: `calc(${width * 100}% - ${left + width >= 1 ? 8 : 6}px)`,
+                          zIndex: 1,
+                          boxShadow: left > 0 ? '0 0 0 1px var(--surface)' : 'none',
                           background: ev.tint,
                           borderLeft: `3px solid ${ev.color}`,
                           borderRadius: 8, padding: '5px 8px', overflow: 'hidden', cursor: 'pointer', transition: 'filter .1s',
@@ -412,10 +483,11 @@ export default function CalendarPage() {
                         <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.2, color: ev.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {ev.title}
                         </div>
-                        {height > 28 && <div style={{ fontSize: 10, color: ev.color, opacity: .8 }}>{ev.timeDisplay}</div>}
+                        {height > 28 && <div style={{ fontSize: 10, color: ev.color, opacity: .8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.timeDisplay}</div>}
                       </div>
                     )
-                  })}
+                  })
+                })()}
 
                 {/* Drag ghost */}
                 {ghost && ghost.date === d.dateStr && (
@@ -431,7 +503,7 @@ export default function CalendarPage() {
 
       {/* Modals */}
       {selectedEvent && (
-        <EventDetailModal event={selectedEvent} onClose={() => setSelectedEvent(null)} onDelete={removeEvent} />
+        <EventDetailModal event={selectedEvent} onClose={() => setSelectedEvent(null)} onDelete={handleDeleteEvent} />
       )}
       {showAddModal && (
         <AddEventModal

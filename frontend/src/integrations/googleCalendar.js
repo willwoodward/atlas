@@ -47,6 +47,15 @@ export async function insertGcalEvent(token, { title, date, startH, endH, notes 
   return res.json()
 }
 
+export async function deleteGcalEvent(token, eventId) {
+  const res = await fetch(`${CAL_BASE}/calendars/primary/events/${encodeURIComponent(eventId)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  // 410 = already deleted
+  if (!res.ok && res.status !== 410) throw new Error(`GCal delete ${res.status}`)
+}
+
 // GCal colorId → palette
 const COLOR_MAP = {
   '1':  { c: '#9a6d84', t: 'rgba(154,109,132,.16)' },
