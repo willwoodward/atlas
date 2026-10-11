@@ -191,6 +191,17 @@ async def init_db():
                 as_of TEXT NOT NULL DEFAULT ''
             );
 
+            -- Signed-out sessions (by token id) and a "sessions valid after"
+            -- cut-off for signing out everywhere. See auth.py.
+            CREATE TABLE IF NOT EXISTS revoked_tokens (
+                jti TEXT PRIMARY KEY,
+                expires_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
             -- ECB daily reference rates, "1 EUR = rate CUR" (see fx.py).
             CREATE TABLE IF NOT EXISTS fx_daily (
                 date TEXT NOT NULL,
@@ -353,6 +364,9 @@ async def init_db():
             # categorised, a guess) or 'manual' (you). Rules and edits replace
             # AI guesses; nothing replaces a manual choice.
             "ALTER TABLE finances_transactions ADD COLUMN category_source TEXT NOT NULL DEFAULT ''",
+            # A budget can cover several categories (JSON list); the `category`
+            # column is its name. Empty means just the category it's named after.
+            "ALTER TABLE finances_budgets ADD COLUMN categories TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 await db.execute(stmt)

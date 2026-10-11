@@ -257,7 +257,7 @@ function MigrationCard() {
 export default function AccountsPage() {
   const isMobile = useIsMobile()
   const { gcal, connectGoogle, disconnectGoogle } = useIntegrations()
-  const { user, logout } = useAuth()
+  const { user, signOut } = useAuth()
   const hasClientId = !!import.meta.env.VITE_GOOGLE_CLIENT_ID
 
   return (
@@ -269,8 +269,13 @@ export default function AccountsPage() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 4 }}>
           {user && <span style={{ fontSize: 13, color: 'var(--mid)' }}>{user.email}</span>}
-          <button onClick={logout} style={{ padding: '7px 14px', borderRadius: 9, border: '1px solid var(--bd-xl)', background: 'transparent', color: 'var(--mid)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+          <button onClick={() => signOut()} style={{ padding: '7px 14px', borderRadius: 9, border: '1px solid var(--bd-xl)', background: 'transparent', color: 'var(--mid)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
             Sign out
+          </button>
+          <button title="Signs out every phone, laptop and browser — use if you think a session has leaked"
+            onClick={() => window.confirm('Sign out on every device? You will need to sign in again everywhere.') && signOut({ everywhere: true })}
+            style={{ padding: '7px 14px', borderRadius: 9, border: '1px solid rgba(193,95,60,.35)', background: 'transparent', color: '#c15f3c', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+            Sign out of all devices
           </button>
         </div>
       </div>

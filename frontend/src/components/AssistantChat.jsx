@@ -1,21 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
-import { marked } from 'marked'
+import { renderMarkdown } from '../lib/markdown.js'
 import AtlasOrb from './AtlasOrb.jsx'
 import { useAssistant } from '../context/AssistantContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { assistantPrompts } from '../data.js'
-
-marked.use({ gfm: true, breaks: true })
-// Citations point off-site, so they must not navigate away from the app.
-marked.use({
-  renderer: {
-    link({ href, title, tokens }) {
-      const text = this.parser.parseInline(tokens)
-      const t = title ? ` title="${title}"` : ''
-      return `<a href="${href}"${t} target="_blank" rel="noopener noreferrer">${text}</a>`
-    },
-  },
-})
 
 // MCP tool name → what to show while it runs
 const TOOL_LABELS = {
@@ -348,7 +336,7 @@ function ResearchPanel({ research }) {
                       ))
                     : failed
                       ? <div style={{ fontSize: 12, color: '#c15f3c', fontFamily: 'ui-monospace, monospace', wordBreak: 'break-word' }}>{body}</div>
-                      : <div className="md-prose" style={{ fontSize: 12.5, lineHeight: 1.55 }} dangerouslySetInnerHTML={{ __html: marked.parse(body || '') }} />}
+                      : <div className="md-prose" style={{ fontSize: 12.5, lineHeight: 1.55 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />}
                 </div>
               )}
             </div>
@@ -476,7 +464,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
             <CodingPanel coding={m.coding} />
             <QuestionPanel question={m.question} runId={m.runId} onAnswer={answer} />
             {m.content
-              ? <div className="md-prose" style={{ fontSize: 14.5, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: marked.parse(m.content) }} />
+              ? <div className="md-prose" style={{ fontSize: 14.5, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} />
               : busy && i === messages.length - 1 && (m.tools?.length ?? 0) === 0 && !m.research?.length && !m.question && !m.coding &&
                   <span style={{ fontSize: 13.5, color: 'var(--muted)' }}>Thinking…</span>}
           </div>

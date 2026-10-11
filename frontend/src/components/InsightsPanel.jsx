@@ -31,15 +31,20 @@ const CADENCE_LABEL = {
 
 // ─── Budgets ──────────────────────────────────────────────────────────────────
 
-function BudgetRow({ b, onRemove, isMobile }) {
+function BudgetRow({ b, onRemove, onEdit, isMobile }) {
   const { fmt } = useMoney()
+  const covers = b.categories || [b.category]
+  const named = !(covers.length === 1 && covers[0].toLowerCase() === b.category.toLowerCase())
   const width = Math.min(b.pct, 100)
   return (
     <div style={{ padding: '12px 0', borderTop: '1px solid var(--bd-xs)' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 7 }}>
-        <span style={{ flex: 1, fontSize: 13.5, fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <button onClick={() => onEdit(b)} title="Edit budget"
+          style={{ flex: 1, fontSize: 13.5, fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left',
+            background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', color: 'var(--ink)' }}>
           {b.category}
-        </span>
+          {named && <span style={{ fontSize: 11.5, fontWeight: 400, color: 'var(--muted)' }}> · {covers.join(', ')}</span>}
+        </button>
         <span style={{ fontFamily: "'Newsreader', serif", fontSize: 14.5, fontWeight: 600, color: paceColor(b) }}>
           {fmt(b.spent)}
         </span>
@@ -64,16 +69,37 @@ function BudgetRow({ b, onRemove, isMobile }) {
 
 function BudgetsCard({ isMobile }) {
   const { fmt2, cur } = useMoney()
-  const { insights, setBudget, removeBudget } = useFinances()
+  const { insights, setBudget, removeBudget, transactions } = useFinances()
   const [adding, setAdding] = useState(false)
-  const [category, setCategory] = useState('')
+  const [editing, setEditing] = useState(null)     // budget being edited
+  const [name, setName] = useState('')
   const [amount, setAmount] = useState('')
+  const [picked, setPicked] = useState([])
 
-  const submit = (e) => {
+  // Categories you've used, most common first, to pick from.
+  const counts = {}
+  for (const t of transactions) { const c = (t.category || '').trim(); if (c && t.type !== 'income') counts[c] = (counts[c] || 0) + 1 }
+  const choices = [...new Set([...Object.keys(counts).sort((a, b) => counts[b] - counts[a]), ...picked])]
+
+  const open = (b = null) => {
+    setEditing(b)
+    setName(b?.category || '')
+    // The amount as shown (display currency), since saving stores it in that currency.
+    setAmount(b ? String(Math.round(b.amount)) : '')
+    const covers = b?.categories || []
+    setPicked(covers.length === 1 && covers[0].toLowerCase() === (b?.category || '').toLowerCase() ? [] : covers)
+    setAdding(true)
+  }
+  const close = () => { setAdding(false); setEditing(null); setName(''); setAmount(''); setPicked([]) }
+  const toggle = (c) => setPicked(p => p.includes(c) ? p.filter(x => x !== c) : [...p, c])
+
+  const submit = async (e) => {
     e.preventDefault()
-    if (!category.trim() || !amount) return
-    setBudget(category.trim(), amount)
-    setCategory(''); setAmount(''); setAdding(false)
+    if (!name.trim() || !amount) return
+    // Budgets are keyed by name, so a rename is a new budget replacing the old.
+    if (editing && editing.category !== name.trim()) await removeBudget(editing.id)
+    await setBudget(name.trim(), amount, picked)
+    close()
   }
 
   const { budgets = [], unbudgeted = [] } = insights
@@ -82,10 +108,10 @@ function BudgetsCard({ isMobile }) {
     <div style={{ ...card, padding: isMobile ? '18px 16px' : '20px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
         <h2 style={h2}>Budgets</h2>
-        <button onClick={() => setAdding(a => !a)} style={linkBtn}>{adding ? 'Cancel' : '+ Add'}</button>
+        <button onClick={() => adding ? close() : open()} style={linkBtn}>{adding ? 'Cancel' : '+ Add'}</button>
       </div>
       <div style={{ fontSize: 11.5, color: 'var(--faint)', marginBottom: 6, lineHeight: 1.5 }}>
-        Monthly, per category. Progress is coloured by pace — {currencySymbol(cur)}90 of {currencySymbol(cur)}100
+        Monthly. A budget can cover several categories (e.g. Bills). Progress is coloured by pace — {currencySymbol(cur)}90 of {currencySymbol(cur)}100
         reads differently on the 3rd than on the 28th.
       </div>
 
@@ -95,15 +121,40 @@ function BudgetsCard({ isMobile }) {
         </div>
       )}
 
-      {budgets.map(b => <BudgetRow key={b.id} b={b} onRemove={removeBudget} isMobile={isMobile} />)}
+      {budgets.map(b => <BudgetRow key={b.id} b={b} onRemove={removeBudget} onEdit={open} isMobile={isMobile} />)}
 
       {adding && (
-        <form onSubmit={submit} style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-          <input autoFocus value={category} onChange={e => setCategory(e.target.value)}
-            placeholder="Category" style={{ ...inp, flex: '1 1 130px' }} />
-          <input type="number" min="0" step="1" value={amount} onChange={e => setAmount(e.target.value)}
-            placeholder={`${currencySymbol(cur)} / month`} style={{ ...inp, flex: '0 1 110px' }} />
-          <button type="submit" style={{ ...linkBtn, padding: '0 4px' }}>Save</button>
+        <form onSubmit={submit} style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--bd-sm)' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input autoFocus value={name} onChange={e => setName(e.target.value)}
+              placeholder="Name, e.g. Bills" aria-label="Budget name" style={{ ...inp, flex: '1 1 130px' }} />
+            <input type="number" min="0" step="1" value={amount} onChange={e => setAmount(e.target.value)}
+              placeholder={`${currencySymbol(cur)} / month`} aria-label="Monthly amount" style={{ ...inp, flex: '0 1 110px' }} />
+          </div>
+          <div style={{ ...eyebrow, margin: '12px 0 6px' }}>Categories it covers</div>
+          {choices.length === 0
+            ? <div style={{ fontSize: 12, color: 'var(--faint)' }}>Categorise some transactions first.</div>
+            : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {choices.map(c => {
+                  const on = picked.includes(c)
+                  return (
+                    <button key={c} type="button" onClick={() => toggle(c)} aria-pressed={on}
+                      style={{ padding: '4px 10px', borderRadius: 99, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
+                        border: `1px solid ${on ? '#c15f3c' : 'var(--bd-xl)'}`, background: on ? 'rgba(193,95,60,.1)' : 'transparent', color: on ? '#c15f3c' : 'var(--mid)' }}>
+                      {on ? '✓ ' : ''}{c}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 8, lineHeight: 1.5 }}>
+            {picked.length ? `Counts spending in ${picked.join(', ')}.` : name.trim() ? `None picked: counts spending in "${name.trim()}".` : 'None picked: counts the category with the same name.'}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 14, marginTop: 10 }}>
+            {editing && <button type="button" onClick={() => { removeBudget(editing.id); close() }} style={{ ...linkBtn, color: 'var(--muted)', marginRight: 'auto' }}>Delete</button>}
+            <button type="submit" style={linkBtn}>{editing ? 'Save changes' : 'Save'}</button>
+          </div>
         </form>
       )}
 

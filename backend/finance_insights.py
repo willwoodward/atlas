@@ -5,6 +5,7 @@ Pure functions over transaction rows. The hard part is not arithmetic, it is
 saying "this is a subscription" without being wrong often enough to be annoying:
 a false positive here tells you that you pay £4.29 a month for a sandwich.
 """
+import json
 import re
 import statistics
 from datetime import date, datetime, timedelta
@@ -27,6 +28,23 @@ def current_month(today: Optional[date] = None) -> str:
 
 
 # ── Budgets ───────────────────────────────────────────────────────────────────
+
+def budget_categories(b: dict) -> list[str]:
+    """The categories a budget covers. Stored as a JSON list; a budget saved
+    before multi-category budgets (or with none picked) covers the category
+    it's named after."""
+    raw = b.get("categories")
+    cats = []
+    if isinstance(raw, list):
+        cats = raw
+    elif raw:
+        try:
+            cats = json.loads(raw)
+        except ValueError:
+            cats = []
+    cats = [c.strip() for c in cats if isinstance(c, str) and c.strip()]
+    return cats or [b["category"]]
+
 
 def budget_status(budgets: Iterable[dict], transactions: Iterable[dict],
                   month: Optional[str] = None, today: Optional[date] = None,
@@ -52,13 +70,19 @@ def budget_status(budgets: Iterable[dict], transactions: Iterable[dict],
     elapsed = today.day / days_in_month if current_month(today) == month else 1.0
     elapsed = min(max(elapsed, 1 / days_in_month), 1.0)
 
+    # Case-insensitive, so a budget for "groceries" counts "Groceries" spend.
+    spend_ci: dict[str, float] = {}
+    for c, v in spend.items():
+        spend_ci[c.lower()] = spend_ci.get(c.lower(), 0) + v
+
     out = []
     for b in budgets:
-        category = b["category"]
+        cats = budget_categories(b)
         limit = float(b.get("amount") or 0)
-        used = round(spend.get(category, 0), 2)
+        used = round(sum(spend_ci.get(c.lower(), 0) for c in {c.lower() for c in cats}), 2)
         out.append({
             **b,
+            "categories": cats,
             "spent": used,
             "remaining": round(limit - used, 2),
             "pct": round(used / limit * 100) if limit > 0 else 0,
@@ -68,9 +92,9 @@ def budget_status(budgets: Iterable[dict], transactions: Iterable[dict],
 
     # Spending with no budget attached is the blind spot a budget page creates,
     # so it is reported rather than quietly omitted.
-    budgeted = {b["category"] for b in budgets}
+    budgeted = {c.lower() for b in budgets for c in budget_categories(b)}
     unbudgeted = [{"category": c, "spent": round(v, 2)}
-                  for c, v in spend.items() if c not in budgeted]
+                  for c, v in spend.items() if c.lower() not in budgeted]
     unbudgeted.sort(key=lambda r: -r["spent"])
 
     out.sort(key=lambda r: -r["spent"])

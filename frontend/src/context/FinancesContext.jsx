@@ -204,10 +204,12 @@ export function FinancesProvider({ children }) {
 
   // ─── Budgets ───────────────────────────────────────────────────────────────
   // Entered in the display currency, and kept in it.
-  const setBudget = useCallback(async (category, amount) => {
+  // `name` identifies the budget; `categories` are what it counts (empty =
+  // just the category it's named after).
+  const setBudget = useCallback(async (name, amount, categories = []) => {
     await call('/api/finances/budgets', {
       method: 'POST',
-      body: JSON.stringify({ id: uid(), category, amount: Number(amount) || 0, period: 'monthly', currency: displayCurrency }),
+      body: JSON.stringify({ id: uid(), category: name, amount: Number(amount) || 0, period: 'monthly', currency: displayCurrency, categories }),
     })
     await refreshInsights()
   }, [call, refreshInsights, displayCurrency])

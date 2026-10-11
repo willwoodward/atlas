@@ -1,12 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { marked } from 'marked'
+import { renderMarkdown } from '../lib/markdown.js'
 import { useNotes } from '../context/NotesContext.jsx'
 import { useGitHub } from '../context/GitHubContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { useQuickAdd } from '../context/QuickAddContext.jsx'
 
-marked.use({ gfm: true, breaks: true })
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -696,7 +695,7 @@ export default function NotesPage() {
 
               {/* GitHub — rendered markdown */}
               {isGithub && !fileLoading && !editing && (
-                <div className="md-prose" dangerouslySetInnerHTML={{ __html: marked.parse(body || '') }} />
+                <div className="md-prose" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />
               )}
 
               {/* Mobile outline trigger — ^ button */}

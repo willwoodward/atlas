@@ -231,3 +231,27 @@ async def test_budget_upsert_is_keyed_on_category(client, auth):
     data = (await client.get("/api/finances/insights", headers=auth)).json()
     assert len(data["budgets"]) == 1
     assert data["budgets"][0]["amount"] == 250
+
+
+
+def test_a_budget_can_cover_several_categories():
+    budgets = [{"id": "b", "category": "Bills", "amount": 300, "categories": '["Electricity", "internet"]'}]
+    rows = [txn("ESB", 80, "2026-04-03", category="Electricity"), txn("Virgin", 45, "2026-04-04", category="Internet"),
+            txn("Tesco", 20, "2026-04-05", category="Groceries")]
+    status, unbudgeted = fi.budget_status(budgets, rows, month="2026-04", today=date(2026, 4, 30))
+    assert status[0]["spent"] == 125                      # case-insensitive: "internet" covers Internet
+    assert status[0]["categories"] == ["Electricity", "internet"]
+    assert [u["category"] for u in unbudgeted] == ["Groceries"]
+
+
+def test_old_single_category_budgets_still_work():
+    budgets = [{"id": "b", "category": "Groceries", "amount": 400, "categories": ""}]
+    status, _ = fi.budget_status(budgets, [txn("Tesco", 20, "2026-04-05", category="Groceries")], month="2026-04", today=date(2026, 4, 30))
+    assert status[0]["spent"] == 20 and status[0]["categories"] == ["Groceries"]
+
+
+async def test_budget_categories_round_trip(client, auth):
+    await client.post("/api/finances/budgets", headers=auth,
+                      json={"id": "b", "category": "Bills", "amount": 300, "categories": ["Phone", " Electricity ", ""]})
+    data = (await client.get("/api/finances/insights", headers=auth)).json()
+    assert data["budgets"][0]["categories"] == ["Electricity", "Phone"]

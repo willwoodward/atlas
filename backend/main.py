@@ -1,3 +1,4 @@
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -5,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from auth import config_problems
 from database import init_db
 from mcp_server import mcp_app
 from routers import auth_router, habits, todos, goals, finances, notes, calendar, integrations, assistant, employment, fitness
@@ -25,11 +27,24 @@ BASE_URL = os.getenv("BASE_URL", "https://willwoodward-clan-manager.duckdns.org"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Refuse to run with a security setting missing rather than run open.
+    # ATLAS_ALLOW_INSECURE_CONFIG=1 skips this for local development only.
+    problems = config_problems()
+    if problems:
+        if os.getenv("ATLAS_ALLOW_INSECURE_CONFIG", "").strip().lower() in ("1", "true", "yes"):
+            for p in problems:
+                logging.getLogger("atlas").warning("INSECURE CONFIG (allowed for dev): %s", p)
+        else:
+            raise RuntimeError("Refusing to start — fix .env.production:\n  - " + "\n  - ".join(problems))
     await init_db()
     yield
 
 
-app = FastAPI(title="Atlas API", lifespan=lifespan)
+# The interactive API docs list every endpoint to anyone; off unless asked for.
+_DOCS = os.getenv("ATLAS_API_DOCS", "").strip().lower() in ("1", "true", "on")
+app = FastAPI(title="Atlas API", lifespan=lifespan,
+              docs_url="/docs" if _DOCS else None, redoc_url="/redoc" if _DOCS else None,
+              openapi_url="/openapi.json" if _DOCS else None)
 
 app.add_middleware(
     CORSMiddleware,

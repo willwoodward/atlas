@@ -97,10 +97,27 @@ function RealAuthProvider({ children }) {
     popupRef.current = window.open(url, 'atlas-auth', `width=${w},height=${h},left=${left},top=${top}`)
   }, [])
 
+  // Local only: used when the server has already refused the token.
   const logout = useCallback(() => {
     localStorage.removeItem(JWT_KEY)
     setAuth(null)
   }, [])
+
+  // What the Sign out buttons use: revoke on the server first, so a copy of
+  // the token (if one ever leaked) stops working too — then forget it here.
+  // `everywhere` signs out every device. Best effort: if the server can't be
+  // reached, the local sign-out still happens.
+  const signOut = useCallback(async ({ everywhere = false } = {}) => {
+    const current = localStorage.getItem(JWT_KEY)
+    if (current) {
+      try {
+        await fetch(`${API}/auth/${everywhere ? 'logout-all' : 'logout'}`, {
+          method: 'POST', headers: { Authorization: `Bearer ${current}` }, keepalive: true,
+        })
+      } catch { /* offline: still sign out locally */ }
+    }
+    logout()
+  }, [logout])
 
   // Every context builds its own fetch, so the 401 check wraps fetch itself
   // rather than each caller. Without it a token the API has stopped accepting
@@ -165,6 +182,7 @@ function RealAuthProvider({ children }) {
       error,
       loginWithGoogle,
       logout,
+      signOut,
     }}>
       {children}
     </Ctx.Provider>

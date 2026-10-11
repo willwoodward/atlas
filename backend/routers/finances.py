@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import date
 
@@ -344,9 +345,42 @@ async def _auto_categorise(db, ids: Optional[list[str]] = None) -> int:
     ) as cur:
         existing = [r["category"] for r in await cur.fetchall()]
 
+    # What you've already decided, per exact merchant + direction, newest first;
+    # your own choices (manual/rule) outrank earlier AI guesses.
+    async with db.execute(
+        "SELECT merchant, type, category, category_source FROM finances_transactions "
+        "WHERE TRIM(COALESCE(category, '')) != '' "
+        "ORDER BY CASE WHEN category_source IN ('manual', 'rule') THEN 0 ELSE 1 END, date DESC"
+    ) as cur:
+        known_rows = [dict(r) for r in await cur.fetchall()]
+
     key = lambda r: (r["merchant"], "in" if r["type"] == "income" else "out")
-    answers = await finance_classify.classify([key(r) for r in rows], finance_classify.category_list(existing))
-    updates = [(answers[key(r)], r["id"]) for r in rows if answers.get(key(r))]
+    known: dict[tuple[str, str], str] = {}
+    for r in known_rows:
+        known.setdefault((r["merchant"].strip().lower(), key(r)[1]), r["category"])
+
+    # 1. Same merchant as before: reuse its category — no model call.
+    updates = []
+    remaining = []
+    for r in rows:
+        prior = known.get((r["merchant"].strip().lower(), key(r)[1]))
+        if prior:
+            updates.append((prior, r["id"]))
+        else:
+            remaining.append(r)
+
+    # 2. The rest go to the model, with examples of your own choices to follow.
+    if remaining:
+        examples, seen = [], set()
+        for r in known_rows:
+            if r["category_source"] in ("manual", "rule") and r["merchant"] not in seen:
+                seen.add(r["merchant"])
+                examples.append({"merchant": r["merchant"], "direction": key(r)[1], "category": r["category"]})
+            if len(examples) >= 40:
+                break
+        answers = await finance_classify.classify([key(r) for r in remaining],
+                                                  finance_classify.category_list(existing), examples)
+        updates += [(answers[key(r)], r["id"]) for r in remaining if answers.get(key(r))]
     if updates:
         # Re-checks blank so a category set while the model was thinking wins.
         await db.executemany(
@@ -525,10 +559,12 @@ async def import_commit(body: ImportCommitIn, user=Depends(get_current_user), db
 
 class BudgetIn(BaseModel):
     id: str
-    category: str
+    category: str                 # the budget's name
     amount: float = 0
     period: str = "monthly"
     currency: str = "EUR"
+    # Categories it covers; empty = just the one it's named after.
+    categories: list[str] = []
 
 
 class AllocateIn(BaseModel):
@@ -545,9 +581,11 @@ async def _all_transactions(db) -> list[dict]:
 @router.post("/budgets")
 async def add_budget(body: BudgetIn, user=Depends(get_current_user), db=Depends(get_db)):
     await db.execute(
-        "INSERT INTO finances_budgets (id, category, amount, period, currency) VALUES (?,?,?,?,?) "
-        "ON CONFLICT(category) DO UPDATE SET amount=excluded.amount, period=excluded.period, currency=excluded.currency",
-        (body.id, body.category.strip(), body.amount, body.period, body.currency.upper()),
+        "INSERT INTO finances_budgets (id, category, amount, period, currency, categories) VALUES (?,?,?,?,?,?) "
+        "ON CONFLICT(category) DO UPDATE SET amount=excluded.amount, period=excluded.period, "
+        "currency=excluded.currency, categories=excluded.categories",
+        (body.id, body.category.strip(), body.amount, body.period, body.currency.upper(),
+         json.dumps(sorted({c.strip() for c in body.categories if c.strip()}, key=str.lower))),
     )
     await db.commit()
     return {"ok": True}

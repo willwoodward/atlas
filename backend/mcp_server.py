@@ -576,6 +576,9 @@ sse_transport = SseServerTransport("/messages/")
 # environment silently published every tool to the internet. It now fails closed,
 # and local dev has to say so explicitly.
 ALLOW_INSECURE = os.getenv("ATLAS_MCP_ALLOW_INSECURE", "").strip().lower() in ("1", "true", "yes")
+# A key in the URL ends up in proxy logs and history. Header only, unless a
+# client that can't send headers needs it switched on.
+ALLOW_QUERY_KEY = os.getenv("ATLAS_MCP_ALLOW_QUERY_KEY", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 async def _check_auth(request: Request) -> bool:
@@ -588,7 +591,7 @@ async def _check_auth(request: Request) -> bool:
     key = request.query_params.get("key", "")
     if auth.startswith("Bearer ") and _secrets.compare_digest(auth[7:], ATLAS_MCP_KEY):
         return True
-    if key and _secrets.compare_digest(key, ATLAS_MCP_KEY):
+    if ALLOW_QUERY_KEY and key and _secrets.compare_digest(key, ATLAS_MCP_KEY):
         return True
 
     # A JWT is accepted only if it was minted for MCP. Any token will otherwise

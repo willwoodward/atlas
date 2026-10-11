@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import CheckMark from '../components/CheckMark.jsx'
 import DaySchedule from '../components/DaySchedule.jsx'
 import { EventDetailModal } from './CalendarPage.jsx'
@@ -211,8 +211,28 @@ export default function HomePage() {
   const { netWorth, accounts, fmt: fmtMoney } = useFinances()
   const allEvents = useCalendarEvents()
   const [openStat, setOpenStat] = useState(null)
-  const [selectedEvent, setSelectedEvent] = useState(null)
   const { weekStart, weekEnd, todayStr } = getWeekRange()
+  const showSchedule = gcal.connected || allEvents.some(ev => ev.date === todayStr && !ev.isAllDay)
+  // Desktop: the day column runs from where it starts to just above the
+  // bottom of the window (400–760px), re-measured on resize.
+  const scheduleRef = useRef(null)
+  const [scheduleH, setScheduleH] = useState(520)
+  useLayoutEffect(() => {
+    if (isMobile) return
+    const measure = () => {
+      const el = scheduleRef.current
+      if (!el) return
+      // Position within the page, not the viewport, so a scrolled page doesn't shrink it.
+      let sc = el.parentElement
+      while (sc && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement
+      const top = el.getBoundingClientRect().top + (sc?.scrollTop || 0)
+      setScheduleH(Math.round(Math.min(760, Math.max(400, window.innerHeight - top - 24))))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [isMobile, showSchedule, openStat])
+  const [selectedEvent, setSelectedEvent] = useState(null)
 
   useEffect(() => {
     if (gcal.connected) refetchEvents(weekStart, weekEnd)
@@ -320,40 +340,21 @@ export default function HomePage() {
 
           {gcal.loading && todayEvents.length === 0 && <div style={{ padding: '20px 0', fontSize: 13, color: 'var(--faint)' }}>Loading events…</div>}
 
-          {isMobile && (gcal.connected || todayEvents.length > 0) && (
+          {/* Today as a time column, the same view on desktop and mobile. On
+              desktop it matches the Calendar page's scale and takes the
+              viewport's height, so it sits level with the column beside it. */}
+          {showSchedule && (
+            <div ref={scheduleRef}>
             <DaySchedule
               dateStr={todayStr}
               events={allEvents.filter(ev => ev.date === todayStr)}
               isToday
               onEventClick={setSelectedEvent}
-              hourHeight={56}
-              style={{ height: 380 }}
+              hourHeight={isMobile ? 56 : 64}
+              style={{ height: isMobile ? 380 : scheduleH }}
             />
+            </div>
           )}
-
-          {!isMobile && gcal.connected && !gcal.loading && todayEvents.length === 0 && (
-            <div style={{ padding: '20px 0', fontSize: 13, color: 'var(--faint)' }}>No events today.</div>
-          )}
-
-          {!isMobile && todayEvents.map((ev, i) => {
-            const isSleep = ev.isBedtime || ev.isSleepWakeUp
-            return (
-              <div key={ev.id || i} style={{ display: 'flex', gap: 16, padding: '12px 0', borderTop: '1px solid var(--bd-sm)', opacity: isSleep ? 0.75 : 1 }}>
-                <div style={{ width: 56, flex: 'none', textAlign: 'right', paddingTop: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{ev.timeDisplay}</div>
-                  {!isSleep && (
-                    <div style={{ fontSize: 11, color: 'var(--faint)' }}>{ev.endTimeDisplay}</div>
-                  )}
-                </div>
-                <div style={{ width: 3, flex: 'none', borderRadius: 99, background: isSleep ? '#9a9488' : ev.color }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14.5, fontWeight: 500, color: isSleep ? 'var(--mid)' : 'var(--ink)' }}>
-                    {ev.isSleepWakeUp ? '🌅 Wake up' : ev.isBedtime ? '🌙 ' + ev.title : ev.title}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
         </div>
 
         {/* Habits + Todos + Goals */}

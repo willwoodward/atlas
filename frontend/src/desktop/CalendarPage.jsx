@@ -189,6 +189,19 @@ export default function CalendarPage() {
   const [ghost, setGhost] = useState(null)
   const [syncStatus, setSyncStatus] = useState(null)
   const dragRef = useRef(null)
+  const weekScrollRef = useRef(null)
+
+  // Current time, for the "now" line in today's column.
+  const nowHours = () => { const d = new Date(); return d.getHours() + d.getMinutes() / 60 }
+  const [nowH, setNowH] = useState(nowHours)
+  useEffect(() => {
+    const id = setInterval(() => setNowH(nowHours()), 60_000)
+    return () => clearInterval(id)
+  }, [])
+  // Open the week scrolled to an hour before now, so the line is in view.
+  useEffect(() => {
+    if (weekScrollRef.current) weekScrollRef.current.scrollTop = Math.max(0, nowHours() - 1) * HOUR_H
+  }, [isMobile]) // eslint-disable-line
   const swipeRef = useRef(null)
 
   // Mobile shows one day at a time; the week fetched is whichever contains it.
@@ -342,7 +355,7 @@ export default function CalendarPage() {
 
       {/* Desktop: Calendar card */}
       {!isMobile && <div style={{ flex: 1, minHeight: 0, background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        <div className="no-scrollbar" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+        <div ref={weekScrollRef} className="no-scrollbar" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
 
           {/* Day headers — sticky */}
           <div style={{ display: 'grid', gridTemplateColumns: '56px repeat(7,1fr)', borderBottom: '1px solid var(--bd)', position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 2 }}>
@@ -416,6 +429,13 @@ export default function CalendarPage() {
                     )
                   })
                 })()}
+
+                {/* Now line — today's column only, same as the day view */}
+                {d.today && (
+                  <div style={{ position: 'absolute', left: -4, right: 0, top: (nowH - DAY_START) * HOUR_H - 1, height: 2, background: '#c15f3c', zIndex: 3, pointerEvents: 'none' }}>
+                    <div style={{ position: 'absolute', left: 0, top: -3, width: 8, height: 8, borderRadius: '50%', background: '#c15f3c' }} />
+                  </div>
+                )}
 
                 {/* Drag ghost */}
                 {ghost && ghost.date === d.dateStr && (

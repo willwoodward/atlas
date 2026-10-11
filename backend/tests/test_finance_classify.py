@@ -20,8 +20,8 @@ def model(monkeypatch):
     answers = {"Pret A Manger DUBLIN": "Eating out", "Topped up account": "Transfer",
                "Tesco Stores": "Groceries", "Mystery Ltd": ""}
 
-    async def fake(items, categories):
-        sent.append({"items": items, "categories": categories})
+    async def fake(items, categories, examples=None):
+        sent.append({"items": items, "categories": categories, "examples": examples or []})
         return {it["id"]: answers.get(it["merchant"], "") for it in items}
 
     monkeypatch.setattr(finance_classify, "_call_model", fake)
@@ -72,7 +72,7 @@ async def test_your_categories_lead_the_allowed_list(client, auth, model):
 async def test_model_answers_outside_the_list_are_ignored(client, auth, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
 
-    async def rogue(items, categories):
+    async def rogue(items, categories, examples=None):
         return {it["id"]: "Made Up Category" for it in items}
     monkeypatch.setattr(finance_classify, "_call_model", rogue)
     result = await _setup(client, auth)
@@ -82,7 +82,7 @@ async def test_model_answers_outside_the_list_are_ignored(client, auth, monkeypa
 async def test_a_failing_model_never_fails_the_import(client, auth, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
 
-    async def broken(items, categories):
+    async def broken(items, categories, examples=None):
         raise finance_classify.ClassifyError("The model request failed (500)")
     monkeypatch.setattr(finance_classify, "_call_model", broken)
     result = await _setup(client, auth)
@@ -122,3 +122,23 @@ async def test_classify_endpoint_handles_existing_uncategorised(client, auth, mo
 def test_output_text_is_read_from_a_raw_responses_reply():
     body = {"output": [{"type": "reasoning"}, {"type": "message", "content": [{"type": "output_text", "text": '{"results": []}'}]}]}
     assert finance_classify._output_text(body) == '{"results": []}'
+
+
+async def test_known_merchants_are_reused_without_asking_the_model(client, auth, model):
+    # You've filed Pret under "Lunch" before…
+    await client.post("/api/finances/transactions", headers=auth, json={
+        "id": "old", "merchant": "pret a manger dublin", "category": "Lunch", "type": "expense",
+        "amount": 5, "date": "2026-09-01", "currency": "EUR"})
+    await _setup(client, auth)
+    sent = {it["merchant"] for call in model for it in call["items"]}
+    assert "Pret A Manger DUBLIN" not in sent          # matched case-insensitively, not sent
+    cats = await _cats(client, auth)
+    assert cats["Pret A Manger DUBLIN"] == ("Lunch", "ai")   # reused, but still marked as a guess
+
+
+async def test_model_gets_examples_of_your_own_choices(client, auth, model):
+    await client.post("/api/finances/transactions", headers=auth, json={
+        "id": "ex", "merchant": "Bewleys Grafton St", "category": "Coffee", "type": "expense",
+        "amount": 4, "date": "2026-09-01", "currency": "EUR"})
+    await _setup(client, auth)
+    assert {"merchant": "Bewleys Grafton St", "direction": "out", "category": "Coffee"} in model[0]["examples"]

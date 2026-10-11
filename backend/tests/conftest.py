@@ -21,21 +21,26 @@ import pytest
 # `auth` and `routers.assistant` would not be importable without this.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-TEST_SECRET = "test-secret-not-a-real-one"
+TEST_SECRET = "test-secret-not-a-real-one-but-long-enough"
 TEST_EMAIL = "will@woodwardweb.com"
+
+
+# Set at import, not in a fixture: test modules may import `auth` etc. while
+# being collected, before any fixture runs, and those modules read their
+# configuration at import time.
+os.environ.update({
+    "DATABASE_PATH": str(Path(tempfile.mkdtemp(prefix="atlas-tests-")) / "test.db"),
+    "JWT_SECRET": TEST_SECRET,
+    "ALLOWED_EMAILS": TEST_EMAIL,
+    "GOOGLE_CLIENT_ID": "test-client.apps.googleusercontent.com",
+    "ATLAS_MCP_KEY": "test-mcp-key",
+    "ALLOWED_ORIGINS": "http://localhost:5173",
+})
 
 
 @pytest.fixture(scope="session", autouse=True)
 def _environment():
-    """Configure the app before anything imports it."""
-    tmpdir = tempfile.mkdtemp(prefix="atlas-tests-")
-    os.environ.update({
-        "DATABASE_PATH": str(Path(tmpdir) / "test.db"),
-        "JWT_SECRET": TEST_SECRET,
-        "ALLOWED_EMAILS": TEST_EMAIL,
-        "ATLAS_MCP_KEY": "test-mcp-key",
-        "ALLOWED_ORIGINS": "http://localhost:5173",
-    })
+    """Kept so fixtures can depend on configuration being in place."""
     yield
 
 
@@ -53,6 +58,8 @@ async def _fresh_database(_environment):
     if path.exists():
         path.unlink()
     await init_db()
+    import auth
+    auth.reset_revocation_cache()
     yield
 
 

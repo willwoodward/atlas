@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from auth import create_jwt, get_current_user, verify_google_token
+from auth import create_jwt, get_current_user, verify_google_token, revoke, revoke_all
 from crypto import enc, dec
 from database import get_db
 
@@ -32,6 +32,21 @@ async def google_login(body: GoogleTokenIn):
     name = claims.get("name", "")
     token = create_jwt(email, name)
     return {"token": token, "email": email, "name": name}
+
+
+@router.post("/logout")
+async def logout(user=Depends(get_current_user)):
+    """Sign this session out on the server too, so a copy of the token stops
+    working — not just the one in this browser."""
+    await revoke(user)
+    return {"ok": True}
+
+
+@router.post("/logout-all")
+async def logout_all(user=Depends(get_current_user)):
+    """Sign out every device (the response to a token you think has leaked)."""
+    await revoke_all(user)
+    return {"ok": True}
 
 
 @router.get("/me")

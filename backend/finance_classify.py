@@ -61,7 +61,8 @@ INSTRUCTIONS = """You categorise personal bank transactions for one person livin
 For each item you get the merchant/description exactly as the bank shows it and whether money went "out" or came "in".
 Pick the single best category from the allowed list. Use "" when you genuinely can't tell (e.g. a person's name with no context, or an opaque reference).
 Payment processors (SumUp, Square/SQ, Zettle) often prefix the real merchant name — categorise by the merchant after the prefix.
-"Topped up account" / "Received money" style descriptions are transfers into the account. Answer for every id."""
+"Topped up account" / "Received money" style descriptions are transfers into the account.
+"examples" shows how this person has categorised other merchants. Follow their conventions: reuse their categories the way they do (e.g. if they file a café under "Coffee", file similar cafés there too), and prefer their categories over the generic ones. Answer for every id."""
 
 
 def _schema(categories: list[str]) -> dict:
@@ -99,12 +100,12 @@ def _output_text(body: dict) -> str:
     return "".join(parts)
 
 
-async def _call_model(items: list[dict], categories: list[str]) -> dict[int, str]:
+async def _call_model(items: list[dict], categories: list[str], examples: list[dict] | None = None) -> dict[int, str]:
     base = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
     payload = {
         "model": model_id(),
         "instructions": INSTRUCTIONS,
-        "input": json.dumps({"allowed_categories": categories, "items": items}, ensure_ascii=False),
+        "input": json.dumps({"allowed_categories": categories, "examples": examples or [], "items": items}, ensure_ascii=False),
         "text": {"format": {"type": "json_schema", "name": "transaction_categories",
                             "schema": _schema(categories), "strict": True}},
     }
@@ -120,7 +121,8 @@ async def _call_model(items: list[dict], categories: list[str]) -> dict[int, str
     return {int(x["id"]): x["category"] for x in results if isinstance(x, dict) and "id" in x}
 
 
-async def classify(merchants: list[tuple[str, str]], categories: list[str]) -> dict[tuple[str, str], str]:
+async def classify(merchants: list[tuple[str, str]], categories: list[str],
+                   examples: list[dict] | None = None) -> dict[tuple[str, str], str]:
     """Map (merchant, 'in'|'out') → category, for the ones the model was sure of.
     Batches run concurrently. Raises ClassifyError if nothing could be done."""
     if not configured():
@@ -133,7 +135,7 @@ async def classify(merchants: list[tuple[str, str]], categories: list[str]) -> d
 
     async def run(batch):
         items = [{"id": i, "merchant": m, "direction": d} for i, (m, d) in enumerate(batch)]
-        answers = await _call_model(items, categories)
+        answers = await _call_model(items, categories, examples)
         return {batch[i]: c for i, c in answers.items() if 0 <= i < len(batch) and c in allowed}
 
     results = await asyncio.gather(*(run(b) for b in batches), return_exceptions=True)

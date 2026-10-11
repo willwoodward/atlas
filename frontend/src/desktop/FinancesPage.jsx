@@ -696,12 +696,25 @@ export default function FinancesPage() {
   const { removeTransaction } = useFinances()
   // Clamped, so deleting the last row on the final page, or a smaller ledger
   // after a refresh, never leaves an empty page showing.
+  // A chart slice sets type + period; the category picker sets neither, so it
+  // shows money in and out for that category across all time.
   const shown = txnFilter
-    ? transactions.filter(t => t.type === txnFilter.type
+    ? transactions.filter(t => (!txnFilter.type || t.type === txnFilter.type)
         && txnFilter.categories.includes((t.category || '').trim() || UNCATEGORISED)
         && (!txnFilter.range?.from || t.date >= txnFilter.range.from)
         && (!txnFilter.range?.to || t.date <= txnFilter.range.to))
     : transactions
+  // Categories in use, most transactions first, for the picker.
+  const categoryCounts = transactions.reduce((m, t) => {
+    const c = (t.category || '').trim() || UNCATEGORISED
+    m.set(c, (m.get(c) || 0) + 1)
+    return m
+  }, new Map())
+  const pickerOptions = [...categoryCounts].filter(([c]) => c !== UNCATEGORISED).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  const pickCategory = (c) => {
+    setTxnPage(0)
+    setTxnFilter(c ? { type: null, label: c, categories: [c], range: null } : null)
+  }
   const filterBy = (f) => {
     setTxnFilter(f); setTxnPage(0)
     txnCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -754,6 +767,11 @@ export default function FinancesPage() {
           <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>In pots</div>
           <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 20 : 26, fontWeight: 500, color: totalSaved > 0 ? '#6f8168' : 'var(--ink)' }}>{totalSaved > 0 ? fmt(totalSaved) : '—'}</div>
         </div>
+      </div>
+
+      {/* Where the money goes — right under the headline figures */}
+      <div style={{ marginBottom: 16 }}>
+        <CategoryCharts selected={txnFilter} onSelect={filterBy} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.2fr 1fr', gap: 16, alignItems: 'start' }}>
@@ -839,7 +857,17 @@ export default function FinancesPage() {
         <div ref={txnCardRef} style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 24px', scrollMarginTop: 90 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 19, fontWeight: 600 }}>Transactions</h2>
-            <div style={{ display: 'flex', gap: 12 }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            {transactions.length > 0 && (
+              <select aria-label="Filter by category"
+                value={txnFilter && !txnFilter.type && txnFilter.categories.length === 1 ? txnFilter.categories[0] : ''}
+                onChange={e => pickCategory(e.target.value)}
+                style={{ fontSize: 12, fontWeight: 600, color: 'var(--mid)', background: 'var(--surface-2)', border: '1px solid var(--bd-xl)', borderRadius: 7, padding: '3px 6px', fontFamily: 'inherit', cursor: 'pointer', maxWidth: 150 }}>
+                <option value="">All categories</option>
+                {pickerOptions.map(([c, n]) => <option key={c} value={c}>{c} ({n})</option>)}
+                {categoryCounts.has(UNCATEGORISED) && <option value={UNCATEGORISED}>Uncategorised ({categoryCounts.get(UNCATEGORISED)})</option>}
+              </select>
+            )}
             <button onClick={() => setShowImport(true)} style={{ fontSize: 12, fontWeight: 600, color: 'var(--mid)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>Import</button>
             <button onClick={() => setShowAddTxn(true)} style={{ fontSize: 12, fontWeight: 600, color: '#c15f3c', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>+ Add</button>
             </div>
@@ -847,11 +875,19 @@ export default function FinancesPage() {
           {txnFilter && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 6px 4px 11px', borderRadius: 99, background: 'var(--surface-2)', border: '1px solid var(--bd-xl)', fontSize: 12.5, color: 'var(--ink)' }}>
-                {txnFilter.label} · {txnFilter.type === 'income' ? 'income' : 'spending'}{rangeLabel(txnFilter.range) && ` · ${rangeLabel(txnFilter.range)}`}
+                {txnFilter.label}{txnFilter.type ? ` · ${txnFilter.type === 'income' ? 'income' : 'spending'}` : ''}{rangeLabel(txnFilter.range) && ` · ${rangeLabel(txnFilter.range)}`}
                 <button onClick={() => { setTxnFilter(null); setTxnPage(0) }} aria-label="Clear filter"
                   style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 14, lineHeight: 1, padding: '0 4px' }}>×</button>
               </span>
-              <span style={{ fontSize: 12, color: 'var(--muted)' }}>{shown.length} transaction{shown.length !== 1 ? 's' : ''}</span>
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                {shown.length} transaction{shown.length !== 1 ? 's' : ''}
+                {/* Net total for the filter, in the display currency */}
+                {shown.length > 0 && (() => {
+                  const net = shown.reduce((s, t) => s + (t.type === 'income' ? 1 : -1) * (txnValue(t) ?? 0), 0)
+                  const allIn = shown.every(t => t.type === 'income'), allOut = shown.every(t => t.type !== 'income')
+                  return <> · {allIn || allOut ? '' : net >= 0 ? '+' : '−'}{fmt(Math.abs(net))} {allIn ? 'in' : allOut ? 'out' : 'net'}</>
+                })()}
+              </span>
             </div>
           )}
           {transactions.length === 0 && <div style={{ padding: '24px 0', fontSize: 13, color: 'var(--faint)', textAlign: 'center' }}>No transactions yet</div>}
@@ -891,10 +927,6 @@ export default function FinancesPage() {
             </div>
           )}
         </div>
-      </div>
-
-      <div style={{ marginTop: 16 }}>
-        <CategoryCharts selected={txnFilter} onSelect={filterBy} />
       </div>
 
       <div style={{ marginTop: 16 }}>
