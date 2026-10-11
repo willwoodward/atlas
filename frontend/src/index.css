@@ -141,3 +141,19 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 @media (prefers-reduced-motion: reduce) {
   .goal-shine::after { animation: none; display: none; }
 }
+
+/* ─── Notes: rendered markdown (learnings) ─────────────────────────────────── */
+/* Denser than general prose: these are reference notes, read in a narrow
+   column next to the file list, so smaller type and less side padding. */
+.md-prose.md-notes { font-size: 14px; line-height: 1.65; max-width: 760px; }
+.md-prose.md-notes h1 { font-size: 22px; margin-bottom: 12px; }
+.md-prose.md-notes h2 { font-size: 18px; margin: 22px 0 8px; }
+.md-prose.md-notes h3 { font-size: 15px; margin: 18px 0 6px; }
+.md-prose.md-notes p, .md-prose.md-notes ul, .md-prose.md-notes ol { margin-bottom: 10px; }
+.md-prose.md-notes ul, .md-prose.md-notes ol { padding-left: 18px; }
+.md-prose.md-notes pre { padding: 12px 14px; }
+.md-prose.md-notes code, .md-prose.md-notes pre code { font-size: 12.5px; }
+@media (max-width: 767px) {
+  .md-prose.md-notes { font-size: 13.5px; }
+  .md-prose.md-notes h1 { font-size: 20px; }
+}

@@ -65,6 +65,7 @@ function AutoCategoriseButton() {
 
 function Breakdown({ title, type, transactions, range, selected, onSelect }) {
   const { txnValue, fmt } = useFinances()
+  const isMobile = useIsMobile()
   const [hovered, setHovered] = useState(null)
   // Colours come from all-time totals so a category keeps its colour across periods.
   const colors = useMemo(() => colorMap(transactions, type, txnValue), [transactions, type, txnValue])
@@ -79,13 +80,13 @@ function Breakdown({ title, type, transactions, range, selected, onSelect }) {
 
   return (
     <div style={{ flex: '1 1 300px', minWidth: 0 }}>
-      <div style={{ ...eyebrow, marginBottom: 12 }}>{title}</div>
+      <div style={{ ...eyebrow, marginBottom: 12, textAlign: isMobile ? 'center' : 'left' }}>{title}</div>
       {total <= 0 ? (
-        <div style={{ fontSize: 13, color: 'var(--faint)', padding: '20px 0' }}>Nothing in this period.</div>
+        <div style={{ fontSize: 13, color: 'var(--faint)', padding: '20px 0', textAlign: isMobile ? 'center' : 'left' }}>Nothing in this period.</div>
       ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap', justifyContent: isMobile ? 'center' : 'flex-start' }}>
           <Donut data={data} total={total} hovered={hovered} setHovered={setHovered} onSelect={select} fmt={fmt} />
-          <div style={{ flex: '1 1 160px', minWidth: 0 }}>
+          <div style={{ flex: isMobile ? '1 1 100%' : '1 1 160px', minWidth: 0 }}>
             {data.map((d, i) => {
               const isSel = selected?.type === type && selected?.label === d.category
               return (

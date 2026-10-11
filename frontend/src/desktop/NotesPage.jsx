@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { renderMarkdown } from '../lib/markdown.js'
+import Sheet from '../components/Sheet.jsx'
 import { useNotes } from '../context/NotesContext.jsx'
 import { useGitHub } from '../context/GitHubContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -138,24 +139,7 @@ function OutlineSheet({ body, contentRef, onClose }) {
   }
 
   return (
-    <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,.4)' }} />
-      <div style={{
-        position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 201,
-        background: 'var(--surface)', borderRadius: '18px 18px 0 0',
-        boxShadow: '0 -8px 40px rgba(0,0,0,.18)',
-        maxHeight: '70vh', display: 'flex', flexDirection: 'column',
-        paddingBottom: 'env(safe-area-inset-bottom)',
-      }}>
-        {/* Handle */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px 20px 0' }}>
-          <div style={{ width: 36, height: 4, borderRadius: 99, background: 'var(--bd-xl)' }} />
-        </div>
-        <div style={{ padding: '12px 20px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--mid)', letterSpacing: '.04em', textTransform: 'uppercase' }}>Outline</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4, fontSize: 16, lineHeight: 1 }}>✕</button>
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 12px 16px' }}>
+    <Sheet title="Outline" onClose={onClose} width={420} bodyPadding="0 12px 16px">
           {headings.length === 0
             ? <div style={{ padding: '12px 8px', fontSize: 13, color: 'var(--faint)' }}>No headings found.</div>
             : headings.map((h, i) => (
@@ -174,9 +158,7 @@ function OutlineSheet({ body, contentRef, onClose }) {
               </button>
             ))
           }
-        </div>
-      </div>
-    </>
+    </Sheet>
   )
 }
 
@@ -209,6 +191,7 @@ export default function NotesPage() {
   const [createError,       setCreateError]       = useState(null)
   const contentRef = useRef(null)
   const saveTimer  = useRef(null)
+  const justCreated = useRef(false)   // a brand-new note opens with the keyboard up
 
   const isQuick  = selected?.type === 'quick'
   const isGithub = selected?.type === 'github'
@@ -267,6 +250,7 @@ export default function NotesPage() {
   // ── Note selection ────────────────────────────────────────────────────────
 
   const selectQuick = (note) => {
+    justCreated.current = false
     setSelected({ type: 'quick', id: note.id })
     setBody(note.body)
     setEditing(false)
@@ -351,6 +335,7 @@ export default function NotesPage() {
   }, [isQuick, selected, updateNote])
 
   const handleNewNote = async () => {
+    justCreated.current = true
     const id = await addNote()
     setSelected({ type: 'quick', id })
     setBody('')
@@ -677,7 +662,7 @@ export default function NotesPage() {
             </div>
 
             {/* Content */}
-            <div ref={contentRef} style={{ flex: 1, overflow: 'auto', padding: '28px 36px' }}>
+            <div ref={contentRef} style={{ flex: 1, overflow: 'auto', padding: isQuick ? '28px 36px' : (isMobile ? '14px 16px 80px' : '20px 28px 28px') }}>
               {fileLoading && <div style={{ fontSize: 13, color: 'var(--faint)' }}>Loading…</div>}
 
               {/* Quick note — textarea, auto-saves */}
@@ -686,16 +671,19 @@ export default function NotesPage() {
                   value={body}
                   onChange={e => handleBodyChange(e.target.value)}
                   placeholder="Start writing…"
-                  autoFocus
+                  // Opening a note on a phone shouldn't throw up the keyboard;
+                  // a brand-new one should, since there's nothing to read yet.
+                  autoFocus={!isMobile || justCreated.current}
                   style={{ width: '100%', height: '100%', minHeight: 400, border: 'none', outline: 'none', resize: 'none',
-                    fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 15, lineHeight: 1.75,
+                    // 17px on phones: easier to read, and iOS zooms into inputs under 16px.
+                    fontFamily: "'Hanken Grotesk', sans-serif", fontSize: isMobile ? 17 : 15, lineHeight: 1.75,
                     color: 'var(--ink)', background: 'transparent' }}
                 />
               )}
 
               {/* GitHub — rendered markdown */}
               {isGithub && !fileLoading && !editing && (
-                <div className="md-prose" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />
+                <div className="md-prose md-notes" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />
               )}
 
               {/* Mobile outline trigger — ^ button */}

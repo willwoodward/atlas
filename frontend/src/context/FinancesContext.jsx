@@ -298,8 +298,14 @@ export function FinancesProvider({ children }) {
   const monthTxns = data.transactions.filter(t => inMonth(t, thisMonth))
   const sum = (rows, type) => sumOf(rows.filter(t => t.type === type).map(txnValue))
 
-  const income   = sum(monthTxns, 'income')
-  const spending = sum(monthTxns, 'expense')
+  // Headline income / spending: a rolling 30 days (today and the 29 before),
+  // so the figures mean the same on the 2nd as on the 28th. Budgets stay per
+  // calendar month (byCategory below), matching how they're set.
+  const since = new Date(now); since.setDate(now.getDate() - 29)
+  const last30From = `${since.getFullYear()}-${String(since.getMonth() + 1).padStart(2, '0')}-${String(since.getDate()).padStart(2, '0')}`
+  const last30Txns = data.transactions.filter(t => (t.date || '') >= last30From)
+  const income   = sum(last30Txns, 'income')
+  const spending = sum(last30Txns, 'expense')
   const incomeAllTime   = sum(data.transactions, 'income')
   const spendingAllTime = sum(data.transactions, 'expense')
 

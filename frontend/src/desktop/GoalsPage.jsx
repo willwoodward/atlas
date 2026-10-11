@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useGoals, GOAL_PALETTE } from '../context/GoalsContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { useQuickAdd } from '../context/QuickAddContext.jsx'
+import Sheet from '../components/Sheet.jsx'
 
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4']
 const QUARTER_LABELS = { Q1: 'Jan – Mar', Q2: 'Apr – Jun', Q3: 'Jul – Sep', Q4: 'Oct – Dec' }
@@ -242,12 +243,6 @@ function QuarterlyReviewDrawer({ onClose }) {
   const [quarter, setQuarter] = useState(CURRENT_Q)
   const period = `${year}-${quarter}`
 
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const isFuture = (y, q) => y > CURRENT_YEAR || (y === CURRENT_YEAR && QUARTER_ORDER[q] > QUARTER_ORDER[CURRENT_Q])
   const changeYear = (y) => {
     setYear(y)
@@ -266,29 +261,14 @@ function QuarterlyReviewDrawer({ onClose }) {
   })
 
   return (
-    <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,.4)' }} />
-      <div role="dialog" aria-label="Quarterly review" style={{
-        position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 201, margin: '0 auto',
-        width: '100%', maxWidth: 760, boxSizing: 'border-box',
-        background: 'var(--surface)', borderRadius: '18px 18px 0 0',
-        boxShadow: '0 -8px 40px rgba(0,0,0,.18)',
-        height: '82vh', display: 'flex', flexDirection: 'column',
-        paddingBottom: 'env(safe-area-inset-bottom)',
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 20px 0' }}>
-          <div style={{ width: 36, height: 4, borderRadius: 99, background: 'var(--bd-xl)' }} />
+    <Sheet title="Quarterly review" onClose={onClose} width={760} height="82vh" bodyPadding="0"
+      headerExtra={(
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button onClick={() => changeYear(year - 1)} style={arrow(false)} aria-label="Previous year">‹</button>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', minWidth: 40, textAlign: 'center' }}>{year}</span>
+          <button onClick={() => year < CURRENT_YEAR && changeYear(year + 1)} style={arrow(year >= CURRENT_YEAR)} aria-label="Next year">›</button>
         </div>
-
-        <div style={{ padding: '14px 24px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 24, fontWeight: 500 }}>Quarterly review</h2>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <button onClick={() => changeYear(year - 1)} style={arrow(false)} aria-label="Previous year">‹</button>
-            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', minWidth: 40, textAlign: 'center' }}>{year}</span>
-            <button onClick={() => year < CURRENT_YEAR && changeYear(year + 1)} style={arrow(year >= CURRENT_YEAR)} aria-label="Next year">›</button>
-            <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '2px 4px 2px 12px', fontSize: 16, lineHeight: 1 }}>✕</button>
-          </div>
-        </div>
+      )}>
 
         <div style={{ display: 'flex', gap: 6, padding: '16px 24px 0' }}>
           {QUARTERS.map(q => {
@@ -333,8 +313,7 @@ function QuarterlyReviewDrawer({ onClose }) {
           )}
           <ReflectionEditor key={period} period={period} initial={reflections[period] ?? ''} onSave={setReflection} />
         </div>
-      </div>
-    </>
+    </Sheet>
   )
 }
 

@@ -7,6 +7,7 @@ import EventLabel from '../components/EventLabel.jsx'
 import { mondayOf, parseLocalDate, addDays } from '../lib/week.js'
 import { useCalendarEvents, fmtH } from '../hooks/useCalendarEvents.js'
 import DaySchedule from '../components/DaySchedule.jsx'
+import Sheet from '../components/Sheet.jsx'
 import { useGoals } from '../context/GoalsContext.jsx'
 import { shineWave } from '../lib/goalTime.js'
 import { useShineSync } from '../hooks/useShineSync.js'
@@ -53,15 +54,7 @@ export function EventDetailModal({ event, onClose, onDelete }) {
   }
 
   return (
-    <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,.35)' }} />
-      <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 380, maxWidth: '90vw', zIndex: 51, background: 'var(--surface)', borderRadius: 18, boxShadow: '0 16px 48px rgba(0,0,0,.22)', overflow: 'hidden' }}>
-        <div style={{ height: 5, background: event.color }} />
-        <div style={{ padding: '20px 22px 22px' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
-            <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 21, fontWeight: 600, color: 'var(--ink)', flex: 1, paddingRight: 12 }}>{event.title}</h2>
-            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 18, lineHeight: 1, padding: 2 }}>✕</button>
-          </div>
+    <Sheet title={event.title} onClose={onClose} accent={event.color} width={400}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 16 }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13.5, color: 'var(--mid)' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="4" y="5" width="16" height="16" rx="2"/><line x1="4" y1="9" x2="20" y2="9"/></svg>
@@ -100,9 +93,7 @@ export function EventDetailModal({ event, onClose, onDelete }) {
               {error && <span style={{ fontSize: 12, color: '#c15f3c' }}>⚠ {error}</span>}
             </div>
           )}
-        </div>
-      </div>
-    </>
+    </Sheet>
   )
 }
 
@@ -123,14 +114,7 @@ function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00'
   }
 
   return (
-    <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,.35)' }} />
-      <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 420, maxWidth: '94vw', zIndex: 51, background: 'var(--surface)', borderRadius: 18, boxShadow: '0 16px 48px rgba(0,0,0,.22)' }}>
-        <div style={{ padding: '22px 24px 24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-            <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 21, fontWeight: 600, color: 'var(--ink)' }}>Add event</h2>
-            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 18, lineHeight: 1 }}>✕</button>
-          </div>
+    <Sheet title="Add event" onClose={onClose} width={420}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
               <label style={labelStyle}>Title</label>
@@ -167,9 +151,7 @@ function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00'
             <button onClick={onClose} style={{ flex: 1, padding: '10px', borderRadius: 10, border: '1px solid var(--bd)', background: 'transparent', color: 'var(--mid)', fontSize: 13.5, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
             <button onClick={handleAdd} style={{ flex: 1, padding: '10px', borderRadius: 10, border: 'none', background: '#c15f3c', color: '#fff', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(193,95,60,.32)' }}>Add event</button>
           </div>
-        </div>
-      </div>
-    </>
+    </Sheet>
   )
 }
 

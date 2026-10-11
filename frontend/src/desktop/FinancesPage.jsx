@@ -5,6 +5,7 @@ import { useIsMobile } from '../hooks/useIsMobile.js'
 import CompensationPanel from '../components/CompensationPanel.jsx'
 import InsightsPanel from '../components/InsightsPanel.jsx'
 import CategoryCharts from '../components/CategoryCharts.jsx'
+import Sheet from '../components/Sheet.jsx'
 import { suggestPattern, UNCATEGORISED } from '../lib/categories.js'
 import { useQuickAdd } from '../context/QuickAddContext.jsx'
 import { formatMoney, currencySymbol, DISPLAY_CURRENCIES } from '../lib/fx.js'
@@ -71,36 +72,9 @@ function Field({ label, children }) {
 const inp = { padding: '9px 12px', borderRadius: 9, border: '1.5px solid var(--bd-xl)', background: 'var(--surface-2)', fontSize: 14, fontFamily: 'inherit', color: 'var(--ink)', outline: 'none', width: '100%' }
 const sel = { ...inp, cursor: 'pointer' }
 
+// Every finance dialog is a Sheet: bottom sheet on a phone, dialog on a laptop.
 function Modal({ title, onClose, children }) {
-  const isMobile = useIsMobile()
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(43,40,32,.4)', display: 'flex',
-      alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center', zIndex: 50,
-      padding: isMobile ? 0 : 16,
-    }}
-      onClick={e => e.target === e.currentTarget && onClose()}>
-      {/* maxHeight + scroll: the import preview can be a hundred rows, and
-          without this the confirm button sits below the fold with no way down. */}
-      <div style={{
-        background: 'var(--surface)',
-        borderRadius: isMobile ? '20px 20px 0 0' : 20,
-        padding: isMobile ? '22px 18px calc(22px + env(safe-area-inset-bottom))' : 28,
-        width: isMobile ? '100%' : 440,
-        maxWidth: '100%',
-        maxHeight: isMobile ? '92vh' : '88vh',
-        overflowY: 'auto',
-        WebkitOverflowScrolling: 'touch',
-        boxShadow: '0 24px 60px rgba(43,40,32,.22)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
-          <h3 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 22, fontWeight: 600 }}>{title}</h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 20, lineHeight: 1, padding: 4 }}>×</button>
-        </div>
-        {children}
-      </div>
-    </div>
-  )
+  return <Sheet title={title} onClose={onClose}>{children}</Sheet>
 }
 
 function PrimaryBtn({ children, ...props }) {
@@ -756,11 +730,11 @@ export default function FinancesPage() {
           <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 22 : 32, fontWeight: 500 }}>{accounts.length > 0 ? fmt(netWorth) : '—'}</div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 22px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>Income · this month</div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>Income · last 30 days</div>
           <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 20 : 26, fontWeight: 500 }}>{income > 0 ? fmt(income) : '—'}</div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 22px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>Spending · this month</div>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>Spending · last 30 days</div>
           <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 20 : 26, fontWeight: 500, color: spending > 0 ? '#c15f3c' : 'var(--ink)' }}>{spending > 0 ? fmt(spending) : '—'}</div>
         </div>
         <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 22px' }}>
