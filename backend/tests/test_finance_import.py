@@ -23,6 +23,17 @@ TW-2,04-04-2026,150.00,GBP,Received money,,ACME
 """
 
 
+def test_wise_refund_sharing_charge_id_is_kept():
+    """Wise files a card refund under the original charge's ID."""
+    csv_ = """TransferWise ID,Date,Amount,Currency,Description,Merchant
+CARD-1,02-10-2025,-1.80,EUR,Card transaction,Vending
+CARD-1,07-10-2025,1.80,EUR,Card transaction,Vending
+"""
+    rows = fi.parse_statement(csv_, "wise_csv", "a")
+    assert len({r.external_id for r in rows}) == 2
+    assert {r.type for r in rows} == {"income", "expense"}
+
+
 # ── Parsing ───────────────────────────────────────────────────────────────────
 
 def test_barclays_signed_amount_becomes_type():
@@ -52,7 +63,7 @@ def test_wise_keeps_currency_and_uses_provider_id():
     rows = fi.parse_statement(WISE, "wise_csv", "acc2")
     spotify = next(r for r in rows if r.merchant == "SPOTIFY")
     assert spotify.currency == "EUR"
-    assert spotify.external_id == "wise:TW-1"
+    assert spotify.external_id == "wise:TW-1:out"
 
 
 def test_unparseable_date_is_reported_not_guessed():
@@ -109,7 +120,15 @@ def test_rules_are_case_insensitive_and_optional():
 
 # ── API ───────────────────────────────────────────────────────────────────────
 
-async def test_preview_writes_nothing(client, auth):
+@pytest.fixture
+async def accounts(client, auth):
+    """acc1 is a GBP current account (Barclays), acc2 an EUR one (Wise)."""
+    for id_, cur in [("acc1", "GBP"), ("acc2", "EUR")]:
+        await client.post("/api/finances/accounts", headers=auth,
+                          json={"id": id_, "name": id_, "currency": cur})
+
+
+async def test_preview_writes_nothing(client, auth, accounts):
     resp = await client.post("/api/finances/import/preview",
                              json={"source": "barclays_csv", "account_id": "acc1", "content": BARCLAYS},
                              headers=auth)
@@ -120,18 +139,19 @@ async def test_preview_writes_nothing(client, auth):
     assert after.json()["transactions"] == []
 
 
-async def test_commit_then_reimport_is_idempotent(client, auth):
+async def test_commit_then_reimport_is_idempotent(client, auth, accounts):
     body = {"source": "barclays_csv", "account_id": "acc1", "content": BARCLAYS}
 
     preview = (await client.post("/api/finances/import/preview", json=body, headers=auth)).json()
     commit = {"source": "barclays_csv", "account_id": "acc1",
-              "rows": [dict(r, id="") for r in preview["rows"]], "fx_rates": {}}
+              "rows": [r for r in preview["rows"] if not r["duplicate"]], "fx_rates": {}}
     first = (await client.post("/api/finances/import/commit", json=commit, headers=auth)).json()
     assert first["inserted"] == 3
 
     # The same export again — the common case when exporting by date range.
     second_preview = (await client.post("/api/finances/import/preview", json=body, headers=auth)).json()
     assert second_preview["duplicate_count"] == 3
+    # Resend the full set: the server must still ignore what it already has.
     second = (await client.post("/api/finances/import/commit", json=commit, headers=auth)).json()
     assert second["inserted"] == 0 and second["skipped"] == 3
 
@@ -139,20 +159,41 @@ async def test_commit_then_reimport_is_idempotent(client, auth):
     assert len(txns) == 3
 
 
-async def test_commit_applies_fx_rate_for_non_gbp(client, auth):
+async def test_rows_are_stored_in_the_account_currency(client, auth, accounts):
+    """A GBP row imported into the EUR account is converted at the ECB rate for
+    its own date (a Saturday, so Friday's rate) and keeps its original amount."""
     body = {"source": "wise_csv", "account_id": "acc2", "content": WISE}
     preview = (await client.post("/api/finances/import/preview", json=body, headers=auth)).json()
-    assert preview["currencies"] == ["EUR"]
+    assert preview["account_currency"] == "EUR"
+    assert preview["currencies"] == ["GBP"]
+    acme = next(r for r in preview["rows"] if r["merchant"] == "ACME")
+    assert acme["converted_amount"] == round(150 / 0.90, 2)
 
     commit = {"source": "wise_csv", "account_id": "acc2",
-              "rows": [dict(r, id="") for r in preview["rows"]], "fx_rates": {"EUR": 0.85}}
+              "rows": [r for r in preview["rows"] if not r["duplicate"]]}
     await client.post("/api/finances/import/commit", json=commit, headers=auth)
 
     txns = (await client.get("/api/finances", headers=auth)).json()["transactions"]
-    eur = next(t for t in txns if t["currency"] == "EUR")
-    gbp = next(t for t in txns if t["currency"] == "GBP")
-    assert eur["fx_rate"] == 0.85
-    assert gbp["fx_rate"] == 1.0   # a rate is never applied to the base currency
+    assert {t["currency"] for t in txns} == {"EUR"}
+    received = next(t for t in txns if t["merchant"] == "ACME")
+    assert received["amount"] == round(150 / 0.90, 2)
+    assert (received["orig_amount"], received["orig_currency"]) == (150.0, "GBP")
+    spotify = next(t for t in txns if t["merchant"] == "SPOTIFY")
+    assert spotify["amount"] == 9.99 and spotify["orig_currency"] is None
+
+
+async def test_unknown_currency_is_refused_not_guessed(client, auth, accounts):
+    content = "TransferWise ID,Date,Amount,Currency,Description,Merchant\nX-1,03-04-2026,-5.00,XYZ,Card,Shop\n"
+    resp = await client.post("/api/finances/import/preview", headers=auth,
+                             json={"source": "wise_csv", "account_id": "acc2", "content": content})
+    assert resp.status_code == 400
+    assert "XYZ" in resp.json()["detail"]
+
+
+async def test_import_needs_a_real_account(client, auth):
+    resp = await client.post("/api/finances/import/preview", headers=auth,
+                             json={"source": "barclays_csv", "account_id": "nope", "content": BARCLAYS})
+    assert resp.status_code == 400
 
 
 async def test_malformed_file_is_a_400_not_a_500(client, auth):
@@ -162,7 +203,7 @@ async def test_malformed_file_is_a_400_not_a_500(client, auth):
     assert resp.status_code == 400
 
 
-async def test_rules_are_applied_during_preview(client, auth):
+async def test_rules_are_applied_during_preview(client, auth, accounts):
     await client.post("/api/finances/rules",
                       json={"id": "r1", "pattern": "tesco", "category": "Groceries"}, headers=auth)
     preview = (await client.post("/api/finances/import/preview",

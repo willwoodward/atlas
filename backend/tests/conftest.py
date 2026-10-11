@@ -56,6 +56,43 @@ async def _fresh_database(_environment):
     yield
 
 
+# Fixed ECB-style rates (1 EUR = rate CUR). GBP steps on 2026-04-01 so tests
+# can tell "rate on the transaction's date" from "latest rate".
+FAKE_RATES = {"GBP": [("2025-01-01", 0.80), ("2026-04-01", 0.90)], "USD": [("2025-01-01", 1.10)]}
+FX_CALLS = []
+
+
+@pytest.fixture(autouse=True)
+def _offline_fx(monkeypatch):
+    """No test may reach the real rates API. Serves FAKE_RATES for weekdays in
+    the requested range, like the ECB (which publishes nothing at weekends)."""
+    from datetime import date, timedelta
+    import fx
+
+    async def fake_fetch(start, currencies):
+        FX_CALLS.append((start, tuple(currencies)))
+        unknown = [c for c in currencies if c not in FAKE_RATES]
+        if unknown:
+            import httpx
+            req = httpx.Request("GET", "https://example.invalid")
+            raise httpx.HTTPStatusError("not found", request=req, response=httpx.Response(404, request=req))
+        out = {}
+        d, end = date.fromisoformat(start), date.today()
+        while d <= end:
+            if d.weekday() < 5:
+                for c in currencies:
+                    rate = [r for since, r in FAKE_RATES[c] if since <= d.isoformat()]
+                    if rate:
+                        out.setdefault(d.isoformat(), {})[c] = rate[-1]
+            d += timedelta(days=1)
+        return out
+
+    monkeypatch.setattr(fx, "_fetch", fake_fetch)
+    fx.reset_throttle()
+    FX_CALLS.clear()
+    yield
+
+
 @pytest.fixture
 def token():
     """A JWT for the allowed user, signed the way the real login signs one."""

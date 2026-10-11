@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { localDateStr } from '../lib/week.js'
 import { buildAuthUrl, fetchEvents, toCalendarEvents, insertGcalEvent, deleteGcalEvent } from '../integrations/googleCalendar.js'
 import { useAuth } from './AuthContext.jsx'
 
@@ -9,7 +10,9 @@ const Ctx = createContext(null)
 export function IntegrationsProvider({ children }) {
   const { token } = useAuth()
   const [gcalConnected, setGcalConnected] = useState(false)
-  const [gcalEvents, setGcalEvents] = useState([])
+  // Events cached per fetched week ({ [mondayStr]: events }). Refetches update
+  // a week in place, so nothing already on screen flashes a loading state.
+  const [gcalWeeks, setGcalWeeks] = useState({})
   const [gcalLoading, setGcalLoading] = useState(false)
   const [gcalError, setGcalError] = useState(null)
   const [gcalMutatedAt, setGcalMutatedAt] = useState(0)
@@ -51,7 +54,7 @@ export function IntegrationsProvider({ children }) {
 
   const disconnectGoogle = useCallback(() => {
     setGcalConnected(false)
-    setGcalEvents([])
+    setGcalWeeks({})
     // Revoke + clear on backend
     fetch(`${API}/auth/gcal`, { method: 'DELETE', headers: authHeaders() }).catch(() => {})
     // Also clear legacy stored token if any
@@ -85,25 +88,44 @@ export function IntegrationsProvider({ children }) {
     const accessToken = await getAccessToken()
     await deleteGcalEvent(accessToken, eventId)
     // Sleep events also emit a derived `<id>_wakeup` entry
-    setGcalEvents(prev => prev.filter(e => e.id !== eventId && e.id !== `${eventId}_wakeup`))
+    const keep = e => e.id !== eventId && e.id !== `${eventId}_wakeup`
+    setGcalWeeks(prev => Object.fromEntries(Object.entries(prev).map(([k, evs]) => [k, evs.filter(keep)])))
     setGcalMutatedAt(Date.now())
   }, [gcalConnected, getAccessToken])
 
+  const weeksRef = useRef(gcalWeeks)
+  useEffect(() => { weeksRef.current = gcalWeeks }, [gcalWeeks])
+
   const refetchEvents = useCallback(async (weekStart, weekEnd) => {
     if (!gcalConnected) return
-    setGcalLoading(true)
+    const key = localDateStr(weekStart)
+    // Only a week we've never loaded shows as loading; a cached one revalidates quietly.
+    const firstLoad = !(key in weeksRef.current)
+    if (firstLoad) setGcalLoading(true)
     setGcalError(null)
     try {
       const accessToken = await getAccessToken()
       const data = await fetchEvents(accessToken, weekStart, weekEnd)
-      setGcalEvents(toCalendarEvents(data.items || []))
+      setGcalWeeks(prev => ({ ...prev, [key]: toCalendarEvents(data.items || []) }))
     } catch (err) {
       setGcalError(err.message)
       if (err.message.includes('401')) setGcalConnected(false)
     } finally {
-      setGcalLoading(false)
+      if (firstLoad) setGcalLoading(false)
     }
   }, [gcalConnected, getAccessToken])
+
+  // Every consumer filters by date, so the union of cached weeks works as-is.
+  // A sleep event's wake-up hint can land in the next week's cache too — dedupe.
+  const gcalEvents = useMemo(() => {
+    const seen = new Set()
+    return Object.values(gcalWeeks).flat().filter(e => {
+      const k = `${e.id}|${e.date}`
+      if (seen.has(k)) return false
+      seen.add(k)
+      return true
+    })
+  }, [gcalWeeks])
 
   return (
     <Ctx.Provider value={{

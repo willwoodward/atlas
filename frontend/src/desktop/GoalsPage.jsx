@@ -124,6 +124,36 @@ function GoalCard({ goal, onRemove, onUpdate, onQuarterFocus }) {
           color={goal.color}
         />
       </div>
+
+      <GoalTagsInput goal={goal} onUpdate={onUpdate} />
+    </div>
+  )
+}
+
+// Calendar events whose title contains one of these words count as time spent
+// on the goal (the "Goal time" figure on Home).
+function GoalTagsInput({ goal, onUpdate }) {
+  const [draft, setDraft] = useState(goal.tags)
+  useEffect(() => { setDraft(goal.tags) }, [goal.tags])
+  const commit = () => {
+    const clean = draft.split(',').map(t => t.trim()).filter(Boolean).join(', ')
+    setDraft(clean)
+    if (clean !== goal.tags) onUpdate(goal.id, { tags: clean })
+  }
+  return (
+    <div style={{ padding: '10px 22px 14px 20px', borderTop: '1px solid var(--bd-xs)', display: 'flex', alignItems: 'center', gap: 10 }}>
+      <span title="Calendar events containing these words count towards this goal's time on Home"
+        style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', flex: 'none', cursor: 'help' }}>
+        Calendar tags
+      </span>
+      <input
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+        placeholder="e.g. gym, swim, run"
+        style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'inherit', fontSize: 13, color: 'var(--mid)', padding: 0 }}
+      />
     </div>
   )
 }

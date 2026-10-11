@@ -24,6 +24,7 @@ class GoalIn(BaseModel):
 class GoalUpdate(BaseModel):
     title: Optional[str] = None
     color: Optional[str] = None
+    tags: Optional[str] = None
 
 
 class QuarterIn(BaseModel):
@@ -78,6 +79,8 @@ async def update_goal(goal_id: str, body: GoalUpdate, user=Depends(get_current_u
         await db.execute("UPDATE goals SET title = ? WHERE id = ?", (body.title, goal_id))
     if body.color is not None:
         await db.execute("UPDATE goals SET color = ? WHERE id = ?", (body.color, goal_id))
+    if body.tags is not None:
+        await db.execute("UPDATE goals SET tags = ? WHERE id = ?", (body.tags, goal_id))
     await db.commit()
     return {"ok": True}
 

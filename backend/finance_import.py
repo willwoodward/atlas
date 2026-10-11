@@ -135,8 +135,11 @@ def _parse_wise(rows: list[dict]) -> list[ParsedRow]:
             or "Unknown"
         )
         tw_id = _pick(r, "TransferWise ID", "Wise ID", "ID", "Transaction ID")
+        # A card refund or partial reversal reuses the original charge's ID,
+        # so direction is part of the identity or the refund is dropped as a dupe.
+        direction = "in" if amount >= 0 else "out"
         out.append(ParsedRow(
-            external_id=f"wise:{tw_id}" if tw_id else "",
+            external_id=f"wise:{tw_id}:{direction}" if tw_id else "",
             date=_parse_date(_pick(r, "Date", "Created on") or ""),
             merchant=desc,
             amount=abs(amount),

@@ -12,7 +12,8 @@ from typing import Iterable, Optional
 
 
 def gbp(t: dict) -> float:
-    """Every amount is compared in GBP at its import-time rate."""
+    """Legacy default: GBP at the rate stored on the row. The router passes a
+    `value` function that converts into the display currency instead."""
     return float(t.get("amount") or 0) * float(t.get("fx_rate") or 1)
 
 
@@ -28,7 +29,8 @@ def current_month(today: Optional[date] = None) -> str:
 # ── Budgets ───────────────────────────────────────────────────────────────────
 
 def budget_status(budgets: Iterable[dict], transactions: Iterable[dict],
-                  month: Optional[str] = None, today: Optional[date] = None) -> list[dict]:
+                  month: Optional[str] = None, today: Optional[date] = None,
+                  value=gbp) -> list[dict]:
     """Spend against each budget for a month, with a pace figure.
 
     `pace` is what makes this useful mid-month: £90 of a £100 budget is fine on
@@ -43,7 +45,7 @@ def budget_status(budgets: Iterable[dict], transactions: Iterable[dict],
         if t.get("type") != "expense" or month_of(t) != month:
             continue
         key = (t.get("category") or "Uncategorised").strip()
-        spend[key] = spend.get(key, 0) + gbp(t)
+        spend[key] = spend.get(key, 0) + value(t)
 
     year, mon = int(month[:4]), int(month[5:7])
     days_in_month = (date(year + (mon == 12), (mon % 12) + 1, 1) - date(year, mon, 1)).days
@@ -115,7 +117,7 @@ def _classify_gap(days: float) -> Optional[str]:
 
 
 def find_recurring(transactions: Iterable[dict], today: Optional[date] = None,
-                   min_occurrences: int = 3) -> list[dict]:
+                   min_occurrences: int = 3, value=gbp) -> list[dict]:
     """Merchants billing on a regular cadence.
 
     Three occurrences minimum: two points make a line through any pair of dates,
@@ -152,7 +154,7 @@ def find_recurring(transactions: Iterable[dict], today: Optional[date] = None,
         if spread > max(median_gap * 0.35, 3):
             continue
 
-        amounts = [gbp(r) for r in rows]
+        amounts = [value(r) for r in rows]
         median_amount = statistics.median(amounts)
         varies = any(abs(a - median_amount) > max(median_amount * 0.15, 0.5) for a in amounts)
 
@@ -179,11 +181,11 @@ def find_recurring(transactions: Iterable[dict], today: Optional[date] = None,
 # ── Surplus ───────────────────────────────────────────────────────────────────
 
 def surplus_for(transactions: Iterable[dict], month: Optional[str] = None,
-                today: Optional[date] = None) -> dict:
+                today: Optional[date] = None, value=gbp) -> dict:
     month = month or current_month(today)
     rows = [t for t in transactions if month_of(t) == month]
-    income = sum(gbp(t) for t in rows if t.get("type") == "income")
-    spending = sum(gbp(t) for t in rows if t.get("type") == "expense")
+    income = sum(value(t) for t in rows if t.get("type") == "income")
+    spending = sum(value(t) for t in rows if t.get("type") == "expense")
     return {
         "month": month,
         "income": round(income, 2),

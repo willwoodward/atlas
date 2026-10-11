@@ -1,15 +1,9 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from './AuthContext.jsx'
 import { useRefresh } from './RefreshContext.jsx'
+import { weekKey } from '../lib/week.js'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-
-function getWeekStr() {
-  const d = new Date(), day = d.getDay()
-  const mon = new Date(d)
-  mon.setDate(d.getDate() - (day === 0 ? 6 : day - 1)); mon.setHours(0,0,0,0)
-  return `${mon.getFullYear()}-${String(mon.getMonth()+1).padStart(2,'0')}-${String(mon.getDate()).padStart(2,'0')}`
-}
 
 const Ctx = createContext(null)
 
@@ -18,8 +12,11 @@ export function TodosProvider({ children }) {
   // Bumped when the assistant mutates data via MCP, forcing a refetch.
   const { tick } = useRefresh()
   const [todos, setTodos] = useState([])
-  const [outcomes, setOutcomesState] = useState('')
-  const weekStr = getWeekStr()
+  // Weekly outcomes by week key ({ '2026-10-05': 'text' }); a key that's
+  // present has been loaded, even if empty.
+  const [outcomesByWeek, setOutcomesByWeek] = useState({})
+  const [outcomesHistory, setOutcomesHistory] = useState([])
+  const outcomeTimers = useRef({})
   const todosRef = useRef(todos)
   useEffect(() => { todosRef.current = todos }, [todos])
 
@@ -37,8 +34,23 @@ export function TodosProvider({ children }) {
 
   useEffect(() => {
     call('/api/todos').then(r => r.json()).then(rows => setTodos(rows.map(toInternal)))
-    call(`/api/todos/outcomes/${weekStr}`).then(r => r.json()).then(d => setOutcomesState(d.text))
+    call('/api/todos/outcomes').then(r => r.ok ? r.json() : []).then(rows => {
+      setOutcomesHistory(rows)
+      // Merge rather than replace (keeps weeks loaded as empty), and never
+      // clobber a week with an edit still waiting to be saved.
+      setOutcomesByWeek(prev => {
+        const next = { ...prev }
+        for (const r of rows) if (!(r.week_str in outcomeTimers.current)) next[r.week_str] = r.text
+        return next
+      })
+    })
   }, [token, tick])
+
+  const loadOutcomes = useCallback(async (week) => {
+    const r = await call(`/api/todos/outcomes/${week}`)
+    const d = await r.json()
+    setOutcomesByWeek(prev => week in prev ? prev : { ...prev, [week]: d.text })
+  }, [call])
 
   const addTodo = useCallback(async (text, bucket = 'today', goalId = null, parentId = null) => {
     const id = crypto.randomUUID()
@@ -96,10 +108,20 @@ export function TodosProvider({ children }) {
     await call('/api/todos/done/clear', { method: 'DELETE' })
   }, [call])
 
-  const setOutcomes = useCallback(async (text) => {
-    setOutcomesState(text)
-    await call('/api/todos/outcomes', { method: 'PUT', body: JSON.stringify({ week_str: weekStr, text }) })
-  }, [call, weekStr])
+  // The week is explicit, so switching weeks mid-typing can't save into the wrong one.
+  const setOutcomes = useCallback((week, text) => {
+    setOutcomesByWeek(prev => ({ ...prev, [week]: text }))
+    setOutcomesHistory(prev => {
+      const rest = prev.filter(r => r.week_str !== week)
+      const next = text.trim() ? [...rest, { week_str: week, text }] : rest
+      return next.sort((a, b) => b.week_str.localeCompare(a.week_str))
+    })
+    clearTimeout(outcomeTimers.current[week])
+    outcomeTimers.current[week] = setTimeout(() => {
+      delete outcomeTimers.current[week]
+      call('/api/todos/outcomes', { method: 'PUT', body: JSON.stringify({ week_str: week, text }) })
+    }, 400)
+  }, [call])
 
   const reorderTodo = useCallback(async (dragId, targetId, above, targetBucket) => {
     setTodos(prev => {
@@ -126,7 +148,7 @@ export function TodosProvider({ children }) {
   const addSubTodo = useCallback((parentId, text) => addTodo(text, todos.find(t => t.id === parentId)?.bucket ?? 'today', null, parentId), [addTodo, todos])
 
   return (
-    <Ctx.Provider value={{ todos, outcomes, addTodo, addSubTodo, toggleTodo, moveTodo, removeTodo, clearDone, setOutcomes, reorderTodo }}>
+    <Ctx.Provider value={{ todos, outcomes: outcomesByWeek[weekKey()] ?? '', outcomesByWeek, outcomesHistory, loadOutcomes, addTodo, addSubTodo, toggleTodo, moveTodo, removeTodo, clearDone, setOutcomes, reorderTodo }}>
       {children}
     </Ctx.Provider>
   )

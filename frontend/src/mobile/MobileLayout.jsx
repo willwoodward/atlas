@@ -90,16 +90,8 @@ export default function MobileLayout() {
           </svg>
         </button>
 
-        {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 8, background: '#c15f3c', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--surface-2)' }} />
-          </div>
-          <span style={{ fontFamily: "'Newsreader', serif", fontSize: 17, fontWeight: 600, color: 'var(--ink)' }}>Atlas</span>
-        </div>
-
-        {/* Current page label */}
-        <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: 'var(--mid)', textAlign: 'center' }}>{activeLabel}</span>
+        {/* Current page label — the Atlas brand lives in the drawer */}
+        <span style={{ flex: 1, fontSize: 15, fontWeight: 600, color: 'var(--ink)', lineHeight: '32px' }}>{activeLabel}</span>
 
         {/* The page's primary action — the same one desktop shows as "+ <label>".
             Icon-only here for room, so the label goes to screen readers. */}
@@ -109,14 +101,6 @@ export default function MobileLayout() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
         )}
-
-        {/* Avatar → accounts */}
-        <div
-          style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,#c88a5f,#9a6d84)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 13, flex: 'none', cursor: 'pointer' }}
-          onClick={() => navigate('accounts')}
-        >
-          {initial}
-        </div>
       </div>
 
       {/* Page content — calendar manages its own inner scroll */}

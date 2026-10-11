@@ -8,7 +8,7 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 // Convert API row → internal shape
 const toInternal = (r) => ({
-  id: r.id, title: r.title, color: r.color, createdAt: r.created_at,
+  id: r.id, title: r.title, color: r.color, createdAt: r.created_at, tags: r.tags || '',
   quarters: { Q1: r.q1, Q2: r.q2, Q3: r.q3, Q4: r.q4 },
 })
 
@@ -44,7 +44,7 @@ export function GoalsProvider({ children }) {
   const addGoal = useCallback(async (title, color) => {
     const id = crypto.randomUUID()
     const created_at = new Date().toISOString()
-    const goal = { id, title, color, createdAt: created_at, quarters: { Q1: '', Q2: '', Q3: '', Q4: '' } }
+    const goal = { id, title, color, createdAt: created_at, tags: '', quarters: { Q1: '', Q2: '', Q3: '', Q4: '' } }
     setGoals(prev => [...prev, goal])
     await call('/api/goals', { method: 'POST', body: JSON.stringify({ id, title, color, created_at }) })
     return id

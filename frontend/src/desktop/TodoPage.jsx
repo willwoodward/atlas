@@ -4,6 +4,7 @@ import { useTodos } from '../context/TodosContext.jsx'
 import { useGoals } from '../context/GoalsContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { useQuickAdd } from '../context/QuickAddContext.jsx'
+import { weekKey, shiftWeek, formatWeekRange, relativeWeekLabel, staysInBucket as staysInBucketAt } from '../lib/week.js'
 
 const BUCKETS = [
   { key: 'today',   label: 'Today',     color: '#c15f3c' },
@@ -103,7 +104,7 @@ function AddSubTodoInput({ parentId, onAdd, onCancel }) {
   )
 }
 
-function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddSub, dragState, onGripDown, todayStr, weekMonStr, openSignal = 0 }) {
+function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddSub, dragState, onGripDown, onTouchHold, openSignal = 0 }) {
   const [adding, setAdding] = useState(false)
   // Bumped by the header "+ Add to-do" (Today only). A counter rather than a
   // boolean so pressing it again re-opens the row after it was dismissed.
@@ -112,13 +113,7 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddS
   const [addingSubFor, setAddingSubFor] = useState(null)
 
   // Done todos stay in bucket until day (today) or week (week) ends
-  const staysHere = (t) => {
-    if (!t.done || !t.completedAt) return true
-    const d = t.completedAt.substring(0, 10)
-    if (bucket.key === 'today') return d === todayStr
-    if (bucket.key === 'week') return d >= weekMonStr
-    return true  // someday: always stays
-  }
+  const staysHere = staysInBucketAt
 
   const activeTodos = todos.filter(t => t.bucket === bucket.key && !t.parentId && staysHere(t))
   const openCount   = activeTodos.filter(t => !t.done).length
@@ -141,17 +136,22 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddS
         <div
           data-todo-id={t.id}
           data-bucket-key={bucket.key}
+          onTouchStart={e => onTouchHold(e, t.id, false)}
+          onContextMenu={e => { if (dragId || e.nativeEvent.pointerType === 'touch') e.preventDefault() }}
           style={{
             display: 'flex', alignItems: 'flex-start', gap: 9,
             padding: '10px 0', borderTop: idx === 0 ? 'none' : '1px solid var(--bd-xs)',
-            opacity: isDragging ? 0.35 : 1, transition: 'opacity .1s',
+            opacity: isDragging ? 0.3 : 1, transition: 'opacity .1s',
             pointerEvents: isDragging ? 'none' : 'auto',
+            // Long-press is "pick up", not "select text" / the iOS callout
+            userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none',
           }}
         >
-          {/* Grip — touch-action: none to prevent scroll on mobile */}
+          {/* Grip — touch-action: none so dragging it never scrolls the page */}
           <span
             style={{ color: 'var(--faint)', cursor: 'grab', flexShrink: 0, marginTop: 3, padding: '0 2px', touchAction: 'none' }}
             onPointerDown={e => onGripDown(e, t.id)}
+            onTouchStart={e => { e.stopPropagation(); onTouchHold(e, t.id, true) }}
           >
             <GripIcon />
           </span>
@@ -251,9 +251,102 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddS
   )
 }
 
+const navBtn = { width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 7, border: 'none', background: 'transparent', color: 'var(--muted)', cursor: 'pointer', padding: 0, flex: 'none' }
+
+// "What would make this week a success" — one entry per Mon–Sun week. Arrows
+// or a horizontal swipe move between weeks, so on a Sunday you can look back
+// at this week and write next week's.
+function WeeklyOutcomes() {
+  const { outcomesByWeek, outcomesHistory, loadOutcomes, setOutcomes } = useTodos()
+  const current = weekKey()
+  const [week, setWeek] = useState(current)
+  const [showHistory, setShowHistory] = useState(false)
+  const swipe = useRef(null)
+  const taRef = useRef(null)
+
+  const loaded = week in outcomesByWeek
+  const text = outcomesByWeek[week] ?? ''
+  useEffect(() => { if (!loaded) loadOutcomes(week) }, [week, loaded, loadOutcomes])
+  useEffect(() => {
+    const el = taRef.current
+    if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px' }
+  }, [text, week])
+
+  const isPast = week < current
+  const isSunday = new Date().getDay() === 0
+  const rel = relativeWeekLabel(week)
+  const go = (n) => { setWeek(w => shiftWeek(w, n)); setShowHistory(false) }
+
+  const onTouchStart = (e) => { const t = e.touches[0]; swipe.current = { x: t.clientX, y: t.clientY } }
+  const onTouchEnd = (e) => {
+    const s0 = swipe.current; swipe.current = null
+    if (!s0) return
+    const t = e.changedTouches[0], dx = t.clientX - s0.x, dy = t.clientY - s0.y
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) go(dx < 0 ? 1 : -1)
+  }
+
+  return (
+    <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}
+      style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 14, padding: '14px 16px 14px 20px', marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>
+            {week === current ? "This week's outcomes" : rel ? `${rel}'s outcomes` : 'Outcomes'}
+          </div>
+          <div style={{ fontSize: 12, color: week === current ? 'var(--mid)' : '#5f7591', marginTop: 2 }}>{formatWeekRange(week)}</div>
+        </div>
+        {week !== current && (
+          <button onClick={() => { setWeek(current); setShowHistory(false) }} style={{ ...navBtn, width: 'auto', padding: '0 8px', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', border: '1px solid var(--bd)' }}>This week</button>
+        )}
+        <button onClick={() => go(-1)} aria-label="Previous week" style={navBtn}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button onClick={() => go(1)} aria-label="Next week" style={navBtn}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <button onClick={() => setShowHistory(h => !h)} aria-label="Past weeks" title="Past weeks"
+          style={{ ...navBtn, background: showHistory ? 'var(--surface-3)' : 'transparent', color: showHistory ? 'var(--ink)' : 'var(--muted)' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="4" y="5" width="16" height="16" rx="2"/><line x1="4" y1="9" x2="20" y2="9"/><line x1="9" y1="3" x2="9" y2="6"/><line x1="15" y1="3" x2="15" y2="6"/></svg>
+        </button>
+      </div>
+
+      {showHistory ? (
+        <div style={{ maxHeight: 260, overflowY: 'auto', marginTop: 8 }}>
+          {outcomesHistory.length === 0 && <div style={{ fontSize: 13, color: 'var(--faint)', padding: '6px 0' }}>No past weeks written yet.</div>}
+          {outcomesHistory.map(r => (
+            <button key={r.week_str} onClick={() => { setWeek(r.week_str); setShowHistory(false) }}
+              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 0', border: 'none', borderTop: '1px solid var(--bd-xs)', background: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: r.week_str === week ? '#5f7591' : 'var(--mid)' }}>
+                {relativeWeekLabel(r.week_str) ? `${relativeWeekLabel(r.week_str)} · ` : ''}{formatWeekRange(r.week_str)}
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--ink)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.text.split('\n')[0]}</div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <textarea
+          ref={taRef}
+          value={text}
+          disabled={!loaded}
+          onChange={e => setOutcomes(week, e.target.value)}
+          placeholder={!loaded ? 'Loading…' : isPast ? 'Nothing written for this week.' : 'What would make this week a win? Write 1–3 outcomes…'}
+          rows={2}
+          style={{ width: '100%', border: 'none', outline: 'none', resize: 'none', overflow: 'hidden', fontFamily: 'inherit', fontSize: 14, lineHeight: 1.65, color: 'var(--ink)', background: 'transparent', padding: 0 }}
+        />
+      )}
+
+      {isSunday && week === current && !showHistory && (
+        <button onClick={() => go(1)} style={{ marginTop: 4, fontSize: 12.5, fontWeight: 600, color: '#5f7591', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}>
+          Plan next week →
+        </button>
+      )}
+    </div>
+  )
+}
+
 export default function TodoPage() {
   const isMobile = useIsMobile()
-  const { todos, outcomes, addTodo, addSubTodo, toggleTodo, removeTodo, setOutcomes, reorderTodo } = useTodos()
+  const { todos, addTodo, addSubTodo, toggleTodo, removeTodo, reorderTodo } = useTodos()
   const { goals } = useGoals()
 
   const [showAllCompleted, setShowAllCompleted] = useState(false)
@@ -261,71 +354,128 @@ export default function TodoPage() {
   useQuickAdd('Add to-do', () => setTodaySignal(n => n + 1))
   const [dragId,     setDragId]     = useState(null)
   const [dropTarget, setDropTarget] = useState(null)
-  const dragDataRef = useRef({ id: null, active: false, startY: 0, startX: 0, dropTarget: null })
+  const [ghost,      setGhost]      = useState(null)   // lifted copy that follows the finger / cursor
+  const dragRef = useRef(null)
 
+  // ─── Drag engine (shared by mouse and touch) ──────────────────────────────
+  const hitTest = (x, y, id) => {
+    for (const el of document.elementsFromPoint(x, y)) {
+      if (el.dataset.todoId && el.dataset.todoId !== id) {
+        const rect = el.getBoundingClientRect()
+        return { todoId: el.dataset.todoId, above: y < rect.top + rect.height / 2, bucketKey: el.dataset.bucketKey }
+      }
+      if (el.dataset.bucketKey) return { bucketKey: el.dataset.bucketKey }
+    }
+    return null
+  }
+
+  const updateDrag = (x, y) => {
+    const d = dragRef.current
+    if (!d?.active) return
+    d.x = x; d.y = y
+    d.dropTarget = hitTest(x, y, d.id)
+    setDropTarget(d.dropTarget)
+    setGhost(g => g && { ...g, top: y - d.offsetY, left: x - d.offsetX })
+  }
+
+  // Scroll the list when the drag nears the top/bottom edge of its scroller.
+  const autoScroll = () => {
+    const d = dragRef.current
+    if (!d?.active) return
+    const sc = d.scroller
+    const top = sc === document.scrollingElement ? 0 : sc.getBoundingClientRect().top
+    const bottom = sc === document.scrollingElement ? window.innerHeight : sc.getBoundingClientRect().bottom
+    const EDGE = 70
+    const speed = d.y < top + EDGE ? -(top + EDGE - d.y) / 5 : d.y > bottom - EDGE ? (d.y - (bottom - EDGE)) / 5 : 0
+    if (speed) { sc.scrollTop += speed; updateDrag(d.x, d.y) }
+    d.raf = requestAnimationFrame(autoScroll)
+  }
+
+  const activateDrag = () => {
+    const d = dragRef.current
+    const row = d.row.getBoundingClientRect()
+    d.active = true
+    d.offsetY = d.y - row.top
+    d.offsetX = d.x - row.left
+    let sc = d.row.parentElement
+    while (sc && !(/(auto|scroll)/.test(getComputedStyle(sc).overflowY) && sc.scrollHeight > sc.clientHeight)) sc = sc.parentElement
+    d.scroller = sc || document.scrollingElement
+    setDragId(d.id)
+    setGhost({ id: d.id, left: row.left, width: row.width, top: row.top })
+    navigator.vibrate?.(12)
+    d.raf = requestAnimationFrame(autoScroll)
+  }
+
+  const endDrag = (commit) => {
+    const d = dragRef.current
+    dragRef.current = null
+    if (!d) return
+    clearTimeout(d.holdTimer)
+    cancelAnimationFrame(d.raf)
+    d.cleanup?.()
+    if (commit && d.active && d.dropTarget) {
+      const dt = d.dropTarget
+      reorderTodo(d.id, dt.todoId ?? null, dt.todoId ? dt.above : false, dt.bucketKey)
+    }
+    setDragId(null); setDropTarget(null); setGhost(null)
+  }
+
+  // Mouse / pen: press the grip and move.
   const handleGripDown = useCallback((e, id) => {
+    if (e.pointerType === 'touch') return // touch is handled by handleTouchStart
     e.preventDefault()
-    dragDataRef.current = { id, active: false, startY: e.clientY, startX: e.clientX, dropTarget: null }
-
-    const onMove = (e) => {
-      const d = dragDataRef.current
-      if (!d.id) return
-      const moved = Math.hypot(e.clientX - d.startX, e.clientY - d.startY)
-      if (!d.active && moved > 8) {
-        d.active = true
-        setDragId(d.id)
-      }
-      if (!d.active) return
-
-      // Hit-test: find what's under the pointer (dragging element has pointerEvents:none)
-      const els = document.elementsFromPoint(e.clientX, e.clientY)
-      let newTarget = null
-      for (const el of els) {
-        if (el.dataset.todoId && el.dataset.todoId !== d.id) {
-          const rect = el.getBoundingClientRect()
-          newTarget = { todoId: el.dataset.todoId, above: e.clientY < rect.top + rect.height / 2, bucketKey: el.dataset.bucketKey }
-          break
-        }
-        if (el.dataset.bucketKey) {
-          newTarget = { bucketKey: el.dataset.bucketKey }
-          break
-        }
-      }
-      d.dropTarget = newTarget
-      setDropTarget(newTarget)
+    dragRef.current = { id, row: e.currentTarget.closest('[data-todo-id]'), x: e.clientX, y: e.clientY, startX: e.clientX, startY: e.clientY, active: false }
+    const onMove = (ev) => {
+      const d = dragRef.current
+      if (!d) return
+      d.x = ev.clientX; d.y = ev.clientY
+      if (!d.active && Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY) > 8) activateDrag()
+      updateDrag(ev.clientX, ev.clientY)
     }
-
-    const onUp = () => {
-      document.removeEventListener('pointermove', onMove)
-      document.removeEventListener('pointerup', onUp)
-      const d = dragDataRef.current
-      if (d.active && d.dropTarget) {
-        const dt = d.dropTarget
-        if (dt.todoId) reorderTodo(d.id, dt.todoId, dt.above, dt.bucketKey)
-        else if (dt.bucketKey) reorderTodo(d.id, null, false, dt.bucketKey)
-      }
-      dragDataRef.current = { id: null, active: false, startY: 0, startX: 0, dropTarget: null }
-      setDragId(null)
-      setDropTarget(null)
-    }
-
+    const onUp = () => endDrag(true)
     document.addEventListener('pointermove', onMove)
     document.addEventListener('pointerup', onUp)
-  }, [reorderTodo])
+    dragRef.current.cleanup = () => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+    }
+  }, [reorderTodo]) // eslint-disable-line
 
-  const _today = new Date()
-  const todayStr = `${_today.getFullYear()}-${String(_today.getMonth()+1).padStart(2,'0')}-${String(_today.getDate()).padStart(2,'0')}`
-  const _day = _today.getDay(), _mon = new Date(_today)
-  _mon.setDate(_today.getDate() - (_day === 0 ? 6 : _day - 1))
-  const weekMonStr = `${_mon.getFullYear()}-${String(_mon.getMonth()+1).padStart(2,'0')}-${String(_mon.getDate()).padStart(2,'0')}`
+  // Touch: hold anywhere on the row to pick it up (the grip picks up at once).
+  // Moving before the hold completes is treated as a scroll and cancels it.
+  const handleTouchStart = useCallback((e, id, fromGrip) => {
+    if (e.touches.length !== 1 || dragRef.current) return
+    if (e.target.closest('button, input, textarea')) return
+    const t = e.touches[0]
+    const d = dragRef.current = { id, row: e.currentTarget.closest('[data-todo-id]'), x: t.clientX, y: t.clientY, startX: t.clientX, startY: t.clientY, active: false }
+    const onMove = (ev) => {
+      const p = ev.touches[0]
+      if (!d.active) {
+        if (Math.hypot(p.clientX - d.startX, p.clientY - d.startY) > 10) endDrag(false)
+        return
+      }
+      ev.preventDefault() // we own the gesture now: no scrolling
+      updateDrag(p.clientX, p.clientY)
+    }
+    const onEnd = (ev) => {
+      if (d.active) ev.preventDefault() // swallow the click that would open sub-tasks
+      endDrag(true)
+    }
+    const onCancel = () => endDrag(false)
+    document.addEventListener('touchmove', onMove, { passive: false })
+    document.addEventListener('touchend', onEnd, { passive: false })
+    document.addEventListener('touchcancel', onCancel)
+    d.cleanup = () => {
+      document.removeEventListener('touchmove', onMove)
+      document.removeEventListener('touchend', onEnd)
+      document.removeEventListener('touchcancel', onCancel)
+    }
+    d.holdTimer = setTimeout(() => { if (dragRef.current === d) activateDrag() }, fromGrip ? 120 : 380)
+  }, [reorderTodo]) // eslint-disable-line
 
-  const staysInBucket = (t) => {
-    if (!t.done || !t.completedAt) return true
-    const d = t.completedAt.substring(0, 10)
-    if (t.bucket === 'today') return d === todayStr
-    if (t.bucket === 'week') return d >= weekMonStr
-    return true
-  }
+  useEffect(() => () => endDrag(false), []) // eslint-disable-line
+
+  const staysInBucket = staysInBucketAt
 
   const totalOpen = todos.filter(t => !t.done && !t.parentId).length
 
@@ -338,19 +488,7 @@ export default function TodoPage() {
         </p>
       </div>
 
-      {/* Weekly outcomes */}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 14, padding: '16px 20px', marginBottom: 20 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 }}>
-          This week's outcomes
-        </div>
-        <textarea
-          value={outcomes}
-          onChange={e => setOutcomes(e.target.value)}
-          placeholder="What would make this week a win? Write 1–3 outcomes…"
-          rows={2}
-          style={{ width: '100%', border: 'none', outline: 'none', resize: 'none', fontFamily: 'inherit', fontSize: 14, lineHeight: 1.65, color: 'var(--ink)', background: 'transparent' }}
-        />
-      </div>
+      <WeeklyOutcomes />
 
       {/* Three buckets */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 14, alignItems: 'start' }}>
@@ -366,12 +504,30 @@ export default function TodoPage() {
             onAddSub={addSubTodo}
             dragState={{ dragId, dropTarget }}
             onGripDown={handleGripDown}
-            todayStr={todayStr}
-            weekMonStr={weekMonStr}
+            onTouchHold={handleTouchStart}
             openSignal={b.key === 'today' ? todaySignal : 0}
           />
         ))}
       </div>
+
+      {/* The lifted to-do, following the finger / cursor while dragging */}
+      {ghost && (() => {
+        const t = todos.find(x => x.id === ghost.id)
+        const b = BUCKETS.find(x => x.key === dropTarget?.bucketKey) || BUCKETS.find(x => x.key === t?.bucket)
+        return t && (
+          <div style={{
+            position: 'fixed', left: ghost.left - 10, width: ghost.width + 20, top: ghost.top, zIndex: 300,
+            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 10px', borderRadius: 12,
+            background: 'var(--surface)', border: `1.5px solid ${b?.color || 'var(--bd)'}`,
+            boxShadow: '0 12px 32px rgba(0,0,0,.22)', transform: 'scale(1.03) rotate(-0.6deg)',
+            pointerEvents: 'none', userSelect: 'none', fontSize: 13.5, color: 'var(--ink)',
+            transition: 'border-color .12s',
+          }}>
+            <span style={{ color: 'var(--faint)' }}><GripIcon /></span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.text}</span>
+          </div>
+        )
+      })()}
 
       {/* Overall completed */}
       {(() => {

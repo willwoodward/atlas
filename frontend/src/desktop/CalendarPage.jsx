@@ -2,6 +2,10 @@ import { useEffect, useState, useRef } from 'react'
 import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import { useLocalCalendar } from '../context/LocalCalendarContext.jsx'
 import { getWeekRange, localDateStr } from '../integrations/googleCalendar.js'
+import { layoutOverlaps } from '../lib/calendarLayout.js'
+import { mondayOf, parseLocalDate, addDays } from '../lib/week.js'
+import { useCalendarEvents, fmtH } from '../hooks/useCalendarEvents.js'
+import DaySchedule from '../components/DaySchedule.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { useQuickAdd } from '../context/QuickAddContext.jsx'
 
@@ -11,57 +15,10 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i)
 const DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 const PALETTE = ['#5f7591','#6f8168','#c15f3c','#b08a3e','#9a6d84','#9a9488']
 
-function hexTint(hex, a = 0.15) {
-  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16)
-  return `rgba(${r},${g},${b},${a})`
-}
-function fmtH(h) {
-  const hrs = Math.floor(h), mins = Math.round((h - hrs) * 60)
-  const ampm = hrs >= 12 ? 'PM' : 'AM', h12 = hrs % 12 || 12
-  return mins === 0 ? `${h12} ${ampm}` : `${h12}:${String(mins).padStart(2,'0')} ${ampm}`
-}
 function toTimeStr(h) {
   return `${String(Math.floor(h)).padStart(2,'0')}:${String(Math.round((h % 1) * 60)).padStart(2,'0')}`
 }
 function snapTo(h, step) { return Math.round(h / step) * step }
-
-// Google-Calendar-style layout for overlapping timed events. Events that
-// (transitively) overlap form a cluster; each gets the first free column in
-// its cluster, then widens rightwards over columns it doesn't collide with.
-// Returns Map(event → { left, width }) as fractions of the day column.
-function layoutOverlaps(events) {
-  const MIN_DUR = 22 / HOUR_H // matches the minimum rendered height
-  const items = events
-    .map(ev => ({ ev, start: ev.start, end: ev.start + Math.max(ev.dur, MIN_DUR) }))
-    .sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start))
-  const out = new Map()
-  const overlaps = (a, b) => a.start < b.end && b.start < a.end
-
-  let cluster = [], clusterEnd = -Infinity
-  const flush = () => {
-    const cols = [] // cols[i] = items in column i
-    for (const it of cluster) {
-      let c = cols.findIndex(col => col.every(o => !overlaps(o, it)))
-      if (c === -1) { c = cols.length; cols.push([]) }
-      cols[c].push(it)
-      it.col = c
-    }
-    const n = cols.length
-    for (const it of cluster) {
-      let span = 1
-      while (it.col + span < n && cols[it.col + span].every(o => !overlaps(o, it))) span++
-      out.set(it.ev, { left: it.col / n, width: span / n })
-    }
-    cluster = []
-  }
-  for (const it of items) {
-    if (it.start >= clusterEnd) flush()
-    cluster.push(it)
-    clusterEnd = Math.max(clusterEnd, it.end)
-  }
-  flush()
-  return out
-}
 
 const inputStyle = {
   width: '100%', padding: '8px 12px', borderRadius: 9, fontSize: 13.5,
@@ -71,7 +28,7 @@ const inputStyle = {
 const labelStyle = { display: 'block', fontSize: 11.5, fontWeight: 600, color: 'var(--muted)', marginBottom: 5, letterSpacing: '.03em' }
 
 // ─── Event detail modal ───────────────────────────────────────────────────
-function EventDetailModal({ event, onClose, onDelete }) {
+export function EventDetailModal({ event, onClose, onDelete }) {
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState(null)
@@ -215,7 +172,8 @@ function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00'
 export default function CalendarPage() {
   const isMobile = useIsMobile()
   const { gcal, connectGoogle, refetchEvents, createGcalEvent, removeGcalEvent } = useIntegrations()
-  const { events: localEvents, addEvent, removeEvent } = useLocalCalendar()
+  const { addEvent, removeEvent } = useLocalCalendar()
+  const allEvents = useCalendarEvents()
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -224,24 +182,28 @@ export default function CalendarPage() {
   const [ghost, setGhost] = useState(null)
   const [syncStatus, setSyncStatus] = useState(null)
   const dragRef = useRef(null)
-  const todayRowRef = useRef(null)
-  const agendaScrollRef = useRef(null)
+  const swipeRef = useRef(null)
 
-  const { weekStart, weekEnd, todayStr } = getWeekRange(weekOffset)
+  // Mobile shows one day at a time; the week fetched is whichever contains it.
+  const [selDay, setSelDay] = useState(() => localDateStr(new Date()))
+  const dayWeekOffset = Math.round((mondayOf(parseLocalDate(selDay)) - mondayOf()) / (7 * 864e5))
+  const activeOffset = isMobile ? dayWeekOffset : weekOffset
+  const { weekStart, weekEnd, todayStr } = getWeekRange(activeOffset)
+  const stepDay = (n) => setSelDay(d => localDateStr(addDays(parseLocalDate(d), n)))
 
   useEffect(() => {
     if (gcal.connected) refetchEvents(weekStart, weekEnd)
-  }, [gcal.connected, weekOffset, gcal.mutatedAt]) // eslint-disable-line
+  }, [gcal.connected, activeOffset, gcal.mutatedAt]) // eslint-disable-line
 
-  useEffect(() => {
-    if (!isMobile) return
-    const timer = setTimeout(() => {
-      if (agendaScrollRef.current && todayRowRef.current) {
-        agendaScrollRef.current.scrollTop = todayRowRef.current.offsetTop - 8
-      }
-    }, 150)
-    return () => clearTimeout(timer)
-  }, [isMobile]) // eslint-disable-line
+  const onSwipeStart = (e) => { const t = e.touches[0]; swipeRef.current = { x: t.clientX, y: t.clientY } }
+  const onSwipeEnd = (e) => {
+    const s = swipeRef.current
+    swipeRef.current = null
+    if (!s) return
+    const t = e.changedTouches[0]
+    const dx = t.clientX - s.x, dy = t.clientY - s.y
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) stepDay(dx < 0 ? 1 : -1)
+  }
 
   const handleAddEvent = async (eventData) => {
     if (gcal.connected) {
@@ -297,21 +259,6 @@ export default function CalendarPage() {
     setShowAddModal(true)
   }
 
-  // Format local events
-  const localFormatted = localEvents.map(e => ({
-    id: e.id, title: e.title, start: e.startH,
-    dur: Math.max(e.endH - e.startH, 0.25),
-    time: `${fmtH(e.startH)}–${fmtH(e.endH)}`,
-    timeDisplay: fmtH(e.startH),
-    endTimeDisplay: fmtH(e.endH),
-    durDisplay: `${Math.round(Math.max(e.endH - e.startH, 0.25) * 60)}m`,
-    color: e.color, tint: hexTint(e.color),
-    date: e.date, isLocal: true, isAllDay: false, notes: e.notes,
-    description: '', location: '',
-  }))
-
-  const allEvents = [...gcal.events, ...localFormatted]
-
   const weekDays = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart)
     d.setDate(weekStart.getDate() + i)
@@ -319,8 +266,9 @@ export default function CalendarPage() {
     return { dow: DOW[i], num: d.getDate(), today: dateStr === todayStr, dateStr, events: allEvents.filter(ev => ev.date === dateStr), isPast: dateStr < todayStr }
   })
 
+  const dayLabel = parseLocalDate(selDay).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
   const weekLabel = `${weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })} – ${weekEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`
-  const defaultAddDate = weekDays.find(d => d.today)?.dateStr ?? localDateStr(weekStart)
+  const defaultAddDate = isMobile ? selDay : weekDays.find(d => d.today)?.dateStr ?? localDateStr(weekStart)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -329,7 +277,7 @@ export default function CalendarPage() {
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, marginBottom: 22, flex: 'none', padding: isMobile ? '20px 20px 0' : 0 }}>
         <div>
           <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500, color: 'var(--ink)' }}>Calendar</h1>
-          <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>{weekLabel}</p>
+          <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>{isMobile ? dayLabel : weekLabel}</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {!gcal.connected && !isMobile && (
@@ -337,17 +285,17 @@ export default function CalendarPage() {
               Connect Google Calendar
             </button>
           )}
-          {gcal.loading && <span style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</span>}
+          {gcal.loading && !isMobile && <span style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</span>}
           {gcal.error && <span style={{ fontSize: 13, color: '#c15f3c' }}>⚠ {gcal.error}</span>}
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <button onClick={() => setWeekOffset(o => o - 1)} style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', cursor: 'pointer' }}>
+            <button onClick={() => isMobile ? stepDay(-1) : setWeekOffset(o => o - 1)} style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', cursor: 'pointer' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
-            {weekOffset !== 0 && (
-              <button onClick={() => setWeekOffset(0)} style={{ padding: '5px 10px', borderRadius: 8, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Today</button>
+            {(isMobile ? selDay !== todayStr : weekOffset !== 0) && (
+              <button onClick={() => isMobile ? setSelDay(localDateStr(new Date())) : setWeekOffset(0)} style={{ padding: '5px 10px', borderRadius: 8, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Today</button>
             )}
-            <button onClick={() => setWeekOffset(o => o + 1)} style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', cursor: 'pointer' }}>
+            <button onClick={() => isMobile ? stepDay(1) : setWeekOffset(o => o + 1)} style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', cursor: 'pointer' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
           </div>
@@ -362,50 +310,24 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      {/* Mobile: agenda list */}
+      {/* Mobile: one day as a time column — swipe for the previous / next day */}
       {isMobile && (
-        <div ref={agendaScrollRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 20px 20px' }}>
-          {weekDays.map(d => {
-            const allDayEvs = d.events.filter(ev => ev.isAllDay).sort((a, b) => a.title.localeCompare(b.title))
-            const timedEvs = d.events.filter(ev => !ev.isAllDay && !ev.isSleepWakeUp).sort((a, b) => a.start - b.start)
-            return (
-              <div key={d.dow} ref={d.today ? todayRowRef : null} style={{ marginBottom: 4, opacity: d.isPast ? 0.5 : 1 }}>
-                {/* Day header */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0 6px', borderBottom: '1px solid var(--bd)' }}>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: d.today ? '#c15f3c' : 'transparent', flexShrink: 0 }}>
-                    <span style={{ fontFamily: "'Newsreader', serif", fontSize: 16, fontWeight: 600, color: d.today ? '#fff' : 'var(--ink)' }}>{d.num}</span>
-                  </div>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: d.today ? '#c15f3c' : 'var(--mid)', letterSpacing: '.04em', textTransform: 'uppercase' }}>{d.dow}</span>
-                  {d.today && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#c15f3c', background: 'rgba(193,95,60,.1)', padding: '2px 7px', borderRadius: 4, letterSpacing: '.05em', textTransform: 'uppercase' }}>Today</span>}
-                </div>
-
-                {/* All-day events */}
-                {allDayEvs.map((ev, i) => (
-                  <div key={ev.id || i} onClick={() => setSelectedEvent(ev)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: '1px solid var(--bd-xs)', cursor: 'pointer' }}>
-                    <div style={{ width: 3, borderRadius: 99, background: ev.color, flexShrink: 0, alignSelf: 'stretch', minHeight: 20 }} />
-                    <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)' }}>{ev.title}</span>
-                    <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 'auto' }}>All day</span>
-                  </div>
-                ))}
-
-                {/* Timed events */}
-                {timedEvs.length === 0 && allDayEvs.length === 0
-                  ? <div style={{ padding: '8px 0 4px', fontSize: 13, color: 'var(--faint)' }}>—</div>
-                  : timedEvs.map((ev, i) => (
-                      <div key={ev.id || i} onClick={() => setSelectedEvent(ev)}
-                        style={{ display: 'flex', gap: 12, padding: '9px 0', borderBottom: i < timedEvs.length - 1 ? '1px solid var(--bd-xs)' : 'none', cursor: 'pointer' }}>
-                        <div style={{ width: 3, borderRadius: 99, background: ev.color, flexShrink: 0 }} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev.title}</span>
-                          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{ev.time || ev.timeDisplay}</div>
-                        </div>
-                      </div>
-                    ))
-                }
-              </div>
-            )
-          })}
+        <div onTouchStart={onSwipeStart} onTouchEnd={onSwipeEnd}
+          style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '0 12px 0 4px' }}>
+          {!gcal.connected && (
+            <button onClick={connectGoogle} style={{ alignSelf: 'flex-start', margin: '0 0 10px 12px', fontSize: 13, color: '#5f7591', background: 'rgba(95,117,145,.1)', border: '1px solid rgba(95,117,145,.25)', padding: '7px 14px', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
+              Connect Google Calendar
+            </button>
+          )}
+          <DaySchedule
+            dateStr={selDay}
+            events={allEvents.filter(ev => ev.date === selDay)}
+            isToday={selDay === todayStr}
+            isPast={selDay < todayStr}
+            onEventClick={setSelectedEvent}
+            onSlotClick={h => { setAddDraft({ date: selDay, startH: h, endH: h + 1 }); setShowAddModal(true) }}
+            style={{ flex: 1, paddingBottom: 'env(safe-area-inset-bottom)' }}
+          />
         </div>
       )}
 
@@ -459,7 +381,7 @@ export default function CalendarPage() {
                 {/* Timed events — overlapping ones sit side by side */}
                 {(() => {
                   const timed = d.events.filter(ev => !ev.isAllDay && !ev.isSleepWakeUp && ev.start >= DAY_START && ev.start < 24)
-                  const layout = layoutOverlaps(timed)
+                  const layout = layoutOverlaps(timed, 22 / HOUR_H)
                   return timed.map((ev, i) => {
                     const top = (ev.start - DAY_START) * HOUR_H
                     const height = Math.max(ev.dur * HOUR_H - 4, 20)

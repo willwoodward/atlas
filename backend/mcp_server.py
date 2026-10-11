@@ -197,7 +197,7 @@ async def list_tools() -> list[Tool]:
         Tool(name="list_habits", description="List all habits with today's completion status", inputSchema={"type":"object","properties":{},"required":[]}),
         Tool(name="log_habit", description="Toggle a habit completion for a date (defaults to today)", inputSchema={"type":"object","properties":{"id":{"type":"string"},"date":{"type":"string"}},"required":["id"]}),
         Tool(name="list_goals", description="List all annual goals with quarterly focus text", inputSchema={"type":"object","properties":{},"required":[]}),
-        Tool(name="get_finances_summary", description="Get net worth, total saved in pots, income and spending", inputSchema={"type":"object","properties":{},"required":[]}),
+        Tool(name="get_finances_summary", description="Get net worth, total saved in pots, and all-time income and spending, converted to EUR at ECB rates", inputSchema={"type":"object","properties":{},"required":[]}),
         Tool(name="list_notes", description="List quick notes (local)", inputSchema={"type":"object","properties":{},"required":[]}),
         Tool(name="search_notes", description="Search notes by keyword", inputSchema={"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}),
         Tool(name="create_note", description="Create a new quick note", inputSchema={"type":"object","properties":{"body":{"type":"string"}},"required":["body"]}),
@@ -309,17 +309,36 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
             return [dict(r) for r in await c.fetchall()]
 
     if name == "get_finances_summary":
-        async with db.execute("SELECT SUM(balance) as total FROM finances_accounts") as c:
-            row = await c.fetchone()
-            net_worth = row["total"] or 0
-        async with db.execute("SELECT SUM(d.amount) as saved FROM finances_deposits d") as c:
-            row = await c.fetchone()
-            total_saved = row["saved"] or 0
-        async with db.execute("SELECT SUM(amount) as v FROM finances_transactions WHERE type='income'") as c:
-            income = (await c.fetchone())["v"] or 0
-        async with db.execute("SELECT SUM(amount) as v FROM finances_transactions WHERE type='expense'") as c:
-            spending = (await c.fetchone())["v"] or 0
-        return {"net_worth": net_worth, "total_saved": total_saved, "income": income, "spending": spending}
+        # Everything in EUR: balances at the latest ECB rate, transactions at
+        # the rate on their own date (same rules as the Finances page).
+        import fx
+        async with db.execute("SELECT currency FROM finances_accounts UNION SELECT currency FROM finances_transactions UNION SELECT currency FROM finances_pots") as c:
+            currencies = {r["currency"] for r in await c.fetchall()}
+        async with db.execute("SELECT MIN(date) AS d FROM finances_transactions") as c:
+            oldest = (await c.fetchone())["d"]
+        table = await fx.ensure(db, currencies, since=oldest)
+        missing = set()
+
+        def eur(amount, cur, on=None):
+            try:
+                return table.convert(float(amount or 0), (cur or "EUR").upper(), "EUR", on)
+            except fx.NoRate:
+                missing.add(cur)
+                return 0.0
+
+        async with db.execute("SELECT type, balance, currency FROM finances_accounts") as c:
+            net_worth = sum((-1 if r["type"] == "credit" else 1) * eur(r["balance"], r["currency"]) for r in await c.fetchall())
+        async with db.execute("SELECT d.amount, p.currency FROM finances_deposits d JOIN finances_pots p ON p.id = d.pot_id") as c:
+            total_saved = sum(eur(r["amount"], r["currency"]) for r in await c.fetchall())
+        async with db.execute("SELECT type, amount, currency, date FROM finances_transactions") as c:
+            txns = await c.fetchall()
+        income = sum(eur(t["amount"], t["currency"], t["date"]) for t in txns if t["type"] == "income")
+        spending = sum(eur(t["amount"], t["currency"], t["date"]) for t in txns if t["type"] == "expense")
+        out = {"currency": "EUR", "net_worth": round(net_worth, 2), "total_saved": round(total_saved, 2),
+               "income_all_time": round(income, 2), "spending_all_time": round(spending, 2)}
+        if missing:
+            out["excluded_currencies_without_rates"] = sorted(missing)
+        return out
 
     if name == "list_transactions":
         # Belt and braces: the tool is hidden when disabled, but a client that

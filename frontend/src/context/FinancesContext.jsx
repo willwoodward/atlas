@@ -187,6 +187,10 @@ export function FinancesProvider({ children }) {
       body: JSON.stringify({ source, account_id: accountId, rows, fx_rates: fxRates }),
     })
     const body = await res.json()
+    if (!res.ok) {
+      const detail = Array.isArray(body.detail) ? body.detail[0]?.msg : body.detail
+      throw new Error(detail || `Import failed (${res.status})`)
+    }
     await refetch()
     return body
   }, [call, refetch])

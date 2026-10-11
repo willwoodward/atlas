@@ -13,6 +13,12 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 // ─── Local drafts (per-path saves that haven't been published yet) ────────────
 
 const DRAFTS_KEY = 'atlas:github-drafts:v1'
+// The note that was open, so navigating away and back reopens it.
+const SELECTED_KEY = 'atlas:notes:selected'
+
+function loadSelected() {
+  try { return JSON.parse(localStorage.getItem(SELECTED_KEY) || 'null') } catch { return null }
+}
 
 function loadDrafts() {
   try { return JSON.parse(localStorage.getItem(DRAFTS_KEY) || '{}') } catch { return {} }
@@ -308,6 +314,35 @@ export default function NotesPage() {
       setFileLoading(false)
     }
   }
+
+  // Reopen the previously open note once its source has loaded. Runs once: a
+  // note deleted elsewhere (or a disconnected repo) just leaves nothing open.
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    if (restoredRef.current) return
+    // The user picked something while the repo was still loading — keep it.
+    if (selected) { restoredRef.current = true; return }
+    const saved = loadSelected()
+    if (!saved) { restoredRef.current = true; return }
+    if (saved.type === 'quick') {
+      const note = notes.find(n => n.id === saved.id)
+      if (note) { restoredRef.current = true; selectQuick(note) }
+      else if (notes.length > 0) restoredRef.current = true
+    } else if (saved.type === 'github') {
+      if (!github.connected) { restoredRef.current = true; return }
+      if (github.treeLoading || (github.tree.length === 0 && !github.treeError)) return
+      restoredRef.current = true
+      const onGithub = github.tree.some(f => f.path === saved.path)
+      if (onGithub || backendDraftPaths.has(saved.path)) selectGithub({ path: saved.path, draftOnly: !onGithub })
+    }
+  }, [notes, selected, github.connected, github.tree, github.treeLoading, github.treeError, backendDraftPaths]) // eslint-disable-line
+
+  // Saved only after the restore above has had its chance, or the initial
+  // null would overwrite the note we're about to reopen.
+  useEffect(() => {
+    if (!restoredRef.current) return
+    try { localStorage.setItem(SELECTED_KEY, JSON.stringify(selected)) } catch {}
+  }, [selected])
 
   const handleBodyChange = useCallback((val) => {
     setBody(val)

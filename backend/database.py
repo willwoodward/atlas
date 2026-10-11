@@ -191,6 +191,14 @@ async def init_db():
                 as_of TEXT NOT NULL DEFAULT ''
             );
 
+            -- ECB daily reference rates, "1 EUR = rate CUR" (see fx.py).
+            CREATE TABLE IF NOT EXISTS fx_daily (
+                date TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                rate REAL NOT NULL,
+                PRIMARY KEY (date, currency)
+            );
+
             CREATE TABLE IF NOT EXISTS finances_fx_rates (
                 currency TEXT PRIMARY KEY,
                 rate_to_gbp REAL NOT NULL DEFAULT 1,
@@ -327,6 +335,17 @@ async def init_db():
             "ALTER TABLE finances_transactions ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'",
             "ALTER TABLE finances_transactions ADD COLUMN external_id TEXT",
             "ALTER TABLE finances_accounts ADD COLUMN currency TEXT NOT NULL DEFAULT 'GBP'",
+            # Comma-separated keywords; calendar events whose title contains
+            # one count as time spent on that goal.
+            "ALTER TABLE goals ADD COLUMN tags TEXT NOT NULL DEFAULT ''",
+            # Multi-currency: transactions are stored in their account's
+            # currency; a row converted at import keeps what the bank showed.
+            # Pots and budgets created before this were shown in £, hence the
+            # GBP default for existing rows (new ones are sent explicitly).
+            "ALTER TABLE finances_transactions ADD COLUMN orig_amount REAL",
+            "ALTER TABLE finances_transactions ADD COLUMN orig_currency TEXT",
+            "ALTER TABLE finances_pots ADD COLUMN currency TEXT NOT NULL DEFAULT 'GBP'",
+            "ALTER TABLE finances_budgets ADD COLUMN currency TEXT NOT NULL DEFAULT 'GBP'",
         ]:
             try:
                 await db.execute(stmt)

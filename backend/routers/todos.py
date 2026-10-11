@@ -110,6 +110,15 @@ async def reorder_todo(body: ReorderIn, user=Depends(get_current_user), db=Depen
     return {"ok": True}
 
 
+@router.get("/outcomes")
+async def list_outcomes(user=Depends(get_current_user), db=Depends(get_db)):
+    """Every week with outcomes written, newest first — for the history view."""
+    async with db.execute(
+        "SELECT week_str, text FROM week_outcomes WHERE TRIM(text) != '' ORDER BY week_str DESC"
+    ) as cur:
+        return [dict(r) for r in await cur.fetchall()]
+
+
 @router.get("/outcomes/{week_str}")
 async def get_outcomes(week_str: str, user=Depends(get_current_user), db=Depends(get_db)):
     async with db.execute("SELECT text FROM week_outcomes WHERE week_str = ?", (week_str,)) as cur:

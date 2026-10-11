@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from './AuthContext.jsx'
 import { useRefresh } from './RefreshContext.jsx'
 
@@ -10,7 +10,9 @@ export function NotesProvider({ children }) {
   const { token } = useAuth()
   // Bumped when the assistant mutates data via MCP, forcing a refetch.
   const { tick } = useRefresh()
-  const [notes, setNotes] = useState([])
+  const [rawNotes, setNotes] = useState([])
+  // Most recently edited first. ISO timestamps sort correctly as strings.
+  const notes = useMemo(() => [...rawNotes].sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')), [rawNotes])
 
   const call = useCallback((path, opts = {}) => fetch(`${API}${path}`, {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -18,7 +20,9 @@ export function NotesProvider({ children }) {
   }), [token])
 
   useEffect(() => {
-    call('/api/notes').then(r => r.json()).then(setNotes)
+    // API rows are snake_case; the rest of the app reads updatedAt.
+    call('/api/notes').then(r => r.json()).then(rows =>
+      setNotes(rows.map(r => ({ id: r.id, body: r.body, updatedAt: r.updated_at }))))
   }, [token, tick])
 
   const addNote = useCallback(async () => {
