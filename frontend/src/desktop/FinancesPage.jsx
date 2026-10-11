@@ -350,7 +350,7 @@ function CategoryModal({ txn, onClose }) {
   const [category, setCategory] = useState(txn.category || '')
   const [pattern, setPattern] = useState(suggestPattern(txn.merchant))
   // Defaults on for an uncategorised row: the usual case is "Tesco is groceries".
-  const [applyAll, setApplyAll] = useState(!(txn.category || '').trim())
+  const [applyAll, setApplyAll] = useState(!(txn.category || '').trim() || txn.category_source === 'ai')
   const [busy, setBusy] = useState(false)
 
   // Existing categories, most used first, as one-tap choices.
@@ -358,7 +358,7 @@ function CategoryModal({ txn, onClose }) {
   for (const t of transactions) { const c = (t.category || '').trim(); if (c) counts[c] = (counts[c] || 0) + 1 }
   const known = Object.keys(counts).sort((a, b) => counts[b] - counts[a])
   const p = pattern.trim().toLowerCase()
-  const matches = p ? transactions.filter(t => t.id !== txn.id && !(t.category || '').trim() && (t.merchant || '').toLowerCase().includes(p)).length : 0
+  const matches = p ? transactions.filter(t => t.id !== txn.id && (!(t.category || '').trim() || t.category_source === 'ai') && (t.merchant || '').toLowerCase().includes(p)).length : 0
 
   const save = async (e) => {
     e.preventDefault()
@@ -397,7 +397,7 @@ function CategoryModal({ txn, onClose }) {
           <span>Also categorise other transactions containing{' '}
             <input value={pattern} onChange={e => setPattern(e.target.value)} onClick={e => e.preventDefault()}
               style={{ ...inp, display: 'inline-block', width: 130, padding: '3px 8px', fontSize: 12.5 }} />
-            {' '}— {matches} uncategorised now, and future imports.
+            {' '}— {matches} uncategorised or auto-categorised now, and future imports.
           </span>
         </label>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
@@ -491,7 +491,7 @@ const SOURCES = [
 ]
 
 function ImportModal({ onClose }) {
-  const { accounts, previewImport, commitImport } = useFinances()
+  const { accounts, previewImport, commitImport, classifier } = useFinances()
   const [source, setSource]     = useState(SOURCES[0].id)
   const [accountId, setAccount] = useState(accounts[0]?.id || '')
   const [fileName, setFileName] = useState('')
@@ -541,6 +541,8 @@ function ImportModal({ onClose }) {
       <Modal title="Import complete" onClose={onClose}>
         <div style={{ fontSize: 14, color: 'var(--mid)', lineHeight: 1.6 }}>
           Added <strong style={{ color: 'var(--ink)' }}>{done.inserted}</strong> transaction{done.inserted !== 1 ? 's' : ''}.
+          {done.auto_categorised > 0 && <> Auto-categorised <strong style={{ color: 'var(--ink)' }}>{done.auto_categorised}</strong> (marked ✦ — click one to correct it).</>}
+          {done.auto_error && <div style={{ marginTop: 8, color: '#c15f3c' }}>Couldn't auto-categorise: {done.auto_error}. You can retry from the category charts.</div>}
           {done.skipped > 0 && <> Skipped {done.skipped} already imported.</>}
           {done.balance_updated && (
             <div style={{ marginTop: 8 }}>
@@ -659,7 +661,7 @@ function ImportModal({ onClose }) {
               <GhostBtn type="button" onClick={() => setPreview(null)}>Back</GhostBtn>
               <PrimaryBtn onClick={runCommit} disabled={busy || preview.new_count === 0}
                 style={{ opacity: busy || preview.new_count === 0 ? .5 : 1 }}>
-                {busy ? 'Importing…' : `Import ${preview.new_count}`}
+                {busy ? (classifier.configured ? 'Importing & categorising…' : 'Importing…') : `Import ${preview.new_count}`}
               </PrimaryBtn>
             </div>
           </>
@@ -865,6 +867,9 @@ export default function FinancesPage() {
                       color: t.category ? 'var(--mid)' : '#c15f3c', fontWeight: t.category ? 500 : 600, textDecoration: 'underline', textDecorationColor: 'var(--bd-xl)', textUnderlineOffset: 2 }}>
                     {t.category || '+ Category'}
                   </button>
+                  {t.category_source === 'ai' && (
+                    <span title="Categorised automatically — click the category to correct it" style={{ marginLeft: 3, color: '#b08a3e', cursor: 'help' }}>✦</span>
+                  )}
                   {' · '}{t.date}
                   {t.orig_currency && <> · was {formatMoney(t.orig_amount, t.orig_currency)}</>}
                 </div>

@@ -104,6 +104,17 @@ function AddSubTodoInput({ parentId, onAdd, onCancel }) {
   )
 }
 
+// Where a dragged to-do would land: the list parts to make room for it. The
+// height animates, so the rows slide apart and back together.
+function DropGap({ open, height, color }) {
+  return (
+    <div data-drop-gap={open ? 'open' : undefined}
+      style={{ height: open ? height : 0, transition: 'height .16s ease', overflow: 'hidden', position: 'relative' }}>
+      <div style={{ position: 'absolute', inset: '4px 0', borderRadius: 10, border: `1.5px dashed ${color}`, background: 'var(--surface-2)', opacity: .9 }} />
+    </div>
+  )
+}
+
 function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddSub, dragState, onGripDown, onTouchHold, openSignal = 0 }) {
   const [adding, setAdding] = useState(false)
   // Bumped by the header "+ Add to-do" (Today only). A counter rather than a
@@ -118,21 +129,23 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddS
   const activeTodos = todos.filter(t => t.bucket === bucket.key && !t.parentId && staysHere(t))
   const openCount   = activeTodos.filter(t => !t.done).length
 
-  const { dragId, dropTarget } = dragState
+  const { dragId, dropTarget, gapH } = dragState
+  const gapHere = (beforeId) => !!dragId && dropTarget?.bucketKey === bucket.key && dropTarget.beforeId === beforeId
   const isTarget = !!dragId && dropTarget?.bucketKey === bucket.key && dropTarget?.bucketKey !== todos.find(t => t.id === dragId)?.bucket
 
   const renderTodo = (t, idx) => {
     const isDragging  = dragId === t.id
-    const isDropAbove = dropTarget?.todoId === t.id && dropTarget?.above
-    const isDropBelow = dropTarget?.todoId === t.id && !dropTarget?.above
     const subTodos    = todos.filter(s => s.parentId === t.id)
     const hasChildren = subTodos.length > 0
     const isExpanded  = !!expanded[t.id]
 
     return (
       <div key={t.id}>
-        {isDropAbove && <div style={{ height: 2, borderRadius: 2, background: bucket.color, margin: '2px 0' }} />}
+        <DropGap open={gapHere(t.id)} height={gapH} color={bucket.color} />
 
+        {/* The dragged to-do folds away (kept in the DOM so touch events keep
+            arriving) and the gap shows where it will go instead. */}
+        <div style={isDragging ? { height: 0, overflow: 'hidden' } : undefined}>
         <div
           data-todo-id={t.id}
           data-bucket-key={bucket.key}
@@ -141,7 +154,6 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddS
           style={{
             display: 'flex', alignItems: 'flex-start', gap: 9,
             padding: '10px 0', borderTop: idx === 0 ? 'none' : '1px solid var(--bd-xs)',
-            opacity: isDragging ? 0.3 : 1, transition: 'opacity .1s',
             pointerEvents: isDragging ? 'none' : 'auto',
             // Long-press is "pick up", not "select text" / the iOS callout
             userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none',
@@ -217,7 +229,7 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddS
           </button>
         )}
 
-        {isDropBelow && <div style={{ height: 2, borderRadius: 2, background: bucket.color, margin: '2px 0' }} />}
+        </div>
       </div>
     )
   }
@@ -225,6 +237,7 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddS
   return (
     <div
       data-bucket-key={bucket.key}
+      data-bucket-section={bucket.key}
       style={{ background: 'var(--surface)', border: `1px solid ${isTarget ? bucket.color : 'var(--bd)'}`, borderRadius: 16, padding: '18px 20px', transition: 'border-color .1s' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, paddingBottom: 11, borderBottom: '1px solid var(--bd-sm)' }}>
@@ -233,11 +246,14 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddS
         <span style={{ fontSize: 12, color: 'var(--muted)' }}>{activeTodos.length === 0 ? '—' : openCount > 0 ? `${openCount} left` : 'all done'}</span>
       </div>
 
-      {activeTodos.length === 0 && !adding && (
+      {activeTodos.length === 0 && !adding && !gapHere(null) && (
         <div style={{ padding: '14px 0 6px', fontSize: 13, color: 'var(--faint)' }}>Nothing here yet.</div>
       )}
 
-      {activeTodos.map((t, idx) => renderTodo(t, idx))}
+      {/* Divider index skips the to-do being dragged (it's folded away), so the
+          first visible row never shows a stray top border. */}
+      {activeTodos.map((t, idx) => renderTodo(t, idx - (dragId && activeTodos.slice(0, idx).some(x => x.id === dragId) ? 1 : 0)))}
+      <DropGap open={gapHere(null)} height={gapH} color={bucket.color} />
 
       {adding
         ? <AddTodoRow key={openSignal} bucket={bucket.key} onAdd={onAdd} onCancel={() => setAdding(false)} />
@@ -360,24 +376,50 @@ export default function TodoPage() {
   const dragRef = useRef(null)
 
   // ─── Drag engine (shared by mouse and touch) ──────────────────────────────
+  // The drop target is { bucketKey, beforeId } — beforeId null means the end
+  // of that list. It's worked out from where rows would sit with the gap
+  // closed, so the gap opening (and pushing rows down) can't move the target
+  // and set off a flicker loop.
+  const [gapH, setGapH] = useState(44)
+  const SETTLE_MS = 70
+
+  const rowsIn = (section, exceptId) =>
+    [...section.querySelectorAll('[data-todo-id]')].filter(el => el.dataset.todoId !== exceptId)
+
   const hitTest = (x, y, id) => {
-    for (const el of document.elementsFromPoint(x, y)) {
-      if (el.dataset.todoId && el.dataset.todoId !== id) {
-        const rect = el.getBoundingClientRect()
-        return { todoId: el.dataset.todoId, above: y < rect.top + rect.height / 2, bucketKey: el.dataset.bucketKey }
-      }
-      if (el.dataset.bucketKey) return { bucketKey: el.dataset.bucketKey }
-    }
-    return null
+    const section = document.elementsFromPoint(x, y).map(el => el.closest?.('[data-bucket-section]')).find(Boolean)
+    if (!section) return null // between lists: keep the current target
+    const gap = section.querySelector('[data-drop-gap="open"]')
+    const g = gap?.getBoundingClientRect()
+    const before = rowsIn(section, id).find(el => {
+      const rect = el.getBoundingClientRect()
+      const shift = g && rect.top >= g.top ? g.height : 0
+      return y < rect.top - shift + rect.height / 2
+    })
+    return { bucketKey: section.dataset.bucketSection, beforeId: before?.dataset.todoId ?? null }
+  }
+
+  const applyTarget = (d, t) => {
+    d.dropTarget = t
+    d.targetKey = `${t.bucketKey}|${t.beforeId}`
+    setDropTarget(t)
   }
 
   const updateDrag = (x, y) => {
     const d = dragRef.current
     if (!d?.active) return
     d.x = x; d.y = y
-    d.dropTarget = hitTest(x, y, d.id)
-    setDropTarget(d.dropTarget)
     setGhost(g => g && { ...g, top: y - d.offsetY, left: x - d.offsetX })
+    const t = hitTest(x, y, d.id)
+    if (!t) return
+    const key = `${t.bucketKey}|${t.beforeId}`
+    if (key === d.targetKey) { clearTimeout(d.settle); d.pendingKey = null; return }
+    if (key === d.pendingKey) return
+    // A new spot must hold briefly before the gap moves there, so hovering
+    // right on a boundary doesn't make the list jitter.
+    d.pendingKey = key
+    clearTimeout(d.settle)
+    d.settle = setTimeout(() => { if (dragRef.current === d) { d.pendingKey = null; applyTarget(d, t) } }, SETTLE_MS)
   }
 
   // Scroll the list when the drag nears the top/bottom edge of its scroller.
@@ -397,6 +439,13 @@ export default function TodoPage() {
     const d = dragRef.current
     const row = d.row.getBoundingClientRect()
     d.active = true
+    // Start with the gap exactly where the to-do was, so nothing jumps.
+    const section = d.row.closest('[data-bucket-section]')
+    const all = rowsIn(section, null)
+    const next = all[all.indexOf(d.row) + 1]
+    d.origin = `${section.dataset.bucketSection}|${next?.dataset.todoId ?? null}`
+    setGapH(row.height)
+    applyTarget(d, { bucketKey: section.dataset.bucketSection, beforeId: next?.dataset.todoId ?? null })
     d.offsetY = d.y - row.top
     d.offsetX = d.x - row.left
     let sc = d.row.parentElement
@@ -413,11 +462,18 @@ export default function TodoPage() {
     dragRef.current = null
     if (!d) return
     clearTimeout(d.holdTimer)
+    clearTimeout(d.settle)
     cancelAnimationFrame(d.raf)
     d.cleanup?.()
-    if (commit && d.active && d.dropTarget) {
-      const dt = d.dropTarget
-      reorderTodo(d.id, dt.todoId ?? null, dt.todoId ? dt.above : false, dt.bucketKey)
+    if (commit && d.active && d.dropTarget && d.targetKey !== d.origin) {
+      const { bucketKey, beforeId } = d.dropTarget
+      if (beforeId) reorderTodo(d.id, beforeId, true, bucketKey)
+      else {
+        // End of the list: after its last row, or into an empty list.
+        const section = document.querySelector(`[data-bucket-section="${bucketKey}"]`)
+        const last = section && rowsIn(section, d.id).at(-1)
+        reorderTodo(d.id, last?.dataset.todoId ?? null, false, bucketKey)
+      }
     }
     setDragId(null); setDropTarget(null); setGhost(null)
   }
@@ -504,7 +560,7 @@ export default function TodoPage() {
             onRemove={removeTodo}
             onAdd={addTodo}
             onAddSub={addSubTodo}
-            dragState={{ dragId, dropTarget }}
+            dragState={{ dragId, dropTarget, gapH }}
             onGripDown={handleGripDown}
             onTouchHold={handleTouchStart}
             openSignal={b.key === 'today' ? todaySignal : 0}

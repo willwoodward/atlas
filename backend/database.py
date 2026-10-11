@@ -349,6 +349,10 @@ async def init_db():
             # Date the balance is correct as of: set from a statement's closing
             # balance or a manual edit, so an older statement can't overwrite it.
             "ALTER TABLE finances_accounts ADD COLUMN balance_as_of TEXT",
+            # Who set the category: 'rule' (an import rule), 'ai' (auto-
+            # categorised, a guess) or 'manual' (you). Rules and edits replace
+            # AI guesses; nothing replaces a manual choice.
+            "ALTER TABLE finances_transactions ADD COLUMN category_source TEXT NOT NULL DEFAULT ''",
         ]:
             try:
                 await db.execute(stmt)

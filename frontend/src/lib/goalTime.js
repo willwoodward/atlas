@@ -78,12 +78,18 @@ export const fmtHours = h => {
   return `${Math.round(h * 10) / 10}h`.replace('.0h', 'h')
 }
 
-// Props for a calendar event block that belongs to a goal: the shine class and
-// a stable per-event delay (so events shine at different moments, and the same
-// event keeps its rhythm across re-renders).
-export function goalShine(ev, goals) {
-  if (!ev || ev.isBedtime || ev.isSleepWakeUp || !goalForEvent(ev.title, goals)) return {}
-  let h = 0
-  for (const c of String(ev.id ?? ev.title)) h = (h * 31 + c.charCodeAt(0)) >>> 0
-  return { className: 'goal-shine', shineDelay: `${(h % 90) / 10}s` }
+// The goal shine runs as a wave: goal events light up one after another in
+// date/time order, then the whole wave repeats every SHINE_CYCLE seconds.
+export const SHINE_CYCLE = 9
+
+const shines = (ev, goals) => ev && !ev.isBedtime && !ev.isSleepWakeUp && !!goalForEvent(ev.title, goals)
+
+// Map(event → { className, shineDelay }) for the events on screen that belong
+// to a goal. Gaps shrink when there are many, so the wave always finishes
+// well inside one cycle.
+export function shineWave(events, goals) {
+  const lit = events.filter(ev => shines(ev, goals))
+    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.start - b.start)
+  const step = Math.min(0.35, 5 / Math.max(lit.length, 1))
+  return new Map(lit.map((ev, i) => [ev, { className: 'goal-shine', shineDelay: `${(i * step).toFixed(2)}s` }]))
 }

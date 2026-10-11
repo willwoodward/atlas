@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { layoutOverlaps, isTimed, eventBox, floorToSlot, SLOT } from '../lib/calendarLayout.js'
 import EventLabel from './EventLabel.jsx'
 import { useGoals } from '../context/GoalsContext.jsx'
-import { goalShine } from '../lib/goalTime.js'
+import { shineWave } from '../lib/goalTime.js'
+import { useShineSync } from '../hooks/useShineSync.js'
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
 const LABEL_W = 46
@@ -18,6 +19,7 @@ const hourLabel = h => h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 P
 export default function DaySchedule({ dateStr, events, isToday, isPast, onEventClick, onSlotClick, hourHeight = 64, style }) {
   const scrollRef = useRef(null)
   const { goals } = useGoals()
+  useShineSync()
   const [now, setNow] = useState(nowHours)
 
   useEffect(() => {
@@ -29,6 +31,7 @@ export default function DaySchedule({ dateStr, events, isToday, isPast, onEventC
   const allDay = events.filter(ev => ev.isAllDay)
   const timed = events.filter(isTimed)
   const layout = layoutOverlaps(timed, SLOT)
+  const wave = shineWave(timed, goals)
 
   // Initial position per day shown — not on every minute tick.
   useEffect(() => {
@@ -80,7 +83,7 @@ export default function DaySchedule({ dateStr, events, isToday, isPast, onEventC
               const { top, height, compact } = eventBox(ev, hourHeight)
               const { left, width } = layout.get(ev)
               const isSleep = ev.isBedtime
-              const shine = goalShine(ev, goals)
+              const shine = wave.get(ev) || {}
               return (
                 <div key={`${ev.id || i}`} data-event="true" className={shine.className}
                   onClick={() => onEventClick?.(ev)}

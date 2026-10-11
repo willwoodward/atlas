@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { weekKey, shiftWeek, formatWeekRange, staysInBucket, currentWeekTodos, mondayOf } from '../week.js'
-import { goalTime, goalForEvent } from '../goalTime.js'
+import { goalTime, goalForEvent, shineWave } from '../goalTime.js'
 import { layoutOverlaps, eventBox, floorToSlot, SLOT } from '../calendarLayout.js'
 
 // Thursday 8 Oct 2026, 14:30 local
@@ -123,5 +123,26 @@ describe('15-minute blocks', () => {
     expect(floorToSlot(9.2)).toBe(9)
     expect(floorToSlot(9.3)).toBe(9.25)
     expect(floorToSlot(9.99)).toBe(9.75)
+  })
+})
+
+describe('goal shine wave', () => {
+  const goals = [{ id: 'g', title: 'Body', tags: 'gym, *run' }]
+  const ev = (title, date, start, extra = {}) => ({ title, date, start, dur: 1, ...extra })
+  it('lights goal events one after another in date/time order', () => {
+    const evs = [ev('Gym', '2026-10-07', 18), ev('Standup', '2026-10-06', 9), ev('Long run', '2026-10-06', 7), ev('Gym', '2026-10-06', 12)]
+    const wave = shineWave(evs, goals)
+    const order = [...wave].sort((a, b) => parseFloat(a[1].shineDelay) - parseFloat(b[1].shineDelay)).map(([e]) => `${e.date} ${e.start}`)
+    expect(order).toEqual(['2026-10-06 7', '2026-10-06 12', '2026-10-07 18'])
+    expect(wave.has(evs[1])).toBe(false) // Standup isn't a goal event
+    expect([...wave.values()].map(v => v.shineDelay)).toContain('0.00s')
+  })
+  it('tightens the gaps when there are many, so the wave fits in one cycle', () => {
+    const many = Array.from({ length: 40 }, (_, i) => ev('Gym', '2026-10-06', i / 2))
+    const delays = [...shineWave(many, goals).values()].map(v => parseFloat(v.shineDelay))
+    expect(Math.max(...delays)).toBeLessThan(5)
+  })
+  it('never shines sleep blocks', () => {
+    expect(shineWave([ev('Gym', '2026-10-06', 1, { isBedtime: true })], goals).size).toBe(0)
   })
 })

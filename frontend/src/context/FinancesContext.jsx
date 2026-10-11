@@ -132,7 +132,7 @@ export function FinancesProvider({ children }) {
   }, [call, data.accounts, displayCurrency, refreshInsights])
 
   const setTransactionCategory = useCallback(async (id, category) => {
-    setData(d => ({ ...d, transactions: d.transactions.map(t => t.id === id ? { ...t, category } : t) }))
+    setData(d => ({ ...d, transactions: d.transactions.map(t => t.id === id ? { ...t, category, category_source: 'manual' } : t) }))
     await call(`/api/finances/transactions/${id}`, { method: 'PATCH', body: JSON.stringify({ category }) })
     refreshInsights()
   }, [call, refreshInsights])
@@ -177,12 +177,29 @@ export function FinancesProvider({ children }) {
   // too) and applies it to existing uncategorised transactions now.
   const categoriseMatching = useCallback(async (pattern, category) => {
     const p = pattern.trim().toLowerCase()
+    // Same rule as the server: fills blanks and replaces AI guesses, never yours.
     setData(d => ({ ...d, transactions: d.transactions.map(t =>
-      !(t.category || '').trim() && (t.merchant || '').toLowerCase().includes(p) ? { ...t, category } : t) }))
+      (!(t.category || '').trim() || t.category_source === 'ai') && (t.merchant || '').toLowerCase().includes(p)
+        ? { ...t, category, category_source: 'rule' } : t) }))
     await call('/api/finances/rules', { method: 'POST', body: JSON.stringify({ id: uid(), pattern: p, category }) })
     const res = await call('/api/finances/rules/apply', { method: 'POST', body: JSON.stringify({ pattern: p, category }) })
     await refetch()
     return res.ok ? (await res.json()).updated : 0
+  }, [call, refetch])
+
+  // ─── Auto-categorising (OpenAI model on the server) ────────────────────────
+  const [classifier, setClassifier] = useState({ configured: false, model: '' })
+  useEffect(() => {
+    if (!token) return
+    call('/api/finances/classify/status').then(r => r.ok ? r.json() : null).then(s => s && setClassifier(s)).catch(() => {})
+  }, [token]) // eslint-disable-line
+
+  const autoCategorise = useCallback(async () => {
+    const res = await call('/api/finances/classify', { method: 'POST' })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.detail || 'Auto-categorising failed')
+    await refetch()
+    return body.categorised
   }, [call, refetch])
 
   // ─── Budgets ───────────────────────────────────────────────────────────────
@@ -308,6 +325,7 @@ export function FinancesProvider({ children }) {
       addSubGoal, removeSubGoal,
       addDeposit, removeDeposit,
       addTransaction, removeTransaction, setTransactionCategory, categoriseMatching,
+      classifier, autoCategorise,
       addAccount, updateAccount, removeAccount,
     }}>
       {children}

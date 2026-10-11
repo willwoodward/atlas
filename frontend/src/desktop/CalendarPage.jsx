@@ -8,7 +8,8 @@ import { mondayOf, parseLocalDate, addDays } from '../lib/week.js'
 import { useCalendarEvents, fmtH } from '../hooks/useCalendarEvents.js'
 import DaySchedule from '../components/DaySchedule.jsx'
 import { useGoals } from '../context/GoalsContext.jsx'
-import { goalShine } from '../lib/goalTime.js'
+import { shineWave } from '../lib/goalTime.js'
+import { useShineSync } from '../hooks/useShineSync.js'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { useQuickAdd } from '../context/QuickAddContext.jsx'
 
@@ -179,6 +180,7 @@ export default function CalendarPage() {
   const { addEvent, removeEvent } = useLocalCalendar()
   const allEvents = useCalendarEvents()
   const { goals } = useGoals()
+  useShineSync()
   const [weekOffset, setWeekOffset] = useState(0)
   const [selectedEvent, setSelectedEvent] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -272,6 +274,8 @@ export default function CalendarPage() {
   })
 
   const dayLabel = parseLocalDate(selDay).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
+  // One wave across the whole visible week, in date/time order.
+  const wave = shineWave(weekDays.flatMap(d => d.events.filter(ev => !ev.isAllDay && ev.start >= DAY_START && ev.start < 24)), goals)
   const weekLabel = `${weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })} – ${weekEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`
   const defaultAddDate = isMobile ? selDay : weekDays.find(d => d.today)?.dateStr ?? localDateStr(weekStart)
 
@@ -390,7 +394,7 @@ export default function CalendarPage() {
                   return timed.map((ev, i) => {
                     const { top, height, compact } = eventBox({ ...ev, start: ev.start - DAY_START }, HOUR_H)
                     const { left, width } = layout.get(ev)
-                    const shine = goalShine(ev, goals)
+                    const shine = wave.get(ev) || {}
                     return (
                       <div key={ev.id || i} data-event="true" className={shine.className}
                         onClick={e => { e.stopPropagation(); setSelectedEvent(ev) }}

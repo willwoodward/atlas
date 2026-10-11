@@ -8,6 +8,7 @@ from auth import get_current_user
 from database import get_db
 import finance_import
 import finance_insights
+import finance_classify
 import fx
 
 router = APIRouter(prefix="/api/finances", tags=["finances"])
@@ -89,6 +90,8 @@ class ImportCommitIn(BaseModel):
     rows: list[ImportRowIn]
     # From the preview: the statement's balance after its newest row.
     closing_balance: Optional[ClosingBalanceIn] = None
+    # Send what rules didn't categorise to the model (if one is configured).
+    auto_categorise: bool = True
     fx_rates: dict[str, float] = {}  # ignored: rates now come from the ECB (fx.py)
 
 
@@ -203,10 +206,11 @@ async def remove_deposit(pot_id: str, dep_id: str, user=Depends(get_current_user
 async def add_transaction(body: TransactionIn, user=Depends(get_current_user), db=Depends(get_db)):
     await db.execute(
         "INSERT INTO finances_transactions "
-        "(id, merchant, category, amount, date, type, account_id, currency, fx_rate, source, external_id) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "(id, merchant, category, amount, date, type, account_id, currency, fx_rate, source, external_id, category_source) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (body.id, body.merchant, body.category, body.amount, body.date, body.type,
-         body.account_id, body.currency.upper(), body.fx_rate, body.source, body.external_id),
+         body.account_id, body.currency.upper(), body.fx_rate, body.source, body.external_id,
+         "manual" if body.category.strip() else ""),
     )
     await db.commit()
     return {"ok": True}
@@ -219,7 +223,7 @@ class TransactionUpdate(BaseModel):
 @router.patch("/transactions/{txn_id}")
 async def update_transaction(txn_id: str, body: TransactionUpdate, user=Depends(get_current_user), db=Depends(get_db)):
     if body.category is not None:
-        await db.execute("UPDATE finances_transactions SET category = ? WHERE id = ?",
+        await db.execute("UPDATE finances_transactions SET category = ?, category_source = 'manual' WHERE id = ?",
                          (body.category.strip(), txn_id))
     await db.commit()
     return {"ok": True}
@@ -228,8 +232,8 @@ async def update_transaction(txn_id: str, body: TransactionUpdate, user=Depends(
 class ApplyRuleIn(BaseModel):
     pattern: str
     category: str
-    # False: only fill in uncategorised rows, so a rule never silently undoes a
-    # category you chose by hand. True: recategorise every match.
+    # False: fill in uncategorised rows and replace AI guesses, but never undo
+    # a category you chose by hand. True: recategorise every match.
     overwrite: bool = False
 
 
@@ -242,8 +246,8 @@ async def apply_rule(body: ApplyRuleIn, user=Depends(get_current_user), db=Depen
         raise HTTPException(400, "Pattern is empty")
     where = "INSTR(LOWER(merchant), ?) > 0"
     if not body.overwrite:
-        where += " AND TRIM(COALESCE(category, '')) = ''"
-    cur = await db.execute(f"UPDATE finances_transactions SET category = ? WHERE {where}",
+        where += " AND (TRIM(COALESCE(category, '')) = '' OR category_source = 'ai')"
+    cur = await db.execute(f"UPDATE finances_transactions SET category = ?, category_source = 'rule' WHERE {where}",
                            (body.category.strip(), pattern))
     await db.commit()
     return {"updated": cur.rowcount}
@@ -320,6 +324,53 @@ async def remove_rule(rule_id: str, user=Depends(get_current_user), db=Depends(g
 @router.get("/import/sources")
 async def import_sources(user=Depends(get_current_user)):
     return [{"id": k, "label": v[0]} for k, v in finance_import.PROFILES.items()]
+
+
+async def _auto_categorise(db, ids: Optional[list[str]] = None) -> int:
+    """Ask the model to categorise uncategorised transactions (all of them, or
+    just `ids`). Returns how many got a category."""
+    sql = "SELECT id, merchant, type FROM finances_transactions WHERE TRIM(COALESCE(category, '')) = ''"
+    rows: list[dict] = []
+    # Chunked: SQLite caps the number of ? per statement.
+    for chunk in ([None] if ids is None else [ids[i:i + 400] for i in range(0, len(ids), 400)]):
+        q, params = (sql, []) if chunk is None else (sql + f" AND id IN ({','.join('?' * len(chunk))})", chunk)
+        async with db.execute(q, params) as cur:
+            rows += [dict(r) for r in await cur.fetchall()]
+    if not rows:
+        return 0
+    async with db.execute(
+        "SELECT category, COUNT(*) AS n FROM finances_transactions WHERE TRIM(COALESCE(category, '')) != '' "
+        "GROUP BY category ORDER BY n DESC"
+    ) as cur:
+        existing = [r["category"] for r in await cur.fetchall()]
+
+    key = lambda r: (r["merchant"], "in" if r["type"] == "income" else "out")
+    answers = await finance_classify.classify([key(r) for r in rows], finance_classify.category_list(existing))
+    updates = [(answers[key(r)], r["id"]) for r in rows if answers.get(key(r))]
+    if updates:
+        # Re-checks blank so a category set while the model was thinking wins.
+        await db.executemany(
+            "UPDATE finances_transactions SET category = ?, category_source = 'ai' "
+            "WHERE id = ? AND TRIM(COALESCE(category, '')) = ''", updates)
+        await db.commit()
+    return len(updates)
+
+
+@router.get("/classify/status")
+async def classify_status(user=Depends(get_current_user)):
+    return {"configured": finance_classify.configured(), "model": finance_classify.model_id()}
+
+
+@router.post("/classify")
+async def classify_uncategorised(user=Depends(get_current_user), db=Depends(get_db)):
+    """Auto-categorise every uncategorised transaction (e.g. ones imported
+    before this existed, or after a failed attempt)."""
+    if not finance_classify.configured():
+        raise HTTPException(400, "Auto-categorising needs OPENAI_API_KEY on the server")
+    try:
+        return {"categorised": await _auto_categorise(db)}
+    except finance_classify.ClassifyError as exc:
+        raise HTTPException(502, str(exc))
 
 
 async def _account(db, account_id: str) -> dict:
@@ -428,6 +479,7 @@ async def import_commit(body: ImportCommitIn, user=Depends(get_current_user), db
     account_currency = (account["currency"] or "EUR").upper()
     table = await _ensure_import_rates(db, body.rows, account_currency)
     inserted = skipped = 0
+    new_ids: list[str] = []
     for row in body.rows:
         cur_code = row.currency.upper()
         # Stored in the account's currency; a converted row keeps the original.
@@ -439,14 +491,15 @@ async def import_commit(body: ImportCommitIn, user=Depends(get_current_user), db
         cur = await db.execute(
             "INSERT OR IGNORE INTO finances_transactions "
             "(id, merchant, category, amount, date, type, account_id, currency, fx_rate, source, external_id, "
-            " orig_amount, orig_currency) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (str(uuid.uuid4()), row.merchant, row.category, amount, row.date, row.type,
+            " orig_amount, orig_currency, category_source) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (new_id := str(uuid.uuid4()), row.merchant, row.category, amount, row.date, row.type,
              body.account_id, account_currency, 1.0, body.source, row.external_id,
-             orig_amount, orig_currency),
+             orig_amount, orig_currency, "rule" if row.category.strip() else ""),
         )
         if cur.rowcount:
             inserted += 1
+            new_ids.append(new_id)
         else:
             skipped += 1
     await db.commit()
@@ -456,9 +509,16 @@ async def import_commit(body: ImportCommitIn, user=Depends(get_current_user), db
         await db.execute("UPDATE finances_accounts SET balance = ?, balance_as_of = ? WHERE id = ?",
                          (closing["amount"], closing["date"], body.account_id))
         await db.commit()
+    auto = {"auto_categorised": 0, "auto_error": None}
+    if body.auto_categorise and new_ids and finance_classify.configured():
+        try:
+            auto["auto_categorised"] = await _auto_categorise(db, new_ids)
+        except finance_classify.ClassifyError as exc:
+            # The import itself has succeeded; categorising can be retried.
+            auto["auto_error"] = str(exc)
     return {"inserted": inserted, "skipped": skipped,
             "balance_updated": closing if plan["will_update"] else None,
-            "balance_reason": plan["reason"]}
+            "balance_reason": plan["reason"], **auto}
 
 
 # ── Budgets & insights ────────────────────────────────────────────────────────

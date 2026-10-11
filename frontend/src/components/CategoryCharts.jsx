@@ -42,6 +42,27 @@ function Donut({ data, total, hovered, setHovered, onSelect, fmt }) {
   )
 }
 
+// Sends every uncategorised transaction to the model (server-side).
+function AutoCategoriseButton() {
+  const { classifier, autoCategorise } = useFinances()
+  const [state, setState] = useState(null) // null | 'busy' | { n } | { error }
+  if (!classifier.configured) return null
+  const run = async () => {
+    setState('busy')
+    try { setState({ n: await autoCategorise() }) } catch (e) { setState({ error: e.message }) }
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+      <button onClick={run} disabled={state === 'busy'}
+        style={{ fontSize: 12, fontWeight: 600, color: '#b08a3e', background: 'none', border: 'none', padding: 0, cursor: state === 'busy' ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+        {state === 'busy' ? 'Categorising…' : '✦ Auto-categorise'}
+      </button>
+      {state?.n != null && <span style={{ color: 'var(--muted)' }}>{state.n} done</span>}
+      {state?.error && <span style={{ color: '#c15f3c' }}>{state.error}</span>}
+    </span>
+  )
+}
+
 function Breakdown({ title, type, transactions, range, selected, onSelect }) {
   const { txnValue, fmt } = useFinances()
   const [hovered, setHovered] = useState(null)
@@ -83,10 +104,13 @@ function Breakdown({ title, type, transactions, range, selected, onSelect }) {
               )
             })}
             {uncategorised && (
-              <button onClick={() => select(uncategorised)}
-                style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: '#c15f3c', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}>
-                Categorise the {fmt(uncategorised.total, 0)} uncategorised →
-              </button>
+              <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center' }}>
+                <button onClick={() => select(uncategorised)}
+                  style={{ fontSize: 12, fontWeight: 600, color: '#c15f3c', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  Categorise the {fmt(uncategorised.total, 0)} uncategorised →
+                </button>
+                <AutoCategoriseButton />
+              </div>
             )}
           </div>
         </div>
