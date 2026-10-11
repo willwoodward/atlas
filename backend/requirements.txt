@@ -7,4 +7,8 @@ python-jose[cryptography]==3.3.0
 cryptography>=42,<51
 httpx==0.27.2
 mcp==1.9.0
+# Pinned because nothing else bounds it: fastapi accepts any pydantic 2.x, and
+# pydantic 2.14 removed an internal that mcp 1.9.0 imports, so a fresh install
+# crashed on startup (main.py imports mcp_server). Move with mcp, not alone.
+pydantic==2.13.5
 tzdata==2024.2
