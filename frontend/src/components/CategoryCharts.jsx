@@ -125,13 +125,20 @@ function Breakdown({ title, type, transactions, range, selected, onSelect }) {
 export default function CategoryCharts({ selected, onSelect }) {
   const isMobile = useIsMobile()
   const { transactions } = useFinances()
-  const [period, setPeriod] = useState('month')
+  const [period, setPeriod] = useState('30d')
   const range = periodRange(period)
 
   return (
     <div style={{ ...card, padding: isMobile ? '18px 16px' : '20px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
         <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 19, fontWeight: 600 }}>By category</h2>
+        {/* Six periods don't fit across a phone: a dropdown there, tabs elsewhere. */}
+        {isMobile ? (
+          <select value={period} onChange={e => setPeriod(e.target.value)} aria-label="Period"
+            style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', background: 'var(--surface-2)', border: '1px solid var(--bd)', borderRadius: 10, padding: '6px 10px', fontFamily: 'inherit', cursor: 'pointer' }}>
+            {PERIODS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+          </select>
+        ) : (
         <div role="tablist" aria-label="Period" style={{ display: 'flex', gap: 3, padding: 3, background: 'var(--surface-2)', border: '1px solid var(--bd)', borderRadius: 10, overflowX: 'auto', maxWidth: '100%' }}>
           {PERIODS.map(p => (
             <button key={p.key} role="tab" aria-selected={period === p.key} onClick={() => setPeriod(p.key)}
@@ -142,6 +149,7 @@ export default function CategoryCharts({ selected, onSelect }) {
             </button>
           ))}
         </div>
+        )}
       </div>
       <div style={{ display: 'flex', gap: isMobile ? 28 : 40, flexWrap: 'wrap' }}>
         <Breakdown title="Spending" type="expense" transactions={transactions} range={range} selected={selected} onSelect={s => onSelect({ ...s, range })} />

@@ -13,6 +13,8 @@ describe('periods', () => {
     expect(periodRange('year', now)).toEqual({ from: '2026-01-01', to: '2026-12-31' })
     expect(periodRange('all', now)).toEqual({ from: null, to: null })
     expect(periodRange('month', new Date(2028, 1, 10)).to).toBe('2028-02-29') // leap year
+    expect(periodRange('30d', now)).toEqual({ from: '2025-12-17', to: '2026-01-15' }) // rolls back over the year
+    expect(periodRange('30d', new Date(2026, 2, 1))).toEqual({ from: '2026-01-31', to: '2026-03-01' })
   })
 })
 

@@ -11,6 +11,7 @@ export const OTHER_COLOR = 'var(--cat-other)'
 export const NONE_COLOR = 'var(--cat-none)'
 
 export const PERIODS = [
+  { key: '30d', label: 'Last 30 days' },
   { key: 'month', label: 'This month' },
   { key: 'last-month', label: 'Last month' },
   { key: '3m', label: '3 months' },
@@ -24,6 +25,9 @@ const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0
 export function periodRange(key, now = new Date()) {
   const y = now.getFullYear(), m = now.getMonth()
   switch (key) {
+    // Rolling: today and the 29 days before — same window as the headline
+    // income / spending figures.
+    case '30d': return { from: ymd(new Date(y, m, now.getDate() - 29)), to: ymd(now) }
     case 'month': return { from: ymd(new Date(y, m, 1)), to: ymd(new Date(y, m + 1, 0)) }
     case 'last-month': return { from: ymd(new Date(y, m - 1, 1)), to: ymd(new Date(y, m, 0)) }
     case '3m': return { from: ymd(new Date(y, m - 2, 1)), to: ymd(new Date(y, m + 1, 0)) }
