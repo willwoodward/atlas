@@ -77,10 +77,18 @@ class ImportRowIn(BaseModel):
     category: str = ""
 
 
+class ClosingBalanceIn(BaseModel):
+    amount: float
+    date: str
+    currency: str
+
+
 class ImportCommitIn(BaseModel):
     source: str
     account_id: str
     rows: list[ImportRowIn]
+    # From the preview: the statement's balance after its newest row.
+    closing_balance: Optional[ClosingBalanceIn] = None
     fx_rates: dict[str, float] = {}  # ignored: rates now come from the ECB (fx.py)
 
 
@@ -99,6 +107,8 @@ class AccountUpdate(BaseModel):
     balance: Optional[float] = None
     name: Optional[str] = None
     currency: Optional[str] = None
+    institution: Optional[str] = None
+    type: Optional[str] = None
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -223,7 +233,15 @@ async def add_account(body: AccountIn, user=Depends(get_current_user), db=Depend
 @router.patch("/accounts/{acc_id}")
 async def update_account(acc_id: str, body: AccountUpdate, user=Depends(get_current_user), db=Depends(get_db)):
     if body.balance is not None:
-        await db.execute("UPDATE finances_accounts SET balance = ? WHERE id = ?", (body.balance, acc_id))
+        # A balance typed in by hand is correct as of today.
+        await db.execute("UPDATE finances_accounts SET balance = ?, balance_as_of = ? WHERE id = ?",
+                         (body.balance, date.today().isoformat(), acc_id))
+    if body.institution is not None:
+        await db.execute("UPDATE finances_accounts SET institution = ? WHERE id = ?", (body.institution, acc_id))
+    if body.type is not None:
+        if body.type not in ("checking", "savings", "investment", "credit"):
+            raise HTTPException(400, "Unknown account type")
+        await db.execute("UPDATE finances_accounts SET type = ? WHERE id = ?", (body.type, acc_id))
     if body.name is not None:
         await db.execute("UPDATE finances_accounts SET name = ? WHERE id = ?", (body.name, acc_id))
     if body.currency is not None:
@@ -267,12 +285,31 @@ async def import_sources(user=Depends(get_current_user)):
     return [{"id": k, "label": v[0]} for k, v in finance_import.PROFILES.items()]
 
 
-async def _account_currency(db, account_id: str) -> str:
-    async with db.execute("SELECT currency FROM finances_accounts WHERE id = ?", (account_id,)) as cur:
+async def _account(db, account_id: str) -> dict:
+    async with db.execute("SELECT * FROM finances_accounts WHERE id = ?", (account_id,)) as cur:
         row = await cur.fetchone()
     if not row:
         raise HTTPException(400, "Choose an account to import into")
-    return (row["currency"] or "EUR").upper()
+    return dict(row)
+
+
+async def _account_currency(db, account_id: str) -> str:
+    return ((await _account(db, account_id))["currency"] or "EUR").upper()
+
+
+def _balance_plan(account: dict, closing: Optional[dict]) -> dict:
+    """Whether a statement's closing balance should become the account's balance.
+    Only when it's in the account's currency and no older than what's there —
+    importing last month's statement must not roll the balance back."""
+    if not closing:
+        return {"will_update": False, "reason": "This statement has no running balance."}
+    if closing["currency"].upper() != (account["currency"] or "").upper():
+        return {"will_update": False,
+                "reason": f"The statement is in {closing['currency']} but the account is in {account['currency']}."}
+    as_of = account.get("balance_as_of")
+    if as_of and closing["date"] < as_of:
+        return {"will_update": False, "reason": f"The account's balance is already more recent (as of {as_of})."}
+    return {"will_update": True, "reason": None}
 
 
 async def _ensure_import_rates(db, rows, account_currency: str) -> "fx.FxTable":
@@ -319,7 +356,9 @@ async def import_preview(body: ImportPreviewIn, user=Depends(get_current_user), 
         ) as cur:
             existing.update(r["external_id"] for r in await cur.fetchall())
 
-    account_currency = await _account_currency(db, body.account_id)
+    account = await _account(db, body.account_id)
+    account_currency = (account["currency"] or "EUR").upper()
+    closing = finance_import.closing_balance(parsed)
     foreign = sorted({r.currency for r in parsed if r.currency != account_currency})
     table = await _ensure_import_rates(db, parsed, account_currency)
 
@@ -339,6 +378,8 @@ async def import_preview(body: ImportPreviewIn, user=Depends(get_current_user), 
         "account_currency": account_currency,
         # Currencies that will be converted into the account's currency.
         "currencies": foreign,
+        "closing_balance": closing,
+        "balance_update": _balance_plan(account, closing),
     }
 
 
@@ -346,7 +387,8 @@ async def import_preview(body: ImportPreviewIn, user=Depends(get_current_user), 
 async def import_commit(body: ImportCommitIn, user=Depends(get_current_user), db=Depends(get_db)):
     """Insert the reviewed rows. Duplicates are ignored rather than rejected, so
     re-importing an overlapping date range is safe and needs no user care."""
-    account_currency = await _account_currency(db, body.account_id)
+    account = await _account(db, body.account_id)
+    account_currency = (account["currency"] or "EUR").upper()
     table = await _ensure_import_rates(db, body.rows, account_currency)
     inserted = skipped = 0
     for row in body.rows:
@@ -371,7 +413,15 @@ async def import_commit(body: ImportCommitIn, user=Depends(get_current_user), db
         else:
             skipped += 1
     await db.commit()
-    return {"inserted": inserted, "skipped": skipped}
+    closing = body.closing_balance.model_dump() if body.closing_balance else None
+    plan = _balance_plan(account, closing)
+    if plan["will_update"]:
+        await db.execute("UPDATE finances_accounts SET balance = ?, balance_as_of = ? WHERE id = ?",
+                         (closing["amount"], closing["date"], body.account_id))
+        await db.commit()
+    return {"inserted": inserted, "skipped": skipped,
+            "balance_updated": closing if plan["will_update"] else None,
+            "balance_reason": plan["reason"]}
 
 
 # ── Budgets & insights ────────────────────────────────────────────────────────

@@ -33,6 +33,8 @@ class ParsedRow:
     type: str           # income | expense
     category: str = ""
     raw: str = ""       # original description, kept for rule matching / audit
+    balance: Optional[float] = None  # account balance just after this row, if the bank says
+    occurred_at: str = ""            # ISO timestamp where the export has one, for ordering a day
 
 
 # ── Header handling ───────────────────────────────────────────────────────────
@@ -135,6 +137,8 @@ def _parse_wise(rows: list[dict]) -> list[ParsedRow]:
             or "Unknown"
         )
         tw_id = _pick(r, "TransferWise ID", "Wise ID", "ID", "Transaction ID")
+        running = _pick(r, "Running Balance", "Balance")
+        stamp = _pick(r, "Date Time", "Created on") or ""
         # A card refund or partial reversal reuses the original charge's ID,
         # so direction is part of the identity or the refund is dropped as a dupe.
         direction = "in" if amount >= 0 else "out"
@@ -146,8 +150,34 @@ def _parse_wise(rows: list[dict]) -> list[ParsedRow]:
             currency=(_pick(r, "Currency") or "GBP").upper(),
             type="income" if amount >= 0 else "expense",
             raw=desc,
+            balance=_parse_amount(running) if running else None,
+            occurred_at=_parse_timestamp(stamp),
         ))
     return out
+
+
+def _parse_timestamp(value: str) -> str:
+    """Wise's "09-10-2026 18:33:45.251" → "2026-10-09T18:33:45.251". Only
+    used to order rows within a day, so anything unparseable is just empty."""
+    v = (value or "").strip()
+    for fmt in ("%d-%m-%Y %H:%M:%S.%f", "%d-%m-%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(v, fmt).isoformat(timespec="milliseconds")
+        except ValueError:
+            continue
+    return ""
+
+
+def closing_balance(rows: list[ParsedRow]) -> Optional[dict]:
+    """The account balance at the end of the statement: the running balance on
+    its newest row. None when the export has no balances (Barclays) or mixes
+    currencies, since then there's no single balance to speak of."""
+    if not rows or any(r.balance is None for r in rows):
+        return None
+    if len({r.currency for r in rows}) != 1:
+        return None
+    last = max(rows, key=lambda r: (r.date, r.occurred_at))
+    return {"amount": last.balance, "date": last.date, "currency": last.currency}
 
 
 PROFILES = {

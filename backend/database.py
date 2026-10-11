@@ -346,6 +346,9 @@ async def init_db():
             "ALTER TABLE finances_transactions ADD COLUMN orig_currency TEXT",
             "ALTER TABLE finances_pots ADD COLUMN currency TEXT NOT NULL DEFAULT 'GBP'",
             "ALTER TABLE finances_budgets ADD COLUMN currency TEXT NOT NULL DEFAULT 'GBP'",
+            # Date the balance is correct as of: set from a statement's closing
+            # balance or a manual edit, so an older statement can't overwrite it.
+            "ALTER TABLE finances_accounts ADD COLUMN balance_as_of TEXT",
         ]:
             try:
                 await db.execute(stmt)

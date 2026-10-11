@@ -145,7 +145,9 @@ export function FinancesProvider({ children }) {
   }, [call])
 
   const updateAccount = useCallback(async (id, fields) => {
-    setData(d => ({ ...d, accounts: d.accounts.map(a => a.id === id ? { ...a, ...fields } : a) }))
+    // A balance typed in by hand is correct as of today (the server stamps it too).
+    const local = 'balance' in fields ? { ...fields, balance_as_of: today() } : fields
+    setData(d => ({ ...d, accounts: d.accounts.map(a => a.id === id ? { ...a, ...local } : a) }))
     await call(`/api/finances/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(fields) })
   }, [call])
 
@@ -213,10 +215,12 @@ export function FinancesProvider({ children }) {
     return body
   }, [call])
 
-  const commitImport = useCallback(async (source, accountId, rows, fxRates = {}) => {
+  // closingBalance comes from the preview; the server decides whether it
+  // becomes the account's balance (same currency, not older than the current one).
+  const commitImport = useCallback(async (source, accountId, rows, closingBalance = null) => {
     const res = await call('/api/finances/import/commit', {
       method: 'POST',
-      body: JSON.stringify({ source, account_id: accountId, rows, fx_rates: fxRates }),
+      body: JSON.stringify({ source, account_id: accountId, rows, closing_balance: closingBalance }),
     })
     const body = await res.json()
     if (!res.ok) {

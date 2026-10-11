@@ -211,3 +211,68 @@ async def test_rules_are_applied_during_preview(client, auth, accounts):
                                  headers=auth)).json()
     tesco = next(r for r in preview["rows"] if "TESCO" in r["merchant"])
     assert tesco["category"] == "Groceries"
+
+
+# ── Closing balance ───────────────────────────────────────────────────────────
+
+WISE_BAL = """TransferWise ID,Date,Date Time,Amount,Currency,Description,Running Balance,Merchant
+CARD-2,09-10-2026,09-10-2026 18:33:45.251,-11.75,EUR,Card,8070.79,Pret
+CARD-1,09-10-2026,09-10-2026 12:21:44.562,-14.20,EUR,Card,8082.54,Tula
+CARD-0,08-10-2026,08-10-2026 12:20:28.560,-16.00,EUR,Card,8096.74,Sumup
+"""
+
+
+def test_closing_balance_is_the_newest_rows_running_balance():
+    rows = fi.parse_statement(WISE_BAL, "wise_csv", "a")
+    assert fi.closing_balance(rows) == {"amount": 8070.79, "date": "2026-10-09", "currency": "EUR"}
+
+
+def test_no_closing_balance_without_running_balances():
+    assert fi.closing_balance(fi.parse_statement(BARCLAYS, "barclays_csv", "a")) is None
+
+
+async def _import(client, auth, content, account="acc2", source="wise_csv"):
+    body = {"source": source, "account_id": account, "content": content}
+    preview = (await client.post("/api/finances/import/preview", json=body, headers=auth)).json()
+    commit = {"source": source, "account_id": account, "closing_balance": preview["closing_balance"],
+              "rows": [r for r in preview["rows"] if not r["duplicate"]]}
+    return preview, (await client.post("/api/finances/import/commit", json=commit, headers=auth)).json()
+
+
+async def _acc(client, auth, id_):
+    return next(a for a in (await client.get("/api/finances", headers=auth)).json()["accounts"] if a["id"] == id_)
+
+
+async def test_import_sets_the_account_balance_from_the_statement(client, auth, accounts):
+    preview, result = await _import(client, auth, WISE_BAL)
+    assert preview["balance_update"]["will_update"] is True
+    assert result["balance_updated"]["amount"] == 8070.79
+    acc = await _acc(client, auth, "acc2")
+    assert (acc["balance"], acc["balance_as_of"]) == (8070.79, "2026-10-09")
+
+
+async def test_an_older_statement_does_not_roll_the_balance_back(client, auth, accounts):
+    await _import(client, auth, WISE_BAL)
+    older = "TransferWise ID,Date,Date Time,Amount,Currency,Description,Running Balance,Merchant\nCARD-9,01-09-2026,01-09-2026 10:00:00.000,-5.00,EUR,Card,7000.00,Shop\n"
+    preview, result = await _import(client, auth, older)
+    assert preview["balance_update"]["will_update"] is False
+    assert result["balance_updated"] is None
+    assert (await _acc(client, auth, "acc2"))["balance"] == 8070.79
+
+
+async def test_balance_in_another_currency_is_not_applied(client, auth, accounts):
+    preview, result = await _import(client, auth, WISE_BAL, account="acc1")  # GBP account
+    assert preview["balance_update"]["will_update"] is False
+    assert "EUR" in preview["balance_update"]["reason"]
+    assert (await _acc(client, auth, "acc1"))["balance"] == 0
+
+
+async def test_editing_an_account_stamps_the_balance_date(client, auth, accounts):
+    resp = await client.patch("/api/finances/accounts/acc2", headers=auth,
+                              json={"name": "Wise EUR", "institution": "Wise", "type": "savings", "balance": 100})
+    assert resp.status_code == 200
+    acc = await _acc(client, auth, "acc2")
+    assert (acc["name"], acc["institution"], acc["type"], acc["balance"]) == ("Wise EUR", "Wise", "savings", 100)
+    assert acc["balance_as_of"]  # today
+    bad = await client.patch("/api/finances/accounts/acc2", headers=auth, json={"type": "bogus"})
+    assert bad.status_code == 400

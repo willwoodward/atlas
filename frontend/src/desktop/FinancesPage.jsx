@@ -10,6 +10,14 @@ import { formatMoney, currencySymbol, DISPLAY_CURRENCIES } from '../lib/fx.js'
 const PAL = ['#6f8168','#c15f3c','#5f7591','#b08a3e','#9a6d84','#c88a5f']
 
 const ACCOUNT_CURRENCIES = ['EUR', 'GBP', 'USD']
+const ACCOUNT_TYPES = [
+  { value: 'checking', label: 'Current / Checking' },
+  { value: 'savings', label: 'Savings' },
+  { value: 'investment', label: 'Investments' },
+  { value: 'credit', label: 'Credit card' },
+]
+const TXN_PAGE = 10
+const fmtDate = (iso) => iso ? new Date(iso + 'T12:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : ''
 const localToday = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 
 // EUR | GBP switch for everything on the page (and the net worth on Home).
@@ -333,6 +341,75 @@ function AddAccountModal({ onClose }) {
   )
 }
 
+// ─── Edit Account Modal ───────────────────────────────────────────────────────
+
+function EditAccountModal({ account, onClose }) {
+  const { updateAccount, removeAccount, transactions } = useFinances()
+  const [name, setName] = useState(account.name)
+  const [inst, setInst] = useState(account.institution || '')
+  const [type, setType] = useState(account.type)
+  const [currency, setCurrency] = useState(account.currency)
+  const [bal, setBal] = useState(String(account.balance ?? 0))
+  const txnCount = transactions.filter(t => t.account_id === account.id).length
+
+  const submit = (e) => {
+    e.preventDefault()
+    if (!name.trim()) return
+    const changes = {}
+    if (name.trim() !== account.name) changes.name = name.trim()
+    if (inst.trim() !== (account.institution || '')) changes.institution = inst.trim()
+    if (type !== account.type) changes.type = type
+    if (currency !== account.currency) changes.currency = currency
+    if (Number(bal) !== Number(account.balance)) changes.balance = Number(bal) || 0
+    if (Object.keys(changes).length) updateAccount(account.id, changes)
+    onClose()
+  }
+
+  return (
+    <Modal title="Edit account" onClose={onClose}>
+      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <Field label="Account name"><input autoFocus value={name} onChange={e => setName(e.target.value)} style={inp} /></Field>
+        <Field label="Institution"><input value={inst} onChange={e => setInst(e.target.value)} placeholder="e.g. Wise" style={inp} /></Field>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 150px' }}>
+            <Field label="Type">
+              <select value={type} onChange={e => setType(e.target.value)} style={sel}>
+                {ACCOUNT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div style={{ flex: '1 1 100px' }}>
+            <Field label="Currency">
+              <select value={currency} onChange={e => setCurrency(e.target.value)} style={sel}>
+                {ACCOUNT_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </Field>
+          </div>
+        </div>
+        {currency !== account.currency && txnCount > 0 && (
+          <div style={{ fontSize: 12, color: '#b08a3e', lineHeight: 1.5 }}>
+            The {txnCount} transaction{txnCount !== 1 ? 's' : ''} already in this account keep the currency they were recorded in.
+          </div>
+        )}
+        <Field label={`Current balance (${currencySymbol(currency)})`}>
+          <input type="number" step="0.01" value={bal} onChange={e => setBal(e.target.value)} style={inp} />
+        </Field>
+        {account.balance_as_of && (
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: -6 }}>Balance as of {fmtDate(account.balance_as_of)}. Importing a newer statement updates it.</div>
+        )}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4 }}>
+          <button type="button" onClick={() => { if (window.confirm(`Remove "${account.name}"?`)) { removeAccount(account.id); onClose() } }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#c15f3c', fontSize: 13, fontFamily: 'inherit', padding: 0, marginRight: 'auto' }}>
+            Remove account
+          </button>
+          <GhostBtn type="button" onClick={onClose}>Cancel</GhostBtn>
+          <PrimaryBtn type="submit">Save</PrimaryBtn>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 // ─── Import statement modal ───────────────────────────────────────────────────
 //
 // Neither Barclays nor Wise exposes a usable read-only API for a UK personal
@@ -383,7 +460,7 @@ function ImportModal({ onClose }) {
     setBusy(true)
     try {
       const fresh = preview.rows.filter(r => !r.duplicate)
-      setDone(await commitImport(source, accountId, fresh))
+      setDone(await commitImport(source, accountId, fresh, preview.closing_balance))
     } catch (e) {
       setError(e.message)
     } finally {
@@ -397,6 +474,11 @@ function ImportModal({ onClose }) {
         <div style={{ fontSize: 14, color: 'var(--mid)', lineHeight: 1.6 }}>
           Added <strong style={{ color: 'var(--ink)' }}>{done.inserted}</strong> transaction{done.inserted !== 1 ? 's' : ''}.
           {done.skipped > 0 && <> Skipped {done.skipped} already imported.</>}
+          {done.balance_updated && (
+            <div style={{ marginTop: 8 }}>
+              Balance updated to <strong style={{ color: 'var(--ink)' }}>{formatMoney(done.balance_updated.amount, done.balance_updated.currency)}</strong>, as of {fmtDate(done.balance_updated.date)}.
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
           <PrimaryBtn onClick={onClose}>Done</PrimaryBtn>
@@ -471,6 +553,15 @@ function ImportModal({ onClose }) {
               <span><strong style={{ color: 'var(--muted)', fontSize: 15 }}>{preview.duplicate_count}</strong> already imported</span>
             </div>
 
+            {preview.closing_balance && (
+              <div style={{ fontSize: 12.5, color: 'var(--mid)', background: 'var(--surface-2)', borderRadius: 9, padding: '10px 12px', lineHeight: 1.55 }}>
+                Closing balance <strong style={{ color: 'var(--ink)' }}>{formatMoney(preview.closing_balance.amount, preview.closing_balance.currency)}</strong> on {fmtDate(preview.closing_balance.date)}.{' '}
+                {preview.balance_update.will_update
+                  ? <>This will become the account's balance.</>
+                  : <>The account's balance won't change: {preview.balance_update.reason}</>}
+              </div>
+            )}
+
             {preview.currencies.length > 0 && (
               <div style={{ fontSize: 12.5, color: 'var(--mid)', background: 'var(--surface-2)', borderRadius: 9, padding: '10px 12px', lineHeight: 1.55 }}>
                 Rows in {preview.currencies.join(', ')} will be stored in {preview.account_currency} (this account's currency),
@@ -518,15 +609,21 @@ const ACC_COLOR = { checking: '#6f8168', savings: '#5f7591', investment: '#b08a3
 
 export default function FinancesPage() {
   const isMobile = useIsMobile()
-  const { pots, accounts, transactions, netWorth, income, spending, totalSaved, fmt, txnValue, displayCurrency, missingRates, updateAccount } = useFinances()
+  const { pots, accounts, transactions, netWorth, income, spending, totalSaved, fmt, txnValue, displayCurrency, missingRates } = useFinances()
   const [showAddPot, setShowAddPot]         = useState(false)
   const [showAddTxn, setShowAddTxn]         = useState(false)
   const [showAddAcc, setShowAddAcc]         = useState(false)
   const [showImport, setShowImport]         = useState(false)
   useQuickAdd('Import', () => setShowImport(true))
   const [activePot, setActivePot]           = useState(null)
+  const [editAccount, setEditAccount]       = useState(null)
+  const [txnPage, setTxnPage]               = useState(0)
 
-  const { removeAccount, removeTransaction } = useFinances()
+  const { removeTransaction } = useFinances()
+  // Clamped, so deleting the last row on the final page, or a smaller ledger
+  // after a refresh, never leaves an empty page showing.
+  const pageCount = Math.max(1, Math.ceil(transactions.length / TXN_PAGE))
+  const page = Math.min(txnPage, pageCount - 1)
 
   return (
     <div>
@@ -632,20 +729,17 @@ export default function FinancesPage() {
               <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 0', borderTop: '1px solid var(--bd-xs)' }}>
                 <span style={{ width: 9, height: 9, borderRadius: 3, background: ACC_COLOR[a.type] || 'var(--muted)', flex: 'none' }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 500 }}>{a.name}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    {a.institution ? `${a.institution} · ` : ''}{a.type} ·
-                    {/* The account's own currency — what its transactions are recorded in */}
-                    <select value={a.currency} onChange={e => updateAccount(a.id, { currency: e.target.value })}
-                      aria-label={`${a.name} currency`}
-                      style={{ border: 'none', background: 'transparent', color: 'var(--muted)', fontSize: 11.5, fontFamily: 'inherit', padding: 0, cursor: 'pointer' }}>
-                      {ACCOUNT_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
+                  <button onClick={() => setEditAccount(a)} title="Edit account"
+                    style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', textDecoration: 'underline', textDecorationColor: 'var(--bd-xl)', textUnderlineOffset: 3 }}>
+                    {a.name}
+                  </button>
+                  <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+                    {a.institution ? `${a.institution} · ` : ''}{ACCOUNT_TYPES.find(t => t.value === a.type)?.label || a.type} · {a.currency}
+                    {a.balance_as_of && <> · as of {fmtDate(a.balance_as_of)}</>}
                   </div>
                 </div>
                 <Money amount={a.balance} currency={a.currency} converted={a.balanceDisplay} sign={a.type === 'credit' ? '−' : ''}
                   style={{ fontFamily: "'Newsreader', serif", fontSize: 15, fontWeight: 600, color: a.type === 'credit' ? '#c15f3c' : 'var(--ink)' }} />
-                <button onClick={() => window.confirm(`Remove "${a.name}"?`) && removeAccount(a.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>×</button>
               </div>
             ))}
           </div>
@@ -661,7 +755,7 @@ export default function FinancesPage() {
             </div>
           </div>
           {transactions.length === 0 && <div style={{ padding: '24px 0', fontSize: 13, color: 'var(--faint)', textAlign: 'center' }}>No transactions yet</div>}
-          {transactions.map(t => (
+          {transactions.slice(page * TXN_PAGE, (page + 1) * TXN_PAGE).map(t => (
             <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderTop: '1px solid var(--bd-xs)' }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.type === 'income' ? '#6f8168' : '#c15f3c', flex: 'none' }} />
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -676,6 +770,17 @@ export default function FinancesPage() {
               <button onClick={() => removeTransaction(t.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>×</button>
             </div>
           ))}
+          {pageCount > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 12, borderTop: '1px solid var(--bd-xs)', fontSize: 12.5, color: 'var(--muted)' }}>
+              <span>{page * TXN_PAGE + 1}–{Math.min((page + 1) * TXN_PAGE, transactions.length)} of {transactions.length}</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <GhostBtn onClick={() => setTxnPage(page - 1)} disabled={page === 0} aria-label="Newer transactions"
+                  style={{ padding: '5px 12px', fontSize: 12.5, opacity: page === 0 ? .4 : 1 }}>‹ Newer</GhostBtn>
+                <GhostBtn onClick={() => setTxnPage(page + 1)} disabled={page >= pageCount - 1} aria-label="Older transactions"
+                  style={{ padding: '5px 12px', fontSize: 12.5, opacity: page >= pageCount - 1 ? .4 : 1 }}>Older ›</GhostBtn>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -692,6 +797,7 @@ export default function FinancesPage() {
       {showAddTxn && <AddTransactionModal onClose={() => setShowAddTxn(false)} />}
       {showAddAcc && <AddAccountModal onClose={() => setShowAddAcc(false)} />}
       {showImport && <ImportModal onClose={() => setShowImport(false)} />}
+      {editAccount && <EditAccountModal account={accounts.find(a => a.id === editAccount.id) || editAccount} onClose={() => setEditAccount(null)} />}
       {activePot  && <PotPanel pot={pots.find(p => p.id === activePot.id) || activePot} onClose={() => setActivePot(null)} />}
     </div>
   )
