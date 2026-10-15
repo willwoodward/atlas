@@ -32,6 +32,10 @@ class ChatRequest(BaseModel):
     # The API's durable run id. Answers to ask_user are routed back by it, so
     # without one the agent can stream but cannot pause to ask anything.
     run_id: str | None = None
+    # The session's snapshot of the assistant's memory and system prompt,
+    # taken by the API when the session started.
+    memory: str | None = Field(None, max_length=50_000)
+    system_prompt: str | None = Field(None, max_length=50_000)
 
 
 class AnswerRequest(BaseModel):
@@ -56,7 +60,8 @@ async def chat(req: ChatRequest, user: dict = Depends(get_current_user)):
 
     async def events():
         try:
-            async for kind, payload in stream_reply(messages, name, run_id=req.run_id):
+            async for kind, payload in stream_reply(messages, name, run_id=req.run_id, memory=req.memory,
+                                                     system_prompt=req.system_prompt):
                 if kind == "progress":
                     # Already a full event dict (research_plan / research_done).
                     yield f"data: {json.dumps(payload)}\n\n"

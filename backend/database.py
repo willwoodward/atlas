@@ -327,11 +327,42 @@ async def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_agent_runs_created ON agent_runs(created_at DESC);
+
+            -- A conversation with the assistant: a run of turns, shared by every
+            -- device. One goes stale after a quiet spell and the next message
+            -- starts a fresh one, but none are deleted — they are the session log.
+            CREATE TABLE IF NOT EXISTS agent_sessions (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                closed INTEGER NOT NULL DEFAULT 0
+            );
+
+            -- The assistant's memory: context it reads at the start of every run
+            -- and may rewrite. Every save is a new version, so any edit — the
+            -- user's or the assistant's — can be undone.
+            CREATE TABLE IF NOT EXISTS assistant_memory (
+                version INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'user'  -- user|assistant|restore
+            );
+            -- (kind column added by migration below: memory|prompt)
         """)
         await db.commit()
 
         # Migrations — add columns that may not exist in older DBs
         for stmt in [
+            "ALTER TABLE agent_runs ADD COLUMN session_id TEXT",
+            "ALTER TABLE agent_runs ADD COLUMN user_message TEXT",
+            "ALTER TABLE agent_runs ADD COLUMN reply TEXT",
+            # assistant_memory holds the system prompt's versions too.
+            "ALTER TABLE assistant_memory ADD COLUMN kind TEXT NOT NULL DEFAULT 'memory'",
+            # The memory and prompt versions a session started with. It keeps
+            # them for every turn; edits apply from the next session.
+            "ALTER TABLE agent_sessions ADD COLUMN memory_version INTEGER",
+            "ALTER TABLE agent_sessions ADD COLUMN prompt_version INTEGER",
             "ALTER TABLE todos ADD COLUMN parent_id TEXT",
             "ALTER TABLE todos ADD COLUMN completed_at TEXT",
             "ALTER TABLE user_integrations ADD COLUMN gcal_refresh_token TEXT",
@@ -383,6 +414,9 @@ async def init_db():
         )
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_txn_date ON finances_transactions(date DESC)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_agent_runs_session ON agent_runs(session_id, created_at)"
         )
         await db.commit()
 

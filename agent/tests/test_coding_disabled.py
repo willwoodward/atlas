@@ -69,14 +69,14 @@ async def test_the_tool_refuses_before_touching_anything(fresh, monkeypatch):
 
 def test_the_prompt_does_not_offer_coding_when_off(fresh):
     _, rt = fresh("off")
-    prompt = rt.SYSTEM_PROMPT.format(name="Will", today="today", coding=rt.CODING_DISABLED_SECTION)
+    prompt = rt.build_system_prompt(None, "Will", "today", "")
     assert "delegate_coding" not in prompt
     assert "switched off" in prompt
 
 
 def test_the_prompt_still_explains_coding_when_on(fresh):
     _, rt = fresh("on")
-    prompt = rt.SYSTEM_PROMPT.format(name="Will", today="today", coding=rt.CODING_SECTION)
+    prompt = rt.build_system_prompt(None, "Will", "today", "")
     assert "delegate_coding" in prompt
 
 

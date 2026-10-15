@@ -3,9 +3,15 @@ import { useAuth } from './AuthContext.jsx'
 import { useRefresh } from './RefreshContext.jsx'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-const STORE_KEY = 'atlas:assistant-thread:v1'
-const RUN_KEY = 'atlas:assistant-run:v1'
+// A copy of the current session, so the thread paints instantly on launch.
+// The server is the source of truth; this is replaced on the first sync.
+const STORE_KEY = 'atlas:assistant-session:v2'
+const OLD_KEYS = ['atlas:assistant-thread:v1', 'atlas:assistant-run:v1']
 const MAX_STORED = 40
+// How often an open app checks for turns sent from another device.
+const POLL_MS = 5000
+// Tools that change the assistant's own documents, and which document.
+const DOC_TOOLS = { write_memory: 'memory', edit_memory: 'memory', write_system_prompt: 'prompt', edit_system_prompt: 'prompt' }
 
 // Tools that write. After a turn that used any of these, the data contexts
 // must refetch or the UI keeps showing pre-agent state.
@@ -15,6 +21,18 @@ const MUTATING_TOOLS = new Set([
   'write_github_note', 'create_github_folder',
   'create_event', 'update_event', 'delete_event',
 ])
+
+/** What a memory / system-prompt tool's result says changed, for the chat's Undo. */
+export function memoryEdit(name, output) {
+  if (!DOC_TOOLS[name] || !output) return undefined
+  try {
+    const r = JSON.parse(output)
+    if (!r.ok || r.unchanged) return undefined
+    return { kind: DOC_TOOLS[name], version: r.version, previous: r.previous_version ?? 0 }
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * Apply one streamed event to an assistant message.
@@ -34,7 +52,8 @@ export function reduceMessage(msg, ev) {
         ...msg,
         tools: (msg.tools || []).map(t =>
           (typeof t === 'object' && t.toolUseId === ev.toolUseId)
-            ? { ...t, status: ev.status, input: ev.input, output: ev.output }
+            ? { ...t, status: ev.status, input: ev.input, output: ev.output,
+                memory: memoryEdit(t.name, ev.output) }
             : t),
       }
     case 'question':
@@ -120,40 +139,76 @@ function loadJson(key, fallback) {
   }
 }
 
+const isLive = status => status === 'running' || status === 'awaiting_input'
+
+/**
+ * Lay the server's view of a session over what this device already shows.
+ *
+ * The server knows every turn (including ones sent from another device) but only
+ * their text; this device may hold the detail of turns it watched — tool calls,
+ * research, questions. Turns are matched by run id, so that detail survives.
+ * Returns `local` itself when nothing changed, so polling doesn't re-render.
+ */
+export function mergeThread(local, server) {
+  const mine = new Map(local.filter(m => m.role === 'assistant' && m.runId).map(m => [m.runId, m]))
+  const next = server.map(m => {
+    if (m.role === 'user') return { role: 'user', content: m.content, runId: m.runId }
+    const have = mine.get(m.runId)
+    // A turn still running is rebuilt by replaying its events, text included.
+    if (isLive(m.status)) return { role: 'assistant', content: '', tools: [], runId: m.runId }
+    const base = have || { role: 'assistant', tools: [], runId: m.runId }
+    return { ...base, content: m.content || base.content || '', error: m.content ? undefined : m.error || undefined }
+  })
+  const same = next.length === local.length && next.every((m, i) =>
+    m.role === local[i].role && m.runId === local[i].runId && m.content === local[i].content && m.error === local[i].error)
+  return same ? local : next
+}
+
 const Ctx = createContext(null)
 
 export function AssistantProvider({ children }) {
   const { token } = useAuth()
   const { refresh } = useRefresh()
-  const [messages, setMessages] = useState(() => {
-    const stored = loadJson(STORE_KEY, [])
-    return Array.isArray(stored) ? stored : []
+  const [initial] = useState(() => {
+    for (const k of OLD_KEYS) { try { localStorage.removeItem(k) } catch { /* ignore */ } }
+    const stored = loadJson(STORE_KEY, null)
+    // Don't flash a thread that has already gone stale; the sync would clear it.
+    if (!stored || !Array.isArray(stored.messages) || (stored.expiresAt && new Date(stored.expiresAt) < new Date())) {
+      return { sessionId: null, messages: [] }
+    }
+    return { sessionId: stored.sessionId ?? null, messages: stored.messages }
   })
+  const initialSession = initial.sessionId
+  const initialMessages = initial.messages
+  const [messages, setMessages] = useState(initialMessages)
+  const [sessionId, setSessionId] = useState(initialSession)
+  const [expiresAt, setExpiresAt] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const abortRef = useRef(null)
   const runRef = useRef(null)
+  const busyRef = useRef(false)
+  const sessionRef = useRef(initialSession)
+  useEffect(() => { sessionRef.current = sessionId }, [sessionId])
 
-  // Persist so the thread survives reload / PWA relaunch, not just navigation.
-  // Tool arguments, results and research summaries are dropped on the way out —
-  // they run to several KB each and would blow the quota within a few threads.
-  // The durable run on the server keeps the full record.
+  // Cache for an instant first paint. Tool arguments, results and research
+  // summaries are dropped — they run to several KB each; the server keeps the
+  // full record and rehydrate() fetches it back.
   useEffect(() => {
     try {
-      // runId is kept so the stripped detail can be fetched back from the server.
-      const slim = messages.slice(-MAX_STORED).map(m => ({
+      const slim = messages.slice(-MAX_STORED).map(({ rehydrated, ...m }) => ({
         ...m,
         tools: (m.tools || []).map(t => typeof t === 'string'
-          ? t : { name: t.name, status: t.status, toolUseId: t.toolUseId }),
+          ? t : { name: t.name, status: t.status, toolUseId: t.toolUseId, memory: t.memory }),
         research: m.research?.map(({ objective, status, retried }) => ({ objective, status, retried })),
         question: m.question,
         coding: m.coding && { repo: m.coding.repo, branch: m.coding.branch,
                               status: m.coding.status, prUrl: m.coding.prUrl,
                               commits: m.coding.commits },
       }))
-      localStorage.setItem(STORE_KEY, JSON.stringify(slim))
-    } catch { /* quota — thread just won't survive reload */ }
-  }, [messages])
+      localStorage.setItem(STORE_KEY, JSON.stringify({ sessionId, expiresAt, messages: slim }))
+    } catch { /* quota — the thread just won't paint before the first sync */ }
+  }, [messages, sessionId, expiresAt])
 
   const patchLast = useCallback(fn => setMessages(prev => {
     if (prev.length === 0) return prev
@@ -161,6 +216,8 @@ export function AssistantProvider({ children }) {
     next[next.length - 1] = fn(next[next.length - 1])
     return next
   }), [])
+
+  const setBusyBoth = useCallback(v => { busyRef.current = v; setBusy(v) }, [])
 
   /**
    * Follow a run's event stream. Runs are durable server-side, so this can
@@ -171,10 +228,8 @@ export function AssistantProvider({ children }) {
     const controller = new AbortController()
     abortRef.current = controller
     runRef.current = runId
-    localStorage.setItem(RUN_KEY, JSON.stringify({ runId, after }))
-    setBusy(true)
+    setBusyBoth(true)
 
-    let seq = after
     let touchedData = false
 
     try {
@@ -202,40 +257,68 @@ export function AssistantProvider({ children }) {
           let ev
           try { ev = JSON.parse(line.slice(6)) } catch { continue }
 
-          if (typeof ev.seq === 'number') {
-            seq = ev.seq
-            localStorage.setItem(RUN_KEY, JSON.stringify({ runId, after: seq }))
-          }
-
           if (ev.type === 'done') break outer
           if (ev.type === 'error') { setError(ev.message); continue }
           if (ev.type === 'tool' && MUTATING_TOOLS.has(ev.name)) touchedData = true
-          patchLast(m => reduceMessage(m, ev))
+          patchLast(m => m.runId === runId || !m.runId ? reduceMessage(m, ev) : m)
         }
       }
     } catch (err) {
       if (err.name !== 'AbortError') setError(err.message || 'Lost contact with the assistant.')
     } finally {
-      setBusy(false)
+      setBusyBoth(false)
       abortRef.current = null
       runRef.current = null
-      localStorage.removeItem(RUN_KEY)
-      setMessages(prev => {
-        const last = prev[prev.length - 1]
-        return last?.role === 'assistant' && !last.content && (last.tools?.length ?? 0) === 0
-          ? prev.slice(0, -1) : prev
-      })
+      // Watched live, so its detail is all here already.
+      setMessages(prev => prev.map(m => m.role === 'assistant' && m.runId === runId ? { ...m, rehydrated: true } : m))
       if (touchedData) refresh()
     }
-  }, [token, patchLast, refresh])
+  }, [token, patchLast, refresh, setBusyBoth])
 
   /**
-   * Rebuild the detail stripped from a stored thread.
-   *
-   * localStorage keeps only the shape of a past turn — tool names, objectives,
-   * statuses — because the arguments, results and summaries are far too large.
-   * Replaying the run's stored events through the same reducer restores it, so
-   * expanding an old answer after a reload shows what it showed live.
+   * Bring this device up to date with the session on the server: turns sent
+   * from elsewhere appear, a stale session clears, and a turn still running
+   * (perhaps started on the phone) is followed live.
+   */
+  const sync = useCallback(async () => {
+    if (!token || busyRef.current) return
+    let body
+    try {
+      const res = await fetch(`${API}/assistant/sessions/current`, { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) return
+      body = await res.json()
+    } catch {
+      return // offline — keep showing what we have
+    }
+    if (busyRef.current) return // a send started while we were asking
+    setSessionId(body.session?.id ?? null)
+    setExpiresAt(body.session?.expires_at ?? null)
+    if (!body.session) setError(null)
+    setMessages(prev => mergeThread(prev, body.messages || []))
+    const active = body.active_run
+    if (active && runRef.current !== active.id) follow(active.id, 0)
+  }, [token, follow])
+
+  // On launch, whenever the app comes back into view, and every few seconds
+  // while it is visible.
+  useEffect(() => {
+    if (!token) return
+    sync()
+    const onShow = () => { if (document.visibilityState === 'visible') sync() }
+    const id = setInterval(onShow, POLL_MS)
+    document.addEventListener('visibilitychange', onShow)
+    window.addEventListener('focus', onShow)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', onShow)
+      window.removeEventListener('focus', onShow)
+    }
+  }, [token, sync])
+
+  /**
+   * Rebuild the detail of turns this device didn't watch, or watched before a
+   * reload. Replaying the run's stored events through the same reducer
+   * restores what it showed live.
    */
   const rehydrate = useCallback(async (runIds) => {
     const histories = await Promise.all(runIds.map(async id => {
@@ -254,52 +337,42 @@ export function AssistantProvider({ children }) {
     if (byRun.size === 0) return
 
     setMessages(prev => prev.map(m => {
-      const events = m.runId && byRun.get(m.runId)
+      const events = m.role === 'assistant' && m.runId && byRun.get(m.runId)
       if (!events) return m
       // Content is already stored in full; replaying tokens would double it.
-      const detail = events.filter(e => e.type !== 'token')
-      return detail.reduce(reduceMessage, { ...m, tools: [], research: undefined })
+      const detail = events.filter(e => e.type !== 'token' && e.type !== 'error')
+      return detail.reduce(reduceMessage, { ...m, tools: [], research: undefined, rehydrated: true })
     }))
   }, [token])
 
-  // On load, restore detail for the most recent turns that have a run behind
-  // them. Bounded because each history is a few hundred KB.
+  // Restore detail for the most recent finished turns that lack it. Bounded
+  // because each history can be a few hundred KB.
+  const pendingDetail = messages
+    .filter(m => m.role === 'assistant' && m.runId && !m.rehydrated && !(busy && m === messages[messages.length - 1]))
+    .slice(-3).map(m => m.runId).join(',')
+  const askedRef = useRef(new Set())
   useEffect(() => {
-    if (!token) return
-    const ids = messages
-      .filter(m => m.role === 'assistant' && m.runId && !m.rehydrated)
-      .slice(-3)
-      .map(m => m.runId)
+    if (!token || !pendingDetail) return
+    const ids = pendingDetail.split(',').filter(id => !askedRef.current.has(id))
     if (ids.length === 0) return
-    setMessages(prev => prev.map(m => ids.includes(m.runId) ? { ...m, rehydrated: true } : m))
+    ids.forEach(id => askedRef.current.add(id))
     rehydrate(ids)
-  }, [token]) // eslint-disable-line
+  }, [token, pendingDetail, rehydrate])
 
-  // Reattach to a run that was still going when the app was last closed.
-  useEffect(() => {
-    if (!token) return
-    const saved = loadJson(RUN_KEY, null)
-    if (!saved?.runId) return
-    let cancelled = false
-    ;(async () => {
-      try {
-        const res = await fetch(`${API}/assistant/runs?limit=10`, { headers: { Authorization: `Bearer ${token}` } })
-        if (!res.ok) return
-        const { runs } = await res.json()
-        const run = runs.find(r => r.id === saved.runId)
-        if (!cancelled && run?.status === 'running') follow(saved.runId, saved.after ?? 0)
-        else localStorage.removeItem(RUN_KEY)
-      } catch { /* offline — leave the marker for next launch */ }
-    })()
-    return () => { cancelled = true }
-  }, [token]) // eslint-disable-line
-
+  /** New chat: end the session for every device. It stays in the session log. */
   const clear = useCallback(() => {
     abortRef.current?.abort()
-    localStorage.removeItem(RUN_KEY)
+    const sid = sessionRef.current
     setMessages([])
+    setSessionId(null)
+    setExpiresAt(null)
     setError(null)
-  }, [])
+    if (sid) {
+      fetch(`${API}/assistant/sessions/${sid}/close`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => { /* it will go stale on its own */ })
+    }
+  }, [token])
 
   const stop = useCallback(async () => {
     const runId = runRef.current
@@ -335,29 +408,39 @@ export function AssistantProvider({ children }) {
 
   const send = useCallback(async (text) => {
     const prompt = (text || '').trim()
-    if (!prompt || busy) return
+    if (!prompt || busyRef.current) return
 
-    // The agent is stateless — it gets the whole thread on every turn.
-    const history = [...messages, { role: 'user', content: prompt }]
-    setMessages([...history, { role: 'assistant', content: '', tools: [] }])
+    // Only the new message goes up; the server holds the rest of the session.
+    setMessages(prev => [...prev, { role: 'user', content: prompt }, { role: 'assistant', content: '', tools: [] }])
     setError(null)
-    setBusy(true)
+    setBusyBoth(true)
 
     try {
       const res = await fetch(`${API}/assistant/runs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ messages: history.map(({ role, content }) => ({ role, content })) }),
+        body: JSON.stringify({ message: prompt, session_id: sessionRef.current }),
       })
-      if (!res.ok) throw new Error(res.status === 403 ? 'Not authorised to use the assistant.' : `Assistant error (${res.status})`)
-      const { run_id } = await res.json()
-      patchLast(m => ({ ...m, runId: run_id }))
+      if (!res.ok) {
+        throw new Error(res.status === 403 ? 'Not authorised to use the assistant.'
+          : res.status === 409 ? 'Atlas is still answering your last message.'
+          : `Assistant error (${res.status})`)
+      }
+      const { run_id, session_id, new_session } = await res.json()
+      setSessionId(session_id)
+      sessionRef.current = session_id
+      const pair = [{ role: 'user', content: prompt, runId: run_id }, { role: 'assistant', content: '', tools: [], runId: run_id }]
+      // The old session had gone stale, so this message started a new one.
+      setMessages(prev => new_session ? pair : [...prev.slice(0, -2), ...pair])
       await follow(run_id, 0)
     } catch (err) {
+      setMessages(prev => prev.slice(0, -2))
       setError(err.message || 'Something went wrong.')
-      setBusy(false)
+      setBusyBoth(false)
     }
-  }, [messages, busy, token, follow])
+    // Pick up the saved reply and the session's new expiry.
+    sync()
+  }, [token, follow, sync, setBusyBoth])
 
   return (
     <Ctx.Provider value={{ messages, busy, error, send, stop, clear, answer }}>

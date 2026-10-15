@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 import aiosqlite
+import assistant_memory
 from crypto import enc, dec
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
@@ -215,6 +216,12 @@ async def list_tools() -> list[Tool]:
         Tool(name="create_github_folder", description="Create a new folder draft in the GitHub notes (saves README.md as a draft for review before publishing)", inputSchema={"type":"object","properties":{"path":{"type":"string","description":"Folder path e.g. ideas/2024"}},"required":["path"]}),
         Tool(name="list_github_drafts", description="List all pending GitHub note drafts (created/edited via MCP, not yet published to GitHub)", inputSchema={"type":"object","properties":{},"required":[]}),
         Tool(name="read_github_draft", description="Read the content of a specific GitHub note draft by path", inputSchema={"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}),
+        Tool(name="read_memory", description="Read the assistant's memory: the standing notes (routines, rules, preferences) loaded into the assistant's context at the start of every conversation. Returns the latest text and its version.", inputSchema={"type":"object","properties":{},"required":[]}),
+        Tool(name="write_memory", description="Replace the assistant's whole memory with new text (markdown). Use for reorganising or larger rewrites; read_memory first so nothing is lost. Applies from the next conversation. Every version is kept and the user can undo.", inputSchema={"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}),
+        Tool(name="edit_memory", description="Change one passage of the assistant's memory: old_text must match exactly once and is replaced by new_text (use an empty new_text to delete it). To add something, pass a nearby line, e.g. a section heading, as old_text and the same line plus the addition as new_text. Applies from the next conversation.", inputSchema={"type":"object","properties":{"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["old_text","new_text"]}),
+        Tool(name="read_system_prompt", description="Read the assistant's system prompt: its instructions for who it is and how it works. {name} and {today} in it are filled in at the start of each conversation. Returns the latest text and its version.", inputSchema={"type":"object","properties":{},"required":[]}),
+        Tool(name="write_system_prompt", description="Replace the assistant's whole system prompt. read_system_prompt first and keep what still applies. Applies from the next conversation. Every version is kept and the user can undo.", inputSchema={"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}),
+        Tool(name="edit_system_prompt", description="Change one passage of the assistant's system prompt: old_text must match exactly once and is replaced by new_text. Applies from the next conversation.", inputSchema={"type":"object","properties":{"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["old_text","new_text"]}),
     ]
 
     if MCP_TRANSACTIONS in ("redacted", "full"):
@@ -563,6 +570,27 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         if not row:
             return {"error": "Draft not found"}
         return dict(row)
+
+    doc = {"read_memory": "memory", "write_memory": "memory", "edit_memory": "memory",
+           "read_system_prompt": "prompt", "write_system_prompt": "prompt",
+           "edit_system_prompt": "prompt"}.get(name)
+    if doc and name.startswith("read_"):
+        cur = await assistant_memory.current(db, doc)
+        return {"version": cur["version"], "content": cur["content"],
+                "max_chars": assistant_memory.MAX_CHARS}
+    if doc:
+        try:
+            if name.startswith("write_"):
+                saved = await assistant_memory.save(db, args.get("content", ""), "assistant", doc)
+            else:
+                saved = await assistant_memory.edit(db, args.get("old_text", ""), args.get("new_text", ""), "assistant", doc)
+        except assistant_memory.MemoryEditError as exc:
+            return {"error": str(exc)}
+        # previous_version is what the chat's Undo restores (0 = the default).
+        return {"ok": True, "document": doc, "version": saved["version"],
+                "previous_version": saved["previous_version"] or 0,
+                "unchanged": saved.get("unchanged", False),
+                "applies": "from the next conversation"}
 
     return {"error": f"Unknown tool: {name}"}
 

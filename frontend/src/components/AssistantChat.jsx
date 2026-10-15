@@ -4,6 +4,7 @@ import AtlasOrb from './AtlasOrb.jsx'
 import { useAssistant } from '../context/AssistantContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { assistantPrompts } from '../data.js'
+import { SettingsButton, MemoryEditChip } from './AssistantMemory.jsx'
 
 // MCP tool name → what to show while it runs
 const TOOL_LABELS = {
@@ -38,6 +39,12 @@ const TOOL_LABELS = {
   create_github_folder: 'Drafting a new folder',
   list_github_drafts: 'Checking your drafts',
   read_github_draft: 'Reading a draft',
+  read_memory: 'Reading its memory',
+  write_memory: 'Saved to memory',
+  edit_memory: 'Saved to memory',
+  read_system_prompt: 'Reading its instructions',
+  write_system_prompt: 'Updated its system prompt',
+  edit_system_prompt: 'Updated its system prompt',
 }
 
 const toolLabel = name => TOOL_LABELS[name] || name.replace(/_/g, ' ')
@@ -67,6 +74,7 @@ function ToolTrace({ tools = [] }) {
               <span style={{ width: 5, height: 5, borderRadius: '50%', background: failed ? '#c15f3c' : '#c15f3c', flexShrink: 0, opacity: failed ? 1 : .6 }} />
               {toolLabel(tool.name)}
               {failed && <span style={{ fontSize: 11 }}>· failed</span>}
+              {tool.memory && <MemoryEditChip edit={tool.memory} />}
               {hasDetail && (
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
                   style={{ color: 'var(--faint)', transition: 'transform .18s', transform: isOpen ? 'rotate(90deg)' : 'none' }}>
@@ -413,7 +421,8 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
 
   if (empty) {
     return (
-      <div style={{ flex: 1, minHeight: 0, height: '100%', width: '100%', maxWidth: COLUMN, margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: `24px ${Math.max(gutter, orbSize < 160 ? 20 : 0)}px`, paddingBottom: isMobile ? 'max(24px, env(safe-area-inset-bottom))' : 24 }}>
+      <div style={{ position: 'relative', flex: 1, minHeight: 0, height: '100%', width: '100%', maxWidth: COLUMN, margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: `24px ${Math.max(gutter, orbSize < 160 ? 20 : 0)}px`, paddingBottom: isMobile ? 'max(24px, env(safe-area-inset-bottom))' : 24 }}>
+        <SettingsButton style={{ position: 'absolute', top: 6, right: gutter }} />
         <AtlasOrb orbSize={orbSize} ring1={ring1} ring2={ring2} />
 
         <h1 style={{ margin: '14px 0 6px', fontFamily: "'Newsreader', serif", fontSize: 30, fontWeight: 500, color: 'var(--ink)' }}>
@@ -445,13 +454,14 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
       {/* Threads persist across navigation and reloads, so there has to be a way
           out. Desktop and mobile get it from the header "+ New chat"; the tablet
           deck has no header, so it keeps this one. */}
-      {showNewChat && <div style={{ flex: 'none', display: 'flex', justifyContent: 'flex-end', padding: `6px ${gutter}px 0` }}>
-        <button onClick={clear}
+      <div style={{ flex: 'none', display: 'flex', justifyContent: 'flex-end', gap: 8, padding: `6px ${gutter}px 0` }}>
+        <SettingsButton />
+        {showNewChat && <button onClick={clear}
           style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 8, border: '1px solid var(--bd)', background: 'transparent', color: 'var(--muted)', fontSize: 12, fontFamily: 'inherit', cursor: 'pointer' }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           New chat
-        </button>
-      </div>}
+        </button>}
+      </div>
       <div style={{ padding: `8px ${gutter}px 20px`, display: 'flex', flexDirection: 'column', gap: 20 }}>
         {messages.map((m, i) => m.role === 'user' ? (
           <div key={i} style={{ alignSelf: 'flex-end', maxWidth: '80%', padding: '10px 15px', borderRadius: 14, background: 'var(--surface)', border: '1px solid var(--bd)', fontSize: 14, lineHeight: 1.55, whiteSpace: 'pre-wrap', color: 'var(--ink)' }}>
@@ -465,6 +475,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
             <QuestionPanel question={m.question} runId={m.runId} onAnswer={answer} />
             {m.content
               ? <div className="md-prose" style={{ fontSize: 14.5, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} />
+              : m.error ? <div style={{ fontSize: 12.5, color: '#c15f3c' }}>{m.error}</div>
               : busy && i === messages.length - 1 && (m.tools?.length ?? 0) === 0 && !m.research?.length && !m.question && !m.coding &&
                   <span style={{ fontSize: 13.5, color: 'var(--muted)' }}>Thinking…</span>}
           </div>

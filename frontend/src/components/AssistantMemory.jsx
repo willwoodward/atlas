@@ -1,0 +1,232 @@
+import { useEffect, useState } from 'react'
+import Sheet from './Sheet.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
+
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
+// Assistant settings: the two documents the assistant works from, both of
+// which it is free to rewrite itself.
+//   memory — standing notes about you (routines, rules, preferences)
+//   prompt — its system prompt: how it behaves
+// Each save is a version on the server, so any edit (yours or its) can be
+// rolled back. A conversation keeps the versions it started with; changes
+// apply from the next one.
+
+const SOURCE_LABEL = { user: 'You', assistant: 'Atlas', restore: 'Restored' }
+
+const DOCS = {
+  memory: {
+    label: 'Memory',
+    intro: 'Notes Atlas keeps about you (routines, rules, preferences) and updates itself as it learns.',
+    placeholder: '## Routines\n- Morning routine: 1h; 1.5h on weekdays without gym, 45 min on gym days\n\n## Scheduling\n- The train into town takes 30 min; put it in the calendar before anything in town',
+  },
+  prompt: {
+    label: 'System prompt',
+    intro: 'How Atlas behaves. Atlas can edit this too. {name} and {today} are filled in when a conversation starts.',
+    placeholder: '',
+  },
+}
+
+function when(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const sameDay = d.toDateString() === new Date().toDateString()
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  return sameDay ? `Today ${time}` : `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} ${time}`
+}
+
+function useDocApi(kind) {
+  const { token } = useAuth()
+  const call = async (path, init = {}) => {
+    const res = await fetch(`${API}/assistant/${kind}${path}`, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    })
+    if (!res.ok) {
+      let detail = ''
+      try { detail = (await res.json()).detail } catch { /* not JSON */ }
+      throw new Error(typeof detail === 'string' && detail ? detail : `Request failed (${res.status})`)
+    }
+    return res.json()
+  }
+  return {
+    get: () => call(''),
+    history: () => call('/history?limit=30'),
+    save: content => call('', { method: 'PUT', body: JSON.stringify({ content }) }),
+    restore: version => call('/restore', { method: 'POST', body: JSON.stringify({ version }) }),
+  }
+}
+
+export function SettingsButton({ style }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button onClick={() => setOpen(true)} title="Atlas's memory and system prompt"
+        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 8, border: '1px solid var(--bd)', background: 'transparent', color: 'var(--muted)', fontSize: 12, fontFamily: 'inherit', cursor: 'pointer', ...style }}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" /></svg>
+        Settings
+      </button>
+      {open && <SettingsSheet onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
+function SettingsSheet({ onClose }) {
+  const [kind, setKind] = useState('memory')
+  return (
+    <Sheet title="Assistant settings" onClose={onClose} width={680} height="84vh">
+      <div role="tablist" style={{ display: 'flex', gap: 4, padding: 3, borderRadius: 9, background: 'var(--surface-2)', alignSelf: 'flex-start', marginBottom: 14 }}>
+        {Object.entries(DOCS).map(([k, d]) => (
+          <button key={k} role="tab" aria-selected={kind === k} onClick={() => setKind(k)}
+            style={{ fontSize: 12.5, padding: '5px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                     background: kind === k ? 'var(--surface)' : 'transparent', color: kind === k ? 'var(--ink)' : 'var(--muted)',
+                     boxShadow: kind === k ? '0 1px 3px var(--bd)' : 'none' }}>
+            {d.label}
+          </button>
+        ))}
+      </div>
+      {/* Keyed so switching tabs loads the other document fresh. */}
+      <DocEditor key={kind} kind={kind} />
+    </Sheet>
+  )
+}
+
+function DocEditor({ kind }) {
+  const doc = DOCS[kind]
+  const api = useDocApi(kind)
+  const [loaded, setLoaded] = useState(null)   // the version on the server
+  const [draft, setDraft] = useState('')
+  const [versions, setVersions] = useState([])
+  const [showHistory, setShowHistory] = useState(false)
+  const [preview, setPreview] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState(null)
+  const [savedNote, setSavedNote] = useState(false)
+
+  const load = async () => {
+    try {
+      const [cur, hist] = await Promise.all([api.get(), api.history()])
+      setLoaded(cur)
+      setDraft(cur.content)
+      setVersions(hist.versions || [])
+      setErr(null)
+    } catch (e) {
+      setErr(e.message)
+    }
+  }
+  useEffect(() => { load() }, []) // eslint-disable-line
+
+  const dirty = loaded && draft !== loaded.content
+  const max = loaded?.max_chars || 20000
+  const isDefault = loaded && loaded.default !== undefined && loaded.content === loaded.default
+
+  const act = async (fn) => {
+    setSaving(true)
+    try { await fn(); setPreview(null); await load(); setSavedNote(true) } catch (e) { setErr(e.message) } finally { setSaving(false) }
+  }
+  const btn = { fontSize: 13, padding: '7px 12px', borderRadius: 8, border: '1px solid var(--bd)', background: 'transparent', color: 'var(--mid)', fontFamily: 'inherit', cursor: 'pointer' }
+
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+        <p style={{ flex: 1, margin: 0, fontSize: 13, color: 'var(--mid)', lineHeight: 1.5 }}>
+          {doc.intro} Changes apply from your next conversation.
+        </p>
+        {versions.length > 0 && (
+          <button onClick={() => { setShowHistory(h => !h); setPreview(null) }}
+            style={{ ...btn, fontSize: 12.5, padding: '5px 10px', flex: 'none', background: showHistory ? 'var(--surface-2)' : 'transparent' }}>
+            {showHistory ? 'Back' : `History · ${versions.length}`}
+          </button>
+        )}
+      </div>
+
+      {loaded === null && !err && <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</div>}
+      {err && <div style={{ fontSize: 12.5, color: '#c15f3c', marginBottom: 10 }}>{err}</div>}
+
+      {loaded && !showHistory && (
+        <>
+          <textarea value={draft} onChange={e => { setDraft(e.target.value); setSavedNote(false) }} spellCheck
+            aria-label={doc.label} placeholder={doc.placeholder}
+            style={{ flex: 1, minHeight: 260, resize: 'none', padding: '12px 14px', borderRadius: 10, border: '1px solid var(--bd-xl)', background: 'var(--surface-2)', color: 'var(--ink)', fontSize: 13, lineHeight: 1.55, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', outline: 'none' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+            <span style={{ flex: 1, minWidth: 160, fontSize: 12, color: draft.length > max ? '#c15f3c' : 'var(--faint)' }}>
+              {savedNote && !dirty ? 'Saved · applies from your next conversation'
+                : loaded.version ? `${SOURCE_LABEL[loaded.source] || loaded.source} · ${when(loaded.created_at)}`
+                : kind === 'prompt' ? 'Default' : 'Nothing saved yet'}
+              {' · '}{draft.length.toLocaleString()} / {max.toLocaleString()}
+            </span>
+            {kind === 'prompt' && !isDefault && !dirty && (
+              <button onClick={() => act(() => api.restore(0))} disabled={saving} style={btn}>Reset to default</button>
+            )}
+            {dirty && <button onClick={() => setDraft(loaded.content)} disabled={saving} style={btn}>Discard</button>}
+            <button onClick={() => act(() => api.save(draft))} disabled={!dirty || saving || draft.length > max}
+              style={{ ...btn, border: 'none', padding: '7px 14px', background: dirty ? '#c15f3c' : 'var(--surface-3)', color: dirty ? '#fff' : 'var(--faint)', cursor: dirty ? 'pointer' : 'default' }}>
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </>
+      )}
+
+      {loaded && showHistory && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {versions.map((v, i) => {
+            const open = preview === v.version
+            return (
+              <div key={v.version} style={{ border: '1px solid var(--bd)', borderRadius: 10, background: open ? 'var(--surface-2)' : 'transparent' }}>
+                <div onClick={() => setPreview(open ? null : v.version)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', cursor: 'pointer' }}>
+                  <span style={{ fontSize: 13, color: 'var(--ink)', fontWeight: 500, minWidth: 64 }}>{SOURCE_LABEL[v.source] || v.source}</span>
+                  <span style={{ flex: 1, fontSize: 12.5, color: 'var(--muted)' }}>{when(v.created_at)}</span>
+                  {i === 0
+                    ? <span style={{ fontSize: 11.5, color: 'var(--faint)' }}>Current</span>
+                    : <button onClick={e => { e.stopPropagation(); act(() => api.restore(v.version)) }} disabled={saving}
+                        style={{ fontSize: 12, padding: '4px 10px', borderRadius: 7, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--ink)', fontFamily: 'inherit', cursor: 'pointer' }}>Restore</button>}
+                </div>
+                {open && (
+                  <pre style={{ margin: 0, padding: '0 12px 12px', fontSize: 12, lineHeight: 1.5, color: 'var(--mid)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', maxHeight: 300, overflowY: 'auto' }}>
+                    {v.content || '(empty)'}
+                  </pre>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </>
+  )
+}
+
+/**
+ * Shown under a turn where Atlas changed its memory or system prompt, with a
+ * way to take it back. Undo restores the version from just before the edit.
+ */
+export function MemoryEditChip({ edit }) {
+  const api = useDocApi(edit.kind || 'memory')
+  const [state, setState] = useState('idle') // idle | working | undone | failed
+  const undo = async () => {
+    setState('working')
+    try {
+      const cur = await api.get()
+      if (cur.version !== edit.version && !window.confirm(
+        'This has changed again since. Undoing this edit will also undo the later changes. Continue?')) {
+        setState('idle')
+        return
+      }
+      await api.restore(edit.previous)
+      setState('undone')
+    } catch {
+      setState('failed')
+    }
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 4 }}>
+      {state === 'undone'
+        ? <span style={{ color: 'var(--faint)' }}>· undone</span>
+        : <button onClick={e => { e.stopPropagation(); undo() }} disabled={state === 'working'}
+            style={{ fontSize: 11.5, padding: '1px 8px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', fontFamily: 'inherit', cursor: 'pointer' }}>
+            {state === 'working' ? '…' : 'Undo'}
+          </button>}
+      {state === 'failed' && <span style={{ color: '#c15f3c' }}>couldn't undo</span>}
+    </span>
+  )
+}

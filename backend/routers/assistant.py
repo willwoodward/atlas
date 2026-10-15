@@ -11,12 +11,18 @@ the browser will not stay open for it. Starting a run spawns a background task
 that keeps streaming and persisting events regardless of whether anyone is
 listening; subscribers replay the stored events and then follow live, so you can
 close your phone mid-run and pick it up from another device.
+
+Runs belong to sessions — conversations held on the server, so the laptop and
+the phone show the same thread. The browser sends only its new message; the
+history comes from the session's earlier runs. A session goes stale after
+SESSION_IDLE_MINUTES without activity and the next message starts a new one.
+Old sessions are kept, as the session log.
 """
 import asyncio
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import aiosqlite
 import httpx
@@ -24,6 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+import assistant_memory as memory
 from auth import get_current_user
 from database import DATABASE_PATH
 
@@ -34,6 +41,11 @@ IDLE_TIMEOUT_SECONDS = 900  # give up on a run the agent never finishes
 # be asleep. It is exempt from the stall timeout and gets a much longer ceiling,
 # so a forgotten question cannot pin an agent and a sandbox forever.
 AWAITING_TIMEOUT_SECONDS = 86_400
+# A conversation this quiet is over; the next message starts a fresh one.
+SESSION_IDLE_MINUTES = int(os.getenv("ASSISTANT_SESSION_MINUTES", "30"))
+# How many earlier turns are replayed to the agent. Its own limit is 60 messages.
+MAX_HISTORY_TURNS = 25
+LIVE = ("running", "awaiting_input")
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
 
@@ -47,7 +59,12 @@ class Message(BaseModel):
 
 
 class RunRequest(BaseModel):
-    messages: list[Message] = Field(..., min_length=1, max_length=60)
+    # The new message. History comes from the session, not the browser.
+    message: str | None = Field(None, min_length=1, max_length=20_000)
+    # The conversation it continues. None, closed or gone stale: a new one starts.
+    session_id: str | None = None
+    # Older clients send the whole thread instead. Still accepted, sessionless.
+    messages: list[Message] | None = Field(None, min_length=1, max_length=60)
 
 
 def _now() -> str:
@@ -78,12 +95,78 @@ async def _set_status(db, run_id: str, status: str) -> None:
     await db.commit()
 
 
-async def _finish(db, run_id: str, status: str, error: str | None = None) -> None:
+async def _finish(db, run_id: str, status: str, error: str | None = None,
+                  reply: str | None = None) -> None:
+    now = _now()
     await db.execute(
-        "UPDATE agent_runs SET status=?, error=?, updated_at=? WHERE id=?",
-        (status, error, _now(), run_id),
+        "UPDATE agent_runs SET status=?, error=?, updated_at=?, reply=COALESCE(?, reply) WHERE id=?",
+        (status, error, now, reply, run_id),
+    )
+    # The session's clock runs from the end of its last turn, not the start —
+    # a ten-minute research run should not eat into the idle window.
+    await db.execute(
+        "UPDATE agent_sessions SET updated_at=? WHERE id=(SELECT session_id FROM agent_runs WHERE id=?)",
+        (now, run_id),
     )
     await db.commit()
+
+
+def _parse_time(value: str) -> datetime:
+    return datetime.fromisoformat(value)
+
+
+async def _live_session(db, session_id: str | None) -> dict | None:
+    """The session if it can still be continued: open, and either busy or recently used."""
+    if not session_id:
+        return None
+    async with db.execute("SELECT * FROM agent_sessions WHERE id=?", (session_id,)) as c:
+        row = await c.fetchone()
+    if not row or row["closed"]:
+        return None
+    async with db.execute(
+        "SELECT 1 FROM agent_runs WHERE session_id=? AND status IN ('running','awaiting_input') LIMIT 1",
+        (session_id,),
+    ) as c:
+        busy = await c.fetchone() is not None
+    idle = datetime.now(timezone.utc) - _parse_time(row["updated_at"])
+    if busy or idle < timedelta(minutes=SESSION_IDLE_MINUTES):
+        return dict(row)
+    return None
+
+
+async def _current_session_id(db) -> str | None:
+    async with db.execute(
+        "SELECT id FROM agent_sessions WHERE closed=0 ORDER BY updated_at DESC LIMIT 1"
+    ) as c:
+        row = await c.fetchone()
+    if not row:
+        return None
+    live = await _live_session(db, row["id"])
+    return live["id"] if live else None
+
+
+async def _session_view(db, session_id: str) -> dict:
+    """A session as the browser draws it: its turns as user/assistant messages."""
+    async with db.execute("SELECT * FROM agent_sessions WHERE id=?", (session_id,)) as c:
+        session = dict(await c.fetchone())
+    async with db.execute(
+        "SELECT id, status, error, user_message, prompt, reply FROM agent_runs "
+        "WHERE session_id=? ORDER BY created_at", (session_id,),
+    ) as c:
+        runs = [dict(r) for r in await c.fetchall()]
+    messages, active = [], None
+    for r in runs:
+        messages.append({"role": "user", "content": r["user_message"] or r["prompt"], "runId": r["id"]})
+        messages.append({"role": "assistant", "content": r["reply"] or "", "runId": r["id"],
+                         "status": r["status"], "error": r["error"]})
+        if r["status"] in LIVE:
+            active = {"id": r["id"], "status": r["status"]}
+    expires = _parse_time(session["updated_at"]) + timedelta(minutes=SESSION_IDLE_MINUTES)
+    return {
+        "session": {**session, "closed": bool(session["closed"]), "expires_at": expires.isoformat()},
+        "messages": messages,
+        "active_run": active,
+    }
 
 
 async def _drive_run(run_id: str, body: bytes, auth: str) -> None:
@@ -92,6 +175,7 @@ async def _drive_run(run_id: str, body: bytes, auth: str) -> None:
     seq = 0
     status, error = "done", None
     cancelled = False
+    reply: list[str] = []   # the text of the answer, kept so the session can replay it
     try:
         timeout = httpx.Timeout(10.0, read=None)
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -129,12 +213,14 @@ async def _drive_run(run_id: str, body: bytes, auth: str) -> None:
                         if kind == "error":
                             error = ev.get("message") or "The assistant hit an error."
                             status = "error"
+                        elif kind == "token":
+                            reply.append(ev.get("text") or "")
                         seq += 1
                         await _append(db, run_id, seq, kind, json.dumps(ev))
     except asyncio.CancelledError:
         cancelled = True
         # Shielded so the status write survives the cancellation itself.
-        await asyncio.shield(_finish(db, run_id, "cancelled"))
+        await asyncio.shield(_finish(db, run_id, "cancelled", reply="".join(reply)))
         raise
     except Exception as exc:
         status, error = "error", str(exc) or "The assistant hit an error."
@@ -142,35 +228,117 @@ async def _drive_run(run_id: str, body: bytes, auth: str) -> None:
         await _append(db, run_id, seq, "error", json.dumps({"type": "error", "message": error}))
     finally:
         if not cancelled:
-            await _finish(db, run_id, status, error)
+            await _finish(db, run_id, status, error, reply="".join(reply))
         await db.close()
         _tasks.pop(run_id, None)
 
 
 @router.post("/runs")
 async def start_run(req: RunRequest, request: Request, user: dict = Depends(get_current_user)):
-    """Create a run and return immediately — the work continues in the background."""
+    """Create a run and return immediately — the work continues in the background.
+
+    With `message`, the run joins the given session if it is still live, or
+    starts a new one; the agent is sent that session's earlier turns plus the
+    new message. The reply says which session it landed in, and whether that is
+    a new one, so a device showing a stale thread knows to clear it.
+    """
+    if req.message is None and not req.messages:
+        raise HTTPException(422, "Send a message.")
     run_id = str(uuid.uuid4())
-    prompt = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
+    now = _now()
 
     db = await _connect()
-    await db.execute(
-        "INSERT INTO agent_runs (id, created_at, updated_at, status, prompt) VALUES (?,?,?, 'running', ?)",
-        (run_id, _now(), _now(), prompt[:500]),
-    )
-    await db.commit()
-    await db.close()
+    try:
+        session_id, new_session = None, False
+        if req.message is not None:
+            prompt = req.message
+            live = await _live_session(db, req.session_id)
+            if live:
+                session_id = live["id"]
+                async with db.execute(
+                    "SELECT 1 FROM agent_runs WHERE session_id=? AND status IN ('running','awaiting_input')",
+                    (session_id,),
+                ) as c:
+                    if await c.fetchone():
+                        # Two devices answering at once would interleave two
+                        # replies into one thread.
+                        raise HTTPException(409, "The assistant is still working on the last message.")
+            else:
+                session_id, new_session = str(uuid.uuid4()), True
+                # Snapshot the memory and prompt now. Every turn of this session
+                # uses these versions, so the system prompt stays identical (and
+                # cacheable) for the whole conversation; edits made during it,
+                # by anyone, apply from the next session.
+                mem_v = (await memory.current(db, "memory"))["version"] or 0
+                prompt_v = (await memory.current(db, "prompt"))["version"] or 0
+                await db.execute(
+                    "INSERT INTO agent_sessions (id, created_at, updated_at, title, memory_version, prompt_version) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (session_id, now, now, " ".join(prompt.split())[:80], mem_v, prompt_v),
+                )
+            history = await _history(db, session_id)
+            messages = [*history, {"role": "user", "content": prompt}]
+        else:
+            prompt = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
+            messages = [m.model_dump() for m in req.messages]
+
+        await db.execute(
+            "INSERT INTO agent_runs (id, created_at, updated_at, status, prompt, user_message, session_id) "
+            "VALUES (?,?,?, 'running', ?, ?, ?)",
+            (run_id, now, now, prompt[:500], prompt, session_id),
+        )
+        if session_id:
+            await db.execute("UPDATE agent_sessions SET updated_at=? WHERE id=?", (now, session_id))
+        await db.commit()
+        if session_id:
+            async with db.execute(
+                "SELECT memory_version, prompt_version FROM agent_sessions WHERE id=?", (session_id,)
+            ) as c:
+                snap = await c.fetchone()
+            # Sessions from before snapshots existed have NULLs: they get the
+            # current versions, as they always did.
+            mem_text = (await memory.content_at(db, "memory", snap["memory_version"])
+                        if snap["memory_version"] is not None else (await memory.current(db, "memory"))["content"])
+            prompt_text = (await memory.content_at(db, "prompt", snap["prompt_version"])
+                           if snap["prompt_version"] is not None else (await memory.current(db, "prompt"))["content"])
+        else:
+            mem_text = (await memory.current(db, "memory"))["content"]
+            prompt_text = (await memory.current(db, "prompt"))["content"]
+    finally:
+        await db.close()
 
     # run_id goes to the agent so ask_user has an address to be answered at.
     body = json.dumps({
-        "messages": [m.model_dump() for m in req.messages],
+        "messages": messages,
         "run_id": run_id,
+        # The session's snapshot of its standing context.
+        "memory": mem_text,
+        "system_prompt": prompt_text,
     }).encode()
     # Forward the caller's own JWT — the agent re-validates it against
     # ALLOWED_EMAILS, and that second check is only meaningful if it's the real one.
     auth = request.headers.get("authorization", "")
     _tasks[run_id] = asyncio.create_task(_drive_run(run_id, body, auth))
-    return {"run_id": run_id, "status": "running"}
+    return {"run_id": run_id, "status": "running", "session_id": session_id, "new_session": new_session}
+
+
+async def _history(db, session_id: str) -> list[dict]:
+    """The session's earlier turns as plain messages, oldest first.
+
+    A turn that ended without any text (cancelled early, failed) contributes
+    only the user's message, so the agent still knows it was asked.
+    """
+    async with db.execute(
+        "SELECT user_message, prompt, reply FROM agent_runs WHERE session_id=? "
+        "ORDER BY created_at DESC LIMIT ?", (session_id, MAX_HISTORY_TURNS),
+    ) as c:
+        rows = list(reversed(await c.fetchall()))
+    out = []
+    for r in rows:
+        out.append({"role": "user", "content": r["user_message"] or r["prompt"]})
+        if r["reply"]:
+            out.append({"role": "assistant", "content": r["reply"]})
+    return out
 
 
 @router.get("/runs/{run_id}/events")
@@ -327,6 +495,125 @@ async def cancel_run(run_id: str, user: dict = Depends(get_current_user)):
     if not row:
         raise HTTPException(404, "No such run")
     return {"ok": True, "status": row["status"]}
+
+
+# ── Sessions ─────────────────────────────────────────────────────────────────
+
+@router.get("/sessions/current")
+async def current_session(user: dict = Depends(get_current_user)):
+    """The conversation every device should be showing, or none if it has gone stale.
+
+    Polled by the browser, so this is how a message sent from the phone appears
+    on the laptop.
+    """
+    db = await _connect()
+    try:
+        session_id = await _current_session_id(db)
+        if not session_id:
+            return {"session": None, "messages": [], "active_run": None}
+        return await _session_view(db, session_id)
+    finally:
+        await db.close()
+
+
+@router.get("/sessions")
+async def list_sessions(limit: int = 20, user: dict = Depends(get_current_user)):
+    """Past conversations, newest first — the session log."""
+    db = await _connect()
+    try:
+        async with db.execute(
+            "SELECT s.id, s.created_at, s.updated_at, s.title, s.closed, COUNT(r.id) AS turns "
+            "FROM agent_sessions s LEFT JOIN agent_runs r ON r.session_id = s.id "
+            "GROUP BY s.id ORDER BY s.updated_at DESC LIMIT ?", (min(max(limit, 1), 200),),
+        ) as c:
+            rows = [{**dict(r), "closed": bool(r["closed"])} for r in await c.fetchall()]
+        return {"sessions": rows}
+    finally:
+        await db.close()
+
+
+@router.get("/sessions/{session_id}")
+async def get_session(session_id: str, user: dict = Depends(get_current_user)):
+    db = await _connect()
+    try:
+        async with db.execute("SELECT 1 FROM agent_sessions WHERE id=?", (session_id,)) as c:
+            if not await c.fetchone():
+                raise HTTPException(404, "No such session")
+        return await _session_view(db, session_id)
+    finally:
+        await db.close()
+
+
+@router.post("/sessions/{session_id}/close")
+async def close_session(session_id: str, user: dict = Depends(get_current_user)):
+    """End a conversation ("New chat"). It stays in the log; every device moves on."""
+    db = await _connect()
+    try:
+        cur = await db.execute("UPDATE agent_sessions SET closed=1 WHERE id=?", (session_id,))
+        await db.commit()
+        if cur.rowcount == 0:
+            raise HTTPException(404, "No such session")
+        return {"ok": True}
+    finally:
+        await db.close()
+
+
+# ── Memory and system prompt ─────────────────────────────────────────────────
+# Same shape for both: GET the current text, PUT a new version, list the
+# history, restore an old version (0 = the default). Changes apply from the next
+# session — each session keeps the versions it started with.
+
+class DocIn(BaseModel):
+    content: str = Field(..., max_length=memory.MAX_CHARS)
+
+
+class RestoreIn(BaseModel):
+    version: int = Field(..., ge=0)
+
+
+def _document_routes(kind: str) -> None:
+    async def get_doc(user: dict = Depends(get_current_user)):
+        db = await _connect()
+        try:
+            return {**await memory.current(db, kind), "max_chars": memory.MAX_CHARS,
+                    "default": memory.DEFAULTS[kind]}
+        finally:
+            await db.close()
+
+    async def put_doc(body: DocIn, user: dict = Depends(get_current_user)):
+        db = await _connect()
+        try:
+            return await memory.save(db, body.content, "user", kind)
+        except memory.MemoryEditError as exc:
+            raise HTTPException(422, str(exc))
+        finally:
+            await db.close()
+
+    async def doc_history(limit: int = 30, user: dict = Depends(get_current_user)):
+        db = await _connect()
+        try:
+            return {"versions": await memory.history(db, min(max(limit, 1), 200), kind)}
+        finally:
+            await db.close()
+
+    async def restore_doc(body: RestoreIn, user: dict = Depends(get_current_user)):
+        """Undo: make an earlier version current again (0 = the default)."""
+        db = await _connect()
+        try:
+            return await memory.restore(db, body.version, kind)
+        except memory.MemoryEditError as exc:
+            raise HTTPException(404, str(exc))
+        finally:
+            await db.close()
+
+    router.add_api_route(f"/{kind}", get_doc, methods=["GET"])
+    router.add_api_route(f"/{kind}", put_doc, methods=["PUT"])
+    router.add_api_route(f"/{kind}/history", doc_history, methods=["GET"])
+    router.add_api_route(f"/{kind}/restore", restore_doc, methods=["POST"])
+
+
+for _kind in memory.KINDS:
+    _document_routes(_kind)
 
 
 @router.get("/health")

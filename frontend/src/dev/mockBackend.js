@@ -26,6 +26,9 @@ const EMPTY = {
   // Absent `github` and `gcal` keys read as "not connected".
   '/api/integrations': {},
   '/assistant/runs': { runs: [] },
+  '/assistant/sessions/current': { session: null, messages: [], active_run: null },
+  '/assistant/memory': { version: null, content: '', max_chars: 20000 },
+  '/assistant/prompt': { version: null, content: '', max_chars: 20000 },
 }
 
 export function bodyFor(pathname) {
