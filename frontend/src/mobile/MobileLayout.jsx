@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useUser } from '../context/UserContext.jsx'
 import { onShortcut } from '../context/KeybindsContext.jsx'
 import SearchPalette from '../components/SearchPalette.jsx'
+import VoiceDock from '../components/VoiceDock.jsx'
 import { requestFocus, showTarget } from '../lib/focus.js'
 import { useTheme } from '../context/ThemeContext.jsx'
 import { useQuickAddAction } from '../context/QuickAddContext.jsx'
@@ -211,6 +212,7 @@ export default function MobileLayout() {
         </div>
       </div>
       {searchOpen && <SearchPalette initialQuery={searchQuery} onClose={() => setSearchOpen(false)} navigate={navigate} />}
+      <VoiceDock left={16} bottom="max(16px, calc(env(safe-area-inset-bottom) + 8px))" />
     </div>
   )
 }

@@ -19,6 +19,7 @@ import AssistantPage from './AssistantPage.jsx'
 import AccountsPage  from './AccountsPage.jsx'
 import AssistantPanel from './AssistantPanel.jsx'
 import SearchPalette from '../components/SearchPalette.jsx'
+import VoiceDock from '../components/VoiceDock.jsx'
 import { requestFocus, showTarget } from '../lib/focus.js'
 import { getAssistantPrefs } from '../lib/assistantPrefs.js'
 
@@ -337,6 +338,8 @@ export default function DesktopLayout() {
       </main>
 
       {searchOpen && <SearchPalette initialQuery={searchQuery} onClose={() => setSearchOpen(false)} navigate={setActive} />}
+      {/* Bottom left of the page, just clear of the sidebar. */}
+      <VoiceDock left={236 + 20} bottom={22} />
       {panelMounted && <AssistantPanel open={showPanel} onExited={() => setPanelMounted(false)}
         onClose={() => setPanelOpen(false)} onExpand={() => { setPanelOpen(false); setActive('assistant') }} />}
     </div>

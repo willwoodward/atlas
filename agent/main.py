@@ -36,6 +36,10 @@ class ChatRequest(BaseModel):
     # taken by the API when the session started.
     memory: str | None = Field(None, max_length=50_000)
     system_prompt: str | None = Field(None, max_length=50_000)
+    # Assistant settings → "Safer web access" (see web_fetch.py).
+    safe_web: bool = False
+    # The user spoke this and the reply will be read aloud.
+    spoken: bool = False
 
 
 class AnswerRequest(BaseModel):
@@ -61,7 +65,8 @@ async def chat(req: ChatRequest, user: dict = Depends(get_current_user)):
     async def events():
         try:
             async for kind, payload in stream_reply(messages, name, run_id=req.run_id, memory=req.memory,
-                                                     system_prompt=req.system_prompt):
+                                                     system_prompt=req.system_prompt, safe_web=req.safe_web,
+                                                     spoken=req.spoken):
                 if kind == "progress":
                     # Already a full event dict (research_plan / research_done).
                     yield f"data: {json.dumps(payload)}\n\n"

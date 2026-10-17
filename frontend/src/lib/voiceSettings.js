@@ -6,9 +6,21 @@ import { useSyncExternalStore } from 'react'
 //                    in the box to edit first
 //   keepListening  — conversation mode: after Atlas replies, start listening
 //                    again. Always sends on a pause, whatever the two above say.
+//   speakReplies   — read Atlas's replies aloud: 'voice' (when you spoke),
+//                    'always' or 'never'
+//   ttsVoice       — which OpenAI voice reads them
+//   bargeIn        — talking over a reply stops it
+//   floatingMic    — the mic button in the corner when no chat is on screen
+//   voiceOpensChat — the voice shortcut opens the assistant panel instead of
+//                    using the corner mic
 
 const KEY = 'atlas:voice-settings'
-export const VOICE_DEFAULTS = { silenceSeconds: 3, autoSend: true, keepListening: false }
+export const VOICE_DEFAULTS = {
+  silenceSeconds: 3, autoSend: true, keepListening: false,
+  speakReplies: 'voice', ttsVoice: 'coral', bargeIn: true,
+  floatingMic: true, voiceOpensChat: false,
+}
+export const TTS_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse']
 // A pause this long ends a turn in conversation mode when "stop when I pause" is off.
 export const CONVERSATION_SILENCE = 3
 // In conversation mode, how long to wait for you to start speaking before

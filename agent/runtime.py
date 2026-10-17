@@ -16,13 +16,14 @@ from mcp.client.sse import sse_client
 from strands import Agent
 from strands.models.openai_responses import OpenAIResponsesModel
 from strands.tools.mcp import MCPClient
-from strands_tools import http_request, tavily
+from strands_tools import tavily
 
 from coding import CODING_ENABLED, delegate_coding
 from progress import set_progress_queue
 from questions import ask_user, set_run_id
 from research import delegate_research
 from tool_trace import ToolTracer, pretty_args
+from web_fetch import UrlCollector, begin_run, web_tools
 
 log = logging.getLogger("atlas.agent")
 
@@ -67,14 +68,15 @@ counts as done. A misdirected coding run costs far more than a question.
 CODING_DISABLED_SECTION = """Code and repositories: you cannot change code, \
 repositories or pull requests — that ability is switched off on this server. If \
 asked, say so plainly and suggest they do it themselves. Do not try to get there \
-another way, such as calling a code-hosting API with http_request.
+another way, such as calling a code-hosting API through a web tool.
 
 """
 
 def local_tools() -> list:
-    """Tools the orchestrator gets beyond the MCP dashboard tools. The coding
-    tool is only included when coding is switched on."""
-    return [delegate_research, ask_user, tavily.tavily_search, http_request.http_request,
+    """Tools the orchestrator gets beyond the MCP dashboard tools. The web
+    reader depends on "Safer web access" (web_fetch.py); the coding tool is
+    only included when coding is switched on."""
+    return [delegate_research, ask_user, tavily.tavily_search, *web_tools(),
             *([delegate_coding] if CODING_ENABLED else [])]
 
 
@@ -150,7 +152,18 @@ def _memory_section(memory: str | None, name: str) -> str:
     return MEMORY_SECTION.format(name=name, memory=text)
 
 
-def build_system_prompt(template: str | None, name: str, today: str, memory: str | None) -> str:
+VOICE_SECTION = """
+
+Voice: your reply to this message will be read out loud to {name}. \
+Answer the way you would speak: short (a few sentences), plain sentences, no \
+tables, bullet lists, headings, links or emoji. Say numbers naturally ("about \
+forty euros"). Cards your tools draw still appear on screen, so you can say \
+"here's the breakdown" rather than reading it out. If the answer really needs \
+detail, give the gist and offer to go through it."""
+
+
+def build_system_prompt(template: str | None, name: str, today: str, memory: str | None,
+                        spoken: bool = False) -> str:
     """The editable prompt, then the fixed sections: coding, memory.
 
     The editable part is filled with plain replacement, not str.format — it is
@@ -161,7 +174,10 @@ def build_system_prompt(template: str | None, name: str, today: str, memory: str
         base += "\n\nToday is {today}."  # the date is not optional, whatever the edit
     base = base.replace("{name}", name).replace("{today}", today)
     coding = CODING_SECTION if CODING_ENABLED else CODING_DISABLED_SECTION
-    return f"{base}\n\n{coding.rstrip()}\n\n{APP_SECTION.rstrip()}" + _memory_section(memory, name)
+    # Voice goes last: everything before it stays the same between turns, so
+    # the prompt cache still covers it.
+    voice = VOICE_SECTION.format(name=name) if spoken else ""
+    return f"{base}\n\n{coding.rstrip()}\n\n{APP_SECTION.rstrip()}" + _memory_section(memory, name) + voice
 
 
 def _model() -> OpenAIResponsesModel:
@@ -200,7 +216,8 @@ def _to_strands(messages: list[dict]) -> list[dict]:
 
 
 async def stream_reply(messages: list[dict], user_name: str, run_id: str | None = None,
-                       memory: str | None = None, system_prompt: str | None = None):
+                       memory: str | None = None, system_prompt: str | None = None,
+                       safe_web: bool = False, spoken: bool = False):
     """Yield (event_type, payload) tuples: ("token", str) | ("tool", str) | ("error", str)."""
     history = _to_strands(messages)
     if not history or history[-1]["role"] != "user":
@@ -209,7 +226,7 @@ async def stream_reply(messages: list[dict], user_name: str, run_id: str | None 
     prompt, prior = history[-1]["content"], history[:-1]
 
     today = datetime.now(ZoneInfo(TIMEZONE)).strftime("%A %-d %B %Y")
-    system_prompt = build_system_prompt(system_prompt, user_name or "the user", today, memory)
+    system_prompt = build_system_prompt(system_prompt, user_name or "the user", today, memory, spoken)
 
     client = _mcp_client()
     try:
@@ -230,6 +247,9 @@ async def stream_reply(messages: list[dict], user_name: str, run_id: str | None 
         set_progress_queue(queue)
         # Lets ask_user route the answer back to this particular run.
         set_run_id(run_id)
+        # Safer web access, if switched on: pages may only be opened once seen —
+        # in the user's words, a search result or a page already opened.
+        begin_run((m["content"] for m in messages if m.get("role") == "user"), safe=safe_web)
         DONE = object()
 
         agent = Agent(
@@ -248,7 +268,7 @@ async def stream_reply(messages: list[dict], user_name: str, run_id: str | None 
                     "input": pretty_args(args),
                     "output": output,
                 }),
-            )],
+            ), UrlCollector()],
             callback_handler=None,
         )
 

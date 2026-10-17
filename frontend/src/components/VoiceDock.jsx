@@ -1,0 +1,129 @@
+import { useEffect, useRef, useState } from 'react'
+import { useAssistant } from '../context/AssistantContext.jsx'
+import { useKeybinds } from '../context/KeybindsContext.jsx'
+import { useVoiceConversation } from '../hooks/useVoiceConversation.js'
+import { voiceSupported } from '../hooks/useVoiceInput.js'
+import { useVoiceSettings } from '../lib/voiceSettings.js'
+import { useSpeaking } from '../lib/speech.js'
+import { renderMarkdown } from '../lib/markdown.js'
+import { displayCombo } from '../lib/keybinds.js'
+import { toolLabel } from './AssistantChat.jsx'
+import { IconButton } from './ui.jsx'
+
+// How long the reply stays up after everything has gone quiet.
+const LINGER_MS = 10000
+
+const MicIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+)
+const StopIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
+const CheckIcon = () => <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5L20 7" /></svg>
+
+/**
+ * The corner mic: talk to Atlas from any page without opening the chat.
+ *
+ * Shown when no chat is on screen (Assistant settings → Voice → "Corner
+ * mic"). Tap it, or press the voice shortcut, and speak: the message goes to
+ * the same conversation as the chat, the reply streams into a small card
+ * above the button and is read aloud, and "Open in chat" carries on there.
+ * Changes Atlas makes still show on the page as they happen.
+ */
+export default function VoiceDock({ left = 16, bottom = 16 }) {
+  const { messages, busy, queued, registerVoiceDock, chatsOnScreen } = useAssistant()
+  const { floatingMic } = useVoiceSettings()
+  const { bindings } = useKeybinds() || {}
+  const speaking = useSpeaking()
+  // The thread position when this round began, so the card shows only the
+  // replies to what was said here.
+  const [since, setSince] = useState(null)
+  const [hover, setHover] = useState(false)
+  const sinceRef = useRef(null)
+  sinceRef.current = since
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
+
+  const { voice, live, conversing, listening, toggle, end } = useVoiceConversation()
+  const working = voice.state !== 'idle' || conversing
+  const begun = () => { if (sinceRef.current === null) setSince(messagesRef.current.length) }
+
+  const toggleRef = useRef(null)
+  toggleRef.current = () => { if (voice.state === 'idle' && !conversing) begun(); toggle() }
+  const activeRef = useRef(false)
+  activeRef.current = working
+  useEffect(() => registerVoiceDock({ toggle: () => toggleRef.current(), active: () => activeRef.current }), [registerVoiceDock])
+
+  // The card is up while there's something to show, then lingers a little.
+  const round = since !== null
+  const showing = working || (round && (busy || speaking))
+  useEffect(() => {
+    if (!round || showing || hover) return
+    const t = setTimeout(() => setSince(null), LINGER_MS)
+    return () => clearTimeout(t)
+  }, [round, showing, hover])
+  const close = () => { end(); setSince(null) }
+
+  const replies = round ? messages.slice(since).filter(m => m.role === 'assistant') : []
+  const reply = replies[replies.length - 1]
+  const bodyRef = useRef(null)
+  useEffect(() => { const el = bodyRef.current; if (el) el.scrollTop = el.scrollHeight }, [reply?.content, live])
+
+  if (!floatingMic || !voiceSupported()) return null
+  // A chat on screen has its own mic; the corner one stays only to finish what it started.
+  if (chatsOnScreen > 0 && !round && !working) return null
+
+  const lastTool = reply?.tools?.filter(t => typeof t === 'object').slice(-1)[0]
+  const status = listening ? 'Listening'
+    : voice.state === 'transcribing' ? 'Transcribing'
+    : speaking ? 'Speaking'
+    : busy ? (lastTool && !lastTool.status ? toolLabel(lastTool.name) : reply?.content ? 'Answering' : 'Thinking')
+    : conversing ? 'Voice mode' : 'Atlas'
+  const shortcut = bindings?.voice ? ` (${displayCombo(bindings.voice)})` : ''
+
+  const button = {
+    label: listening ? 'Stop and send' : speaking ? 'Stop speaking' : 'Talk to Atlas',
+    icon: listening ? <CheckIcon /> : speaking ? <StopIcon /> : <MicIcon />,
+    on: listening || speaking,
+  }
+
+  return (
+    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{ position: 'fixed', left, bottom, zIndex: 150, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10, pointerEvents: 'none' }}>
+      {round && (
+        <div role="status" aria-live="polite" className="voice-dock-card"
+          style={{ pointerEvents: 'auto', width: 'min(360px, calc(100vw - 32px))', borderRadius: 'var(--radius-lg)', background: 'var(--surface)', border: '1px solid var(--bd)', boxShadow: 'var(--shadow-pop)', overflow: 'hidden', transformOrigin: 'bottom left' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 10px 8px 14px' }}>
+            <span className={listening || busy ? 'voice-dock-pulse' : undefined}
+              style={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', background: listening ? 'var(--accent)' : busy || speaking ? 'var(--sage)' : 'var(--faint)' }} />
+            <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: 'var(--mid)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {[status, conversing && status !== 'Voice mode' ? 'voice mode' : null, queued.length ? `${queued.length} queued` : null].filter(Boolean).join(' · ')}
+            </span>
+            <IconButton size={28} aria-label="Open in chat" title="Open in chat"
+              onClick={() => { setSince(null); window.dispatchEvent(new CustomEvent('atlas:show-assistant')) }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 4h6v6M20 4l-8 8M10 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-4" /></svg>
+            </IconButton>
+            <IconButton size={28} aria-label={conversing ? 'End voice mode' : 'Close'} title={conversing ? 'End voice mode (Esc)' : 'Close'} onClick={close}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </IconButton>
+          </div>
+          <div ref={bodyRef} style={{ maxHeight: 'min(38vh, 320px)', overflowY: 'auto', padding: '0 14px 12px', textAlign: 'left' }}>
+            {voice.state !== 'idle'
+              ? <div style={{ fontSize: 13.5, lineHeight: 1.5, color: live ? 'var(--ink)' : 'var(--faint)' }}>{live || (listening ? 'Go ahead…' : '…')}</div>
+              : reply?.content
+                ? <div className="md-prose" style={{ fontSize: 13.5, lineHeight: 1.55 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(reply.content) }} />
+                : reply?.error ? <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>{reply.error}</div>
+                : <div style={{ fontSize: 13, color: 'var(--faint)' }}>{busy ? 'Working on it…' : conversing ? 'Go ahead whenever you’re ready.' : '—'}</div>}
+            {voice.error && <div style={{ marginTop: 6, fontSize: 12, color: 'var(--accent)' }}>{voice.error}</div>}
+          </div>
+        </div>
+      )}
+      <button type="button" onClick={() => toggleRef.current()} disabled={voice.state === 'transcribing'}
+        aria-label={button.label} title={button.label + shortcut} className={listening ? 'voice-dock-live' : undefined}
+        style={{ pointerEvents: 'auto', width: 48, height: 48, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0,
+                 border: button.on ? 'none' : '1px solid var(--bd)', background: button.on ? 'var(--accent)' : 'var(--surface)', color: button.on ? '#fff' : 'var(--mid)',
+                 boxShadow: button.on ? 'var(--shadow-accent)' : '0 4px 16px var(--bd-sm)', transition: 'background .15s, color .15s, transform .15s',
+                 opacity: voice.state === 'transcribing' ? 0.7 : 1 }}>
+        {button.icon}
+      </button>
+    </div>
+  )
+}

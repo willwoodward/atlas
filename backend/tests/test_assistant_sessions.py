@@ -317,3 +317,68 @@ class TestTranscribe:
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         resp = await client.post("/assistant/transcribe", content=b"x" * 5000, headers={**auth, "Content-Type": "audio/webm"})
         assert resp.status_code == 503
+
+
+class TestSettings:
+    async def test_safer_web_access_is_off_by_default_and_sent_with_each_run(self, client, auth, sent):
+        assert (await client.get("/assistant/settings", headers=auth)).json() == {"safe_web": False}
+        await _send(client, auth, "Hi")
+        assert sent[-1]["safe_web"] is False
+
+    async def test_turning_it_on_applies_from_the_next_message(self, client, auth, sent):
+        resp = await client.put("/assistant/settings", json={"safe_web": True}, headers=auth)
+        assert resp.json() == {"safe_web": True}
+        await _send(client, auth, "Hi")
+        assert sent[-1]["safe_web"] is True
+
+    async def test_settings_need_a_token(self, client):
+        assert (await client.get("/assistant/settings")).status_code == 401
+
+
+class TestSpeak:
+    @pytest.fixture
+    def openai(self, monkeypatch):
+        import httpx
+        import routers.assistant as assistant
+        calls = []
+        real = httpx.AsyncClient
+
+        def handler(request: httpx.Request):
+            calls.append(json.loads(request.read()))
+            return httpx.Response(200, content=b"ID3fake-mp3", headers={"content-type": "audio/mpeg"})
+
+        monkeypatch.setattr(assistant.httpx, "AsyncClient",
+                            lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        return calls
+
+    async def test_text_comes_back_as_audio(self, client, auth, openai):
+        resp = await client.post("/assistant/speak", json={"text": "You're free after three.", "voice": "sage"}, headers=auth)
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "audio/mpeg" and resp.content == b"ID3fake-mp3"
+        assert openai[0]["input"] == "You're free after three."
+        assert openai[0]["voice"] == "sage" and openai[0]["model"] == "gpt-4o-mini-tts"
+
+    async def test_an_unknown_voice_falls_back(self, client, auth, openai):
+        await client.post("/assistant/speak", json={"text": "Hi", "voice": "darth"}, headers=auth)
+        assert openai[0]["voice"] == "coral"
+
+    async def test_needs_a_token(self, client, openai):
+        assert (await client.post("/assistant/speak", json={"text": "Hi"})).status_code == 401
+        assert openai == []
+
+    async def test_long_text_is_refused(self, client, auth, openai):
+        resp = await client.post("/assistant/speak", json={"text": "x" * 2001}, headers=auth)
+        assert resp.status_code == 422 and openai == []
+
+
+class TestSpoken:
+    async def test_a_spoken_message_is_flagged_to_the_agent(self, client, auth, sent):
+        resp = await client.post("/assistant/runs", json={"message": "What's on today?", "spoken": True}, headers=auth)
+        assert resp.status_code == 200
+        await asyncio.sleep(0)
+        assert sent[-1]["spoken"] is True
+
+    async def test_typed_messages_are_not(self, client, auth, sent):
+        await _send(client, auth, "Hi")
+        assert sent[-1]["spoken"] is False

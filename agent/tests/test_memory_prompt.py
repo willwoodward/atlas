@@ -44,3 +44,11 @@ def test_no_prompt_falls_back():
 def test_the_app_guidance_is_always_there():
     p = build_system_prompt("Be brief.", "Will", "Monday", "")
     assert "show opens a view" in p and "can be undone" in p
+
+
+def test_a_spoken_turn_asks_for_a_speakable_reply_at_the_end():
+    typed = build_system_prompt("Be brief.", "Will", "Monday", "notes")
+    spoken = build_system_prompt("Be brief.", "Will", "Monday", "notes", spoken=True)
+    assert "read out" not in typed
+    assert spoken.startswith(typed)          # same prefix, so the cache still applies
+    assert "read out loud to Will" in spoken

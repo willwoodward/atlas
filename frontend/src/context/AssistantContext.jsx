@@ -2,6 +2,8 @@ import { createContext, useContext, useState, useRef, useEffect, useCallback } f
 import { useAuth } from './AuthContext.jsx'
 import { useRefresh } from './RefreshContext.jsx'
 import { onShortcut } from './KeybindsContext.jsx'
+import { speech, shouldSpeak } from '../lib/speech.js'
+import { getVoiceSettings } from '../lib/voiceSettings.js'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 // A copy of the current session, so the thread paints instantly on launch.
@@ -212,9 +214,23 @@ export function AssistantProvider({ children }) {
   const abortRef = useRef(null)
   const runRef = useRef(null)
   const sentHere = useRef(new Set())   // runs this device started
+  const speakRuns = useRef(new Set())  // …and whose replies are read aloud
   const busyRef = useRef(false)
   const sessionRef = useRef(initialSession)
   useEffect(() => { sessionRef.current = sessionId }, [sessionId])
+
+  // Spoken replies fetch their audio from the API with this device's token.
+  useEffect(() => {
+    speech.setFetcher(async text => {
+      const res = await fetch(`${API}/assistant/speak`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ text: text.slice(0, 2000), voice: getVoiceSettings().ttsVoice }),
+      })
+      if (!res.ok) throw new Error(`speak ${res.status}`)
+      return res.blob()
+    })
+  }, [token])
 
   // Cache for an instant first paint. Tool arguments, results and research
   // summaries are dropped — they run to several KB each; the server keeps the
@@ -258,6 +274,10 @@ export function AssistantProvider({ children }) {
 
     let touchedData = false
     const writes = new Set()   // toolUseIds of tools that change data
+    // Read aloud as it streams. A replay from the start would repeat what was
+    // already said, so only a run followed from its first event is spoken.
+    const speak = speakRuns.current.has(runId) && after === 0
+    if (speak) speech.begin(runId)
 
     try {
       const res = await fetch(`${API}/assistant/runs/${runId}/events?after=${after}`, {
@@ -285,6 +305,8 @@ export function AssistantProvider({ children }) {
           try { ev = JSON.parse(line.slice(6)) } catch { continue }
 
           if (ev.type === 'done') break outer
+          if (speak && ev.type === 'token') speech.push(runId, ev.text)
+          if (speak && ev.type === 'question') { speech.end(runId); speech.say(ev.question) }
           if (ev.type === 'error') { setError(ev.message); continue }
           if (ev.type === 'tool' && MUTATING_TOOLS.has(ev.name)) { touchedData = true; writes.add(ev.toolUseId) }
           // Show each change as soon as it lands, not only when the reply ends.
@@ -305,6 +327,7 @@ export function AssistantProvider({ children }) {
     } catch (err) {
       if (err.name !== 'AbortError') setError(err.message || 'Lost contact with the assistant.')
     } finally {
+      if (speak) { speech.end(runId); speakRuns.current.delete(runId) }
       setBusyBoth(false)
       abortRef.current = null
       runRef.current = null
@@ -401,6 +424,7 @@ export function AssistantProvider({ children }) {
   /** New chat: end the session for every device. It stays in the session log. */
   const clear = useCallback(() => {
     abortRef.current?.abort()
+    speech.cancel()
     const sid = sessionRef.current
     setMessages([])
     setQueued([])
@@ -417,6 +441,7 @@ export function AssistantProvider({ children }) {
   const stop = useCallback(async () => {
     // Stopping means stop: don't carry straight on with what was queued.
     setQueued([])
+    speech.cancel()
     const runId = runRef.current
     abortRef.current?.abort()
     if (runId) {
@@ -448,14 +473,17 @@ export function AssistantProvider({ children }) {
     }
   }, [token])
 
-  const send = useCallback(async (text) => {
+  // `spoken`: said aloud, not typed. Whether the reply is read out follows
+  // Assistant settings → Voice → "Read replies aloud".
+  const send = useCallback(async (text, { spoken = false } = {}) => {
     const prompt = (text || '').trim()
     if (!prompt) return
     // Atlas is mid-answer: hold this one and send it when the turn finishes.
     if (busyRef.current) {
-      setQueued(q => [...q, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, text: prompt }])
+      setQueued(q => [...q, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, text: prompt, spoken }])
       return
     }
+    const aloud = shouldSpeak(spoken)
 
     // Only the new message goes up; the server holds the rest of the session.
     setMessages(prev => [...prev, { role: 'user', content: prompt }, { role: 'assistant', content: '', tools: [] }])
@@ -466,7 +494,7 @@ export function AssistantProvider({ children }) {
       const res = await fetch(`${API}/assistant/runs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ message: prompt, session_id: sessionRef.current }),
+        body: JSON.stringify({ message: prompt, session_id: sessionRef.current, spoken: aloud }),
       })
       if (res.status === 409) {
         // A reply is still running that this device isn't following yet
@@ -475,7 +503,7 @@ export function AssistantProvider({ children }) {
         // it ends. The hold stops a tight retry loop if the server is a
         // moment behind.
         setMessages(prev => prev.slice(0, -2))
-        setQueued(q => [{ id: `${Date.now()}-retry`, text: prompt }, ...q])
+        setQueued(q => [{ id: `${Date.now()}-retry`, text: prompt, spoken }, ...q])
         setHold(true)
         setTimeout(() => setHold(false), 2000)
         setBusyBoth(false)
@@ -487,6 +515,7 @@ export function AssistantProvider({ children }) {
       }
       const { run_id, session_id, new_session } = await res.json()
       sentHere.current.add(run_id)
+      if (aloud) speakRuns.current.add(run_id)
       setSessionId(session_id)
       sessionRef.current = session_id
       const pair = [{ role: 'user', content: prompt, runId: run_id }, { role: 'assistant', content: '', tools: [], runId: run_id }]
@@ -507,32 +536,44 @@ export function AssistantProvider({ children }) {
     if (busy || hold || queued.length === 0) return
     const [next, ...rest] = queued
     setQueued(rest)
-    send(next.text)
+    send(next.text, { spoken: next.spoken })
   }, [busy, hold, queued, send])
   const unqueue = useCallback(id => setQueued(q => q.filter(x => x.id !== id)), [])
 
   // ── Voice shortcut ──
   // Each chat on screen registers a toggle; the shortcut goes to the most
-  // recent one. With no chat on screen, the layout is asked to show one (the
-  // desktop panel, or the Assistant page) and it starts listening as it mounts.
+  // recent one. With no chat on screen it goes to the corner mic (VoiceDock),
+  // or — with "Voice shortcut opens the chat" on, or no corner mic — the
+  // layout is asked to show a chat, which starts listening as it mounts.
+  // A conversation already running in the corner keeps the shortcut.
   const voiceTargets = useRef([])
   const pendingVoice = useRef(false)
+  const dock = useRef(null)            // { toggle, active }
+  const [chatsOnScreen, setChatsOnScreen] = useState(0)
   const registerVoiceTarget = useCallback(fn => {
     voiceTargets.current.push(fn)
+    setChatsOnScreen(voiceTargets.current.length)
     if (pendingVoice.current) { pendingVoice.current = false; setTimeout(fn, 0) }
-    return () => { voiceTargets.current = voiceTargets.current.filter(f => f !== fn) }
+    return () => {
+      voiceTargets.current = voiceTargets.current.filter(f => f !== fn)
+      setChatsOnScreen(voiceTargets.current.length)
+    }
+  }, [])
+  const registerVoiceDock = useCallback(d => {
+    dock.current = d
+    return () => { if (dock.current === d) dock.current = null }
   }, [])
   useEffect(() => onShortcut('voice', () => {
+    if (dock.current?.active()) return dock.current.toggle()
     const target = voiceTargets.current[voiceTargets.current.length - 1]
-    if (target) target()
-    else {
-      pendingVoice.current = true
-      window.dispatchEvent(new CustomEvent('atlas:show-assistant'))
-    }
+    if (target) return target()
+    if (dock.current && !getVoiceSettings().voiceOpensChat) return dock.current.toggle()
+    pendingVoice.current = true
+    window.dispatchEvent(new CustomEvent('atlas:show-assistant'))
   }), [])
 
   return (
-    <Ctx.Provider value={{ messages, busy, error, send, stop, clear, answer, registerVoiceTarget, queued, unqueue }}>
+    <Ctx.Provider value={{ messages, busy, error, send, stop, clear, answer, registerVoiceTarget, registerVoiceDock, chatsOnScreen, queued, unqueue }}>
       {children}
     </Ctx.Provider>
   )

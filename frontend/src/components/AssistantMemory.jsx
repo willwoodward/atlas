@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import Sheet from './Sheet.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { useVoiceSettings, setVoiceSettings, CONVERSATION_SILENCE } from '../lib/voiceSettings.js'
+import { useVoiceSettings, setVoiceSettings, CONVERSATION_SILENCE, TTS_VOICES } from '../lib/voiceSettings.js'
+import { speech, unlockAudio } from '../lib/speech.js'
 import { useKeybinds } from '../context/KeybindsContext.jsx'
 import { displayCombo } from '../lib/keybinds.js'
-import { Button, Switch, field, kbd } from './ui.jsx'
+import { Button, Switch, Select, field, kbd } from './ui.jsx'
 import { useAssistantPrefs, setAssistantPrefs } from '../lib/assistantPrefs.js'
 import { useRefresh } from '../context/RefreshContext.jsx'
 import { openShow } from '../lib/focus.js'
@@ -142,6 +143,7 @@ function ChangesLog({ onOpen }) {
         detail="When Atlas edits something, open it so you see the change (on a laptop; the chat moves to the side panel). Asking it to show you something always works.">
         <Switch checked={followAlong} onChange={v => setAssistantPrefs({ followAlong: v })} label="Show me what Atlas changes" />
       </SettingRow>
+      <SafeWebSetting />
       <div style={{ fontSize: 12.5, color: 'var(--mid)', margin: '14px 0 8px' }}>Every change Atlas makes is listed here and can be undone.</div>
       {err && <div style={{ fontSize: 12.5, color: 'var(--accent)', marginBottom: 8 }}>{err}</div>}
       {actions === null && !err && <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</div>}
@@ -163,6 +165,33 @@ function ChangesLog({ onOpen }) {
   )
 }
 
+// Stored on the server (it changes which tools the agent gets), so it's the
+// same on every device. Applies from the next message.
+function SafeWebSetting() {
+  const { token } = useAuth()
+  const [on, setOn] = useState(null)
+  const [err, setErr] = useState(null)
+  const call = async (init) => {
+    const res = await fetch(`${API}/assistant/settings`, {
+      ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) throw new Error(`Couldn't ${init ? 'save' : 'load'} the setting (${res.status})`)
+    return res.json()
+  }
+  useEffect(() => { call().then(s => setOn(s.safe_web)).catch(e => setErr(e.message)) }, []) // eslint-disable-line
+  const change = async v => {
+    setOn(v)
+    try { setOn((await call({ method: 'PUT', body: JSON.stringify({ safe_web: v }) })).safe_web) }
+    catch (e) { setOn(!v); setErr(e.message) }
+  }
+  return (
+    <SettingRow title="Safer web access"
+      detail={err || 'Atlas can only read web pages (no sending data), only open links that came up in a search, on a page it opened or in your messages, and never internal addresses. Protects against web pages that try to trick it into leaking your data. Applies from your next message.'}>
+      <Switch checked={!!on} onChange={change} label="Safer web access" disabled={on === null} />
+    </SettingRow>
+  )
+}
+
 const SILENCE_OPTIONS = [0, 1, 2, 3, 4, 5, 7, 10]
 
 function SettingRow({ title, detail, children }) {
@@ -177,8 +206,10 @@ function SettingRow({ title, detail, children }) {
   )
 }
 
+const SPEAK_OPTIONS = [['voice', 'When I speak'], ['always', 'Always'], ['never', 'Never']]
+
 function VoiceSettings() {
-  const { silenceSeconds, autoSend, keepListening } = useVoiceSettings()
+  const { silenceSeconds, autoSend, keepListening, speakReplies, ttsVoice, bargeIn, floatingMic, voiceOpensChat } = useVoiceSettings()
   const { bindings } = useKeybinds() || { bindings: {} }
   return (
     <div>
@@ -201,6 +232,37 @@ function VoiceSettings() {
       <SettingRow title="Keep listening"
         detail={`A hands-free conversation: after Atlas replies, it starts listening again. Messages send when you pause${silenceSeconds ? '' : ` (${CONVERSATION_SILENCE} seconds, since stopping on a pause is off)`}. Say nothing, or press Esc, to end it.`}>
         <Switch checked={keepListening} onChange={v => setVoiceSettings({ keepListening: v })} label="Keep listening" />
+      </SettingRow>
+
+      <SettingRow title="Read replies aloud"
+        detail="Atlas talks back, starting as soon as the first sentence is ready. “When I speak” keeps typed chats quiet. Replies to be read out are kept short.">
+        <Select aria-label="Read replies aloud" value={speakReplies} onChange={e => setVoiceSettings({ speakReplies: e.target.value })} style={{ fontSize: 13 }}>
+          {SPEAK_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </Select>
+      </SettingRow>
+      {speakReplies !== 'never' && <>
+        <SettingRow title="Voice" detail="Which voice reads replies.">
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <Select aria-label="Voice" value={ttsVoice} onChange={e => setVoiceSettings({ ttsVoice: e.target.value })} style={{ fontSize: 13, textTransform: 'capitalize' }}>
+              {TTS_VOICES.map(v => <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>)}
+            </Select>
+            <Button size="sm" variant="ghost" onClick={() => { unlockAudio(); speech.cancel(); speech.say('Hi, this is how I sound. Say the word and I’ll get on with it.') }}>Try</Button>
+          </div>
+        </SettingRow>
+        <SettingRow title="Stop when I talk"
+          detail="Talking over Atlas cuts the reply off, so you can interrupt. The mic button and the voice shortcut always do.">
+          <Switch checked={bargeIn} onChange={v => setVoiceSettings({ bargeIn: v })} label="Stop when I talk" />
+        </SettingRow>
+      </>}
+
+      <SettingRow title="Corner mic"
+        detail="A mic button in the bottom-left corner when the chat isn't open, so you can talk to Atlas from any page. The reply shows in a small card above it.">
+        <Switch checked={floatingMic} onChange={v => setVoiceSettings({ floatingMic: v })} label="Corner mic" />
+      </SettingRow>
+      <SettingRow title="Voice shortcut opens the chat"
+        detail={`When the chat isn't open, ${bindings.voice ? displayCombo(bindings.voice) : 'the voice shortcut'} opens the assistant panel and listens there${floatingMic ? ', instead of using the corner mic' : ''}.`}>
+        <Switch checked={voiceOpensChat || !floatingMic} onChange={v => setVoiceSettings({ voiceOpensChat: v })} label="Voice shortcut opens the chat" disabled={!floatingMic}
+          title={!floatingMic ? 'Always, while the corner mic is off' : undefined} />
       </SettingRow>
     </div>
   )

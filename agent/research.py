@@ -25,7 +25,9 @@ from strands.agent.conversation_manager import (
     SlidingWindowConversationManager,
 )
 from strands.models.openai_responses import OpenAIResponsesModel
-from strands_tools import http_request, tavily
+from strands_tools import tavily
+
+from web_fetch import UrlCollector, web_tools
 
 from progress import emit as _emit, set_progress_queue  # noqa: F401 (re-exported for runtime)
 from tool_trace import ToolTracer, summarise_args
@@ -153,7 +155,8 @@ async def _attempt(index: int, objective: str, context: str, retry: bool) -> str
     agent = Agent(
         model=_subagent_model(),
         system_prompt=prompt + (RETRY_NOTE if retry else ""),
-        tools=[tavily.tavily_search, tavily.tavily_extract, http_request.http_request],
+        # Open web tools, or the safer read-only pair (Assistant settings).
+        tools=[tavily.tavily_search, *web_tools(include_extract=True)],
         conversation_manager=SlidingWindowConversationManager(
             # A retry gets a tighter window still — the first run proved the
             # objective generates more material than the default can hold.
@@ -163,7 +166,7 @@ async def _attempt(index: int, objective: str, context: str, retry: bool) -> str
                 compression_threshold=COMPRESSION_THRESHOLD,
             ),
         ),
-        hooks=[_activity_tracer(index)],
+        hooks=[_activity_tracer(index), UrlCollector()],
         callback_handler=None,
         name=f"researcher-{index + 1}{'-retry' if retry else ''}",
     )

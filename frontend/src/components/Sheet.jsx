@@ -113,6 +113,9 @@ export default function Sheet({
       <div ref={panelRef} role="dialog" aria-modal="true" tabIndex={-1}
         aria-label={ariaLabel || (typeof title === 'string' ? title : undefined)}
         style={{
+          // Sheets open from all sorts of places (e.g. the centred empty chat);
+          // they shouldn't inherit the opener's text alignment.
+          textAlign: 'left',
           background: 'var(--surface)', boxShadow: '0 24px 60px rgba(0,0,0,.24)',
           display: 'flex', flexDirection: 'column', overflow: 'hidden', outline: 'none',
           boxSizing: 'border-box', transition, ...panelStyle,

@@ -7,9 +7,9 @@ import { useIsMobile } from '../hooks/useIsMobile.js'
 import { assistantPrompts } from '../data.js'
 import { SettingsButton, MemoryEditChip } from './AssistantMemory.jsx'
 import { ToolCards, ActionUndoChip } from './ChatCards.jsx'
-import { useVoiceInput, voiceSupported } from '../hooks/useVoiceInput.js'
-import { useVoiceSettings, getVoiceSettings, CONVERSATION_SILENCE, CONVERSATION_WAIT } from '../lib/voiceSettings.js'
-import { checkSignOff } from '../lib/voiceSignoff.js'
+import { voiceSupported } from '../hooks/useVoiceInput.js'
+import { useVoiceConversation } from '../hooks/useVoiceConversation.js'
+import { speech, useSpeaking, unlockAudio } from '../lib/speech.js'
 import { useKeybinds } from '../context/KeybindsContext.jsx'
 import { displayCombo } from '../lib/keybinds.js'
 
@@ -73,7 +73,7 @@ const TOOL_LABELS = {
   show: 'Opening it for you',
 }
 
-const toolLabel = name => TOOL_LABELS[name] || name.replace(/_/g, ' ')
+export const toolLabel = name => TOOL_LABELS[name] || name.replace(/_/g, ' ')
 
 function prettyJson(raw) {
   if (!raw) return ''
@@ -389,7 +389,6 @@ const COLUMN = 720
 export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240, showNewChat = true, panel = false }) {
   // Thread state lives in AssistantContext so it survives navigating away and back.
   const { messages, busy, error, send, stop, clear, answer, registerVoiceTarget, queued, unqueue } = useAssistant()
-  const { autoSend } = useVoiceSettings()
   const { bindings } = useKeybinds() || {}
   // The mobile shell renders the assistant with no padding (it was built for the
   // centred orb), so the chat supplies its own gutters and safe-area inset there.
@@ -416,8 +415,9 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
     if (nearBottom) page.scrollTo({ top: page.scrollHeight, behavior: 'smooth' })
   }, [messages, busy, contained])
 
-  const submit = (text) => {
-    send(text)
+  const submit = (text, opts) => {
+    unlockAudio()
+    send(text, opts)
     setInput('')
     if (taRef.current) taRef.current.style.height = 'auto'
   }
@@ -430,70 +430,28 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
   // Voice: words stream into the box as a live preview while you speak, then
   // the accurate transcript replaces the preview when you stop. With auto-send
   // on (the default) it goes straight off; otherwise it's left in the box so a
-  // misheard word can be fixed first. Auto-send waits if Atlas is mid-answer.
-  const [live, setLive] = useState('')
-  const joinText = (a, b) => (a.trim() && b ? a.trimEnd() + ' ' : a) + b
-  // Conversation mode ("Keep listening"): each pause sends what you said and
-  // listening starts again straight away, so you can line up the next thing
-  // while Atlas is still answering — it's queued and sent when that turn ends.
-  // It waits up to CONVERSATION_WAIT for you to start talking (thinking time),
-  // and ends when you sign off ("that's all, thanks"), on Cancel / Esc / the
-  // shortcut / "End", after that long in silence, or when the chat goes away.
-  const [conversing, setConversing] = useState(false)
-  const listenAgain = useRef(false)
-  const conversationOpts = () => ({ silenceSeconds: getVoiceSettings().silenceSeconds || CONVERSATION_SILENCE, nothingSeconds: CONVERSATION_WAIT })
-
-  const voice = useVoiceInput(text => {
-    setLive('')
-    if (conversing) {
-      const { end, rest } = checkSignOff(joinText(input, text))
-      if (rest) submit(rest)            // sends now, or queues behind the current turn
-      if (end) { setConversing(false); return }
-      listenAgain.current = true
-      return
-    }
-    if (autoSend && text) { submit(joinText(input, text)); return }
-    setInput(prev => joinText(prev, text))
-    requestAnimationFrame(() => { autosize(); const el = taRef.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length) } })
-  }, text => { setLive(text); requestAnimationFrame(autosize) }, {
-    onNothingHeard: () => setConversing(false),
+  // misheard word can be fixed first. Conversation mode, barge-in and the rest
+  // live in useVoiceConversation, shared with the corner mic.
+  const { voice, live, conversing, listening, begin: beginVoice, end: endVoice, toggle: toggleVoice, joinText } = useVoiceConversation({
+    draft: input,
+    onSend: text => submit(text, { spoken: true }),
+    onDraft: text => {
+      setInput(text)
+      requestAnimationFrame(() => { autosize(); const el = taRef.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length) } })
+    },
   })
-
-  const beginVoice = () => {
-    const { keepListening } = getVoiceSettings()
-    setConversing(keepListening)
-    listenAgain.current = false
-    voice.start(keepListening ? conversationOpts() : {})
-  }
-  const endVoice = () => { setConversing(false); listenAgain.current = false; voice.cancel() }
-
-  // The last message is away: listen for the next one.
-  useEffect(() => {
-    if (!conversing || voice.state !== 'idle' || !listenAgain.current) return
-    listenAgain.current = false
-    voice.start(conversationOpts())
-  }, [conversing, voice.state]) // eslint-disable-line
+  useEffect(() => { requestAnimationFrame(autosize) }, [live]) // eslint-disable-line
 
   const canVoice = voiceSupported()
   // The voice shortcut: start, or end — in conversation mode it ends the
-  // conversation; otherwise it stops and transcribes.
+  // conversation; otherwise it stops and transcribes. Cuts a spoken reply off.
   const voiceRef = useRef(null)
-  voiceRef.current = () => {
-    if (conversing) endVoice()
-    else if (voice.state === 'recording') voice.stop()
-    else if (voice.state === 'idle') beginVoice()
-  }
+  voiceRef.current = toggleVoice
   useEffect(() => {
     if (!canVoice) return
     return registerVoiceTarget(() => voiceRef.current())
   }, [canVoice, registerVoiceTarget])
-  const listening = voice.state === 'recording'
-  useEffect(() => {
-    if (!listening && !conversing) return
-    const onEsc = e => { if (e.key === 'Escape') endVoice() }
-    window.addEventListener('keydown', onEsc)
-    return () => window.removeEventListener('keydown', onEsc)
-  }, [listening, conversing]) // eslint-disable-line
+  const speaking = useSpeaking()
   const clock = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
   const onKeyDown = e => {
@@ -527,9 +485,13 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
           style={{ alignSelf: 'center', background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12.5, fontFamily: 'inherit', cursor: 'pointer', padding: 4, flex: 'none' }}>Cancel</button>
       )}
       {canVoice && (
-        <button onClick={() => (listening ? voice.stop() : beginVoice())} disabled={voice.state === 'transcribing'}
-          aria-label={listening ? 'Stop and transcribe' : 'Speak'}
-          title={(listening ? 'Stop and transcribe' : 'Speak') + (bindings?.voice ? ` (${displayCombo(bindings.voice)})` : '')}
+        <button onClick={() => {
+            // While Atlas is talking, the tap only cuts the reply off.
+            if (speech.speaking && !listening) { speech.cancel(); return }
+            if (listening) voice.stop(); else beginVoice()
+          }} disabled={voice.state === 'transcribing'}
+          aria-label={listening ? 'Stop and transcribe' : speaking ? 'Stop speaking' : 'Speak'}
+          title={(listening ? 'Stop and transcribe' : speaking ? 'Stop speaking' : 'Speak') + (bindings?.voice ? ` (${displayCombo(bindings.voice)})` : '')}
           style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 10, border: listening ? 'none' : '1px solid var(--bd)', background: listening ? 'var(--accent)' : 'transparent', color: listening ? '#fff' : 'var(--muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: voice.state === 'transcribing' ? 'default' : 'pointer', transition: 'all .12s' }}>
           {listening
             ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5L20 7" /></svg>
@@ -552,14 +514,15 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
   )
   // While in conversation mode, a strip above the box says so (it's on even
   // while Atlas is answering and the mic is off) and offers a way out.
-  const voiceBanner = conversing && (
+  const voiceBanner = (conversing || speaking) && (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', maxWidth: 560, marginBottom: 6, fontSize: 12.5, color: 'var(--mid)' }}>
       <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flex: 'none' }} />
       <span style={{ flex: 1 }}>
-        {['Voice mode', listening ? 'listening' : voice.state === 'transcribing' ? 'transcribing' : null, busy ? 'Atlas is answering' : null,
+        {[conversing ? 'Voice mode' : null, speaking ? 'Atlas is speaking' : null, listening ? 'listening' : voice.state === 'transcribing' ? 'transcribing' : null, busy && !speaking ? 'Atlas is answering' : null,
           queued.length ? `${queued.length} queued` : null].filter(Boolean).join(' · ')}
       </span>
-      <button onClick={endVoice} style={{ fontSize: 12, padding: '2px 9px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', fontFamily: 'inherit', cursor: 'pointer' }}>End</button>
+      {speaking && conversing && <button onClick={() => speech.cancel()} style={{ fontSize: 12, padding: '2px 9px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', fontFamily: 'inherit', cursor: 'pointer' }}>Skip</button>}
+      <button onClick={conversing ? endVoice : () => speech.cancel()} style={{ fontSize: 12, padding: '2px 9px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', fontFamily: 'inherit', cursor: 'pointer' }}>{conversing ? 'End' : 'Stop'}</button>
     </div>
   )
   const voiceError = voice.error && (

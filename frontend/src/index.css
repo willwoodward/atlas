@@ -191,3 +191,18 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 @media (prefers-reduced-motion: reduce) {
   .search-flash { animation: none; box-shadow: 0 0 0 2px rgba(193, 95, 60, .55); }
 }
+
+/* The corner mic (VoiceDock): its card grows out of the button, the dot
+   pulses while it listens or works, and the button rings while listening. */
+.voice-dock-card { animation: voice-dock-in .2s cubic-bezier(.2, .8, .2, 1); }
+@keyframes voice-dock-in { from { opacity: 0; transform: translateY(8px) scale(.96); } }
+.voice-dock-pulse { animation: voice-dock-pulse 1.2s ease-in-out infinite; }
+@keyframes voice-dock-pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+.voice-dock-live { animation: voice-dock-ring 1.6s ease-out infinite; }
+@keyframes voice-dock-ring {
+  0% { box-shadow: 0 0 0 0 rgba(193, 95, 60, .45); }
+  100% { box-shadow: 0 0 0 14px rgba(193, 95, 60, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-dock-card, .voice-dock-pulse, .voice-dock-live { animation: none; }
+}

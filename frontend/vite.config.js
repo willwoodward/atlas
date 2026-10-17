@@ -19,6 +19,9 @@ function contentSecurityPolicy(apiUrl) {
     "font-src 'self' https://fonts.gstatic.com",
     // Images in notes may be hosted anywhere; an image can't run code.
     "img-src 'self' data: blob: https:",
+    // Spoken replies play from blob: URLs; data: is the silent clip that
+    // unlocks audio on iOS (src/lib/speech.js).
+    "media-src 'self' blob: data:",
     `connect-src 'self' ${apiOrigin} https://www.googleapis.com https://api.github.com`,
     "worker-src 'self'",
     "manifest-src 'self'",

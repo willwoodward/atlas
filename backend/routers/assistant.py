@@ -27,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 import aiosqlite
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 import agent_actions
@@ -66,6 +66,9 @@ class RunRequest(BaseModel):
     session_id: str | None = None
     # Older clients send the whole thread instead. Still accepted, sessionless.
     messages: list[Message] | None = Field(None, min_length=1, max_length=60)
+    # Said aloud, and the reply will be read out: the agent keeps it short and
+    # speakable (no tables, lists or links).
+    spoken: bool = False
 
 
 def _now() -> str:
@@ -294,6 +297,7 @@ async def start_run(req: RunRequest, request: Request, user: dict = Depends(get_
         if session_id:
             await db.execute("UPDATE agent_sessions SET updated_at=? WHERE id=?", (now, session_id))
         await db.commit()
+        settings = await _settings(db)
         if session_id:
             async with db.execute(
                 "SELECT memory_version, prompt_version FROM agent_sessions WHERE id=?", (session_id,)
@@ -318,6 +322,8 @@ async def start_run(req: RunRequest, request: Request, user: dict = Depends(get_
         # The session's snapshot of its standing context.
         "memory": mem_text,
         "system_prompt": prompt_text,
+        "safe_web": settings["safe_web"],
+        "spoken": req.spoken,
     }).encode()
     # Forward the caller's own JWT — the agent re-validates it against
     # ALLOWED_EMAILS, and that second check is only meaningful if it's the real one.
@@ -620,6 +626,49 @@ for _kind in memory.KINDS:
     _document_routes(_kind)
 
 
+# ── Settings ─────────────────────────────────────────────────────────────────
+# Assistant settings that live on the server, so every device and every run
+# sees the same value. Stored in app_settings under "assistant.<name>".
+
+SETTINGS_DEFAULTS = {
+    # Read-only, seen-URLs-only web access instead of http_request (agent/web_fetch.py).
+    "safe_web": False,
+}
+
+
+async def _settings(db) -> dict:
+    async with db.execute("SELECT key, value FROM app_settings WHERE key LIKE 'assistant.%'") as c:
+        stored = {r["key"][len("assistant."):]: json.loads(r["value"]) for r in await c.fetchall()}
+    return {k: stored.get(k, v) for k, v in SETTINGS_DEFAULTS.items()}
+
+
+class SettingsIn(BaseModel):
+    safe_web: bool | None = None
+
+
+@router.get("/settings")
+async def get_settings(user: dict = Depends(get_current_user)):
+    db = await _connect()
+    try:
+        return await _settings(db)
+    finally:
+        await db.close()
+
+
+@router.put("/settings")
+async def put_settings(body: SettingsIn, user: dict = Depends(get_current_user)):
+    db = await _connect()
+    try:
+        for key, value in body.model_dump(exclude_none=True).items():
+            await db.execute("INSERT INTO app_settings (key, value) VALUES (?, ?) "
+                             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                             (f"assistant.{key}", json.dumps(value)))
+        await db.commit()
+        return await _settings(db)
+    finally:
+        await db.close()
+
+
 # ── Action log ───────────────────────────────────────────────────────────────
 
 @router.get("/actions")
@@ -692,6 +741,42 @@ async def transcribe(request: Request, user: dict = Depends(get_current_user)):
     if resp.status_code >= 400:
         raise HTTPException(502, f"Speech-to-text failed ({resp.status_code}): {resp.text[:200]}")
     return {"text": (resp.json().get("text") or "").strip()}
+
+
+# Spoken replies: the browser sends the reply a sentence or two at a time as it
+# streams in, and plays each clip as it arrives. Nothing is stored.
+TTS_MODEL = os.getenv("TTS_MODEL", "gpt-4o-mini-tts")
+TTS_VOICES = ("alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse")
+TTS_MAX_CHARS = 2000
+TTS_INSTRUCTIONS = ("Speak naturally and warmly, like a helpful assistant talking to someone "
+                    "they know well. Keep a relaxed, conversational pace.")
+
+
+class SpeakIn(BaseModel):
+    text: str = Field(..., min_length=1, max_length=TTS_MAX_CHARS)
+    voice: str = "coral"
+
+
+@router.post("/speak")
+async def speak(req: SpeakIn, user: dict = Depends(get_current_user)):
+    key = os.getenv("OPENAI_API_KEY")
+    if not key:
+        raise HTTPException(503, "Spoken replies need OPENAI_API_KEY on the server.")
+    voice = req.voice if req.voice in TTS_VOICES else "coral"
+    base = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
+            resp = await client.post(
+                f"{base}/audio/speech",
+                headers={"Authorization": f"Bearer {key}"},
+                json={"model": TTS_MODEL, "voice": voice, "input": req.text,
+                      "instructions": TTS_INSTRUCTIONS, "response_format": "mp3"},
+            )
+    except httpx.HTTPError:
+        raise HTTPException(502, "Couldn't reach the text-to-speech service.")
+    if resp.status_code >= 400:
+        raise HTTPException(502, f"Text-to-speech failed ({resp.status_code}): {resp.text[:200]}")
+    return Response(content=resp.content, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
 
 
 @router.get("/health")
