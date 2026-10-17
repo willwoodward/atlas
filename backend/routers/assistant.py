@@ -140,7 +140,7 @@ async def _live_session(db, session_id: str | None) -> dict | None:
 
 async def _current_session_id(db) -> str | None:
     async with db.execute(
-        "SELECT id FROM agent_sessions WHERE closed=0 ORDER BY updated_at DESC LIMIT 1"
+        "SELECT id FROM agent_sessions WHERE closed=0 AND kind='chat' ORDER BY updated_at DESC LIMIT 1"
     ) as c:
         row = await c.fetchone()
     if not row:
@@ -260,6 +260,8 @@ async def start_run(req: RunRequest, request: Request, user: dict = Depends(get_
             # afresh" ("New chat" closes the old one first). Join the live one,
             # so two devices never end up in parallel conversations.
             live = await _live_session(db, req.session_id or await _current_session_id(db))
+            if live and live.get("kind", "chat") != "chat":
+                live = None   # an inbox thread: replies to those go through /inbox
             if live:
                 session_id = live["id"]
                 async with db.execute(
@@ -271,18 +273,7 @@ async def start_run(req: RunRequest, request: Request, user: dict = Depends(get_
                         # replies into one thread.
                         raise HTTPException(409, "The assistant is still working on the last message.")
             else:
-                session_id, new_session = str(uuid.uuid4()), True
-                # Snapshot the memory and prompt now. Every turn of this session
-                # uses these versions, so the system prompt stays identical (and
-                # cacheable) for the whole conversation; edits made during it,
-                # by anyone, apply from the next session.
-                mem_v = (await memory.current(db, "memory"))["version"] or 0
-                prompt_v = (await memory.current(db, "prompt"))["version"] or 0
-                await db.execute(
-                    "INSERT INTO agent_sessions (id, created_at, updated_at, title, memory_version, prompt_version) "
-                    "VALUES (?,?,?,?,?,?)",
-                    (session_id, now, now, " ".join(prompt.split())[:80], mem_v, prompt_v),
-                )
+                session_id, new_session = await new_session_row(db, prompt), True
             history = await _history(db, session_id)
             messages = [*history, {"role": "user", "content": prompt}]
         else:
@@ -297,39 +288,59 @@ async def start_run(req: RunRequest, request: Request, user: dict = Depends(get_
         if session_id:
             await db.execute("UPDATE agent_sessions SET updated_at=? WHERE id=?", (now, session_id))
         await db.commit()
-        settings = await _settings(db)
-        if session_id:
-            async with db.execute(
-                "SELECT memory_version, prompt_version FROM agent_sessions WHERE id=?", (session_id,)
-            ) as c:
-                snap = await c.fetchone()
-            # Sessions from before snapshots existed have NULLs: they get the
-            # current versions, as they always did.
-            mem_text = (await memory.content_at(db, "memory", snap["memory_version"])
-                        if snap["memory_version"] is not None else (await memory.current(db, "memory"))["content"])
-            prompt_text = (await memory.content_at(db, "prompt", snap["prompt_version"])
-                           if snap["prompt_version"] is not None else (await memory.current(db, "prompt"))["content"])
-        else:
-            mem_text = (await memory.current(db, "memory"))["content"]
-            prompt_text = (await memory.current(db, "prompt"))["content"]
+        body = await run_body(db, run_id, session_id, messages, spoken=req.spoken)
     finally:
         await db.close()
 
-    # run_id goes to the agent so ask_user has an address to be answered at.
-    body = json.dumps({
-        "messages": messages,
-        "run_id": run_id,
-        # The session's snapshot of its standing context.
-        "memory": mem_text,
-        "system_prompt": prompt_text,
-        "safe_web": settings["safe_web"],
-        "spoken": req.spoken,
-    }).encode()
     # Forward the caller's own JWT — the agent re-validates it against
     # ALLOWED_EMAILS, and that second check is only meaningful if it's the real one.
     auth = request.headers.get("authorization", "")
     _tasks[run_id] = asyncio.create_task(_drive_run(run_id, body, auth))
     return {"run_id": run_id, "status": "running", "session_id": session_id, "new_session": new_session}
+
+
+async def new_session_row(db, title: str, kind: str = "chat") -> str:
+    """Start a session. Its memory and prompt are snapshotted now: every turn
+    uses these versions, so the system prompt stays identical (and cacheable)
+    for the whole conversation; edits made during it apply from the next one."""
+    session_id, now = str(uuid.uuid4()), _now()
+    mem_v = (await memory.current(db, "memory"))["version"] or 0
+    prompt_v = (await memory.current(db, "prompt"))["version"] or 0
+    await db.execute(
+        "INSERT INTO agent_sessions (id, created_at, updated_at, title, memory_version, prompt_version, kind) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (session_id, now, now, " ".join(title.split())[:80], mem_v, prompt_v, kind),
+    )
+    return session_id
+
+
+async def run_body(db, run_id: str, session_id: str | None, messages: list[dict], **extra) -> bytes:
+    """What the agent is sent for a run: the turns, the session's snapshot of
+    memory and prompt, server-side settings, and any per-run flags."""
+    settings = await _settings(db)
+    if session_id:
+        async with db.execute(
+            "SELECT memory_version, prompt_version FROM agent_sessions WHERE id=?", (session_id,)
+        ) as c:
+            snap = await c.fetchone()
+        # Sessions from before snapshots existed have NULLs: they get the
+        # current versions, as they always did.
+        mem_text = (await memory.content_at(db, "memory", snap["memory_version"])
+                    if snap["memory_version"] is not None else (await memory.current(db, "memory"))["content"])
+        prompt_text = (await memory.content_at(db, "prompt", snap["prompt_version"])
+                       if snap["prompt_version"] is not None else (await memory.current(db, "prompt"))["content"])
+    else:
+        mem_text = (await memory.current(db, "memory"))["content"]
+        prompt_text = (await memory.current(db, "prompt"))["content"]
+    # run_id goes to the agent so ask_user has an address to be answered at.
+    return json.dumps({
+        "messages": messages,
+        "run_id": run_id,
+        "memory": mem_text,
+        "system_prompt": prompt_text,
+        "safe_web": settings["safe_web"],
+        **extra,
+    }).encode()
 
 
 async def _history(db, session_id: str) -> list[dict]:
@@ -534,7 +545,7 @@ async def list_sessions(limit: int = 20, user: dict = Depends(get_current_user))
         async with db.execute(
             "SELECT s.id, s.created_at, s.updated_at, s.title, s.closed, COUNT(r.id) AS turns "
             "FROM agent_sessions s LEFT JOIN agent_runs r ON r.session_id = s.id "
-            "GROUP BY s.id ORDER BY s.updated_at DESC LIMIT ?", (min(max(limit, 1), 200),),
+            "WHERE s.kind = 'chat' GROUP BY s.id ORDER BY s.updated_at DESC LIMIT ?", (min(max(limit, 1), 200),),
         ) as c:
             rows = [{**dict(r), "closed": bool(r["closed"])} for r in await c.fetchall()]
         return {"sessions": rows}

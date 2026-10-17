@@ -16,6 +16,8 @@ import FinancesPage  from './FinancesPage.jsx'
 import FitnessPage   from './FitnessPage.jsx'
 import GoalsPage     from './GoalsPage.jsx'
 import AssistantPage from './AssistantPage.jsx'
+import InboxPage     from './InboxPage.jsx'
+import { useInbox } from '../context/InboxContext.jsx'
 import AccountsPage  from './AccountsPage.jsx'
 import AssistantPanel from './AssistantPanel.jsx'
 import SearchPalette from '../components/SearchPalette.jsx'
@@ -24,12 +26,19 @@ import { requestFocus, showTarget } from '../lib/focus.js'
 import { getAssistantPrefs } from '../lib/assistantPrefs.js'
 
 const PANEL_KEY = 'atlas:assistant-panel'
+const SIDEBAR_KEY = 'atlas:sidebar-collapsed'
+// The sidebar's two widths. Collapsed, it's a rail of icons.
+const SIDEBAR_WIDE = 236
+const SIDEBAR_RAIL = 68
+// Matches the assistant panel's open/close.
+const SLIDE = '.26s cubic-bezier(.2, .8, .2, 1)'
 
 const I = (...kids) => (
   <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{kids}</svg>
 )
 const navIcons = {
   home:      I(<path d="M4 11l8-7 8 7" key="a"/>, <path d="M6 10v9h4v-6h4v6h4v-9" key="b"/>),
+  inbox:     I(<path d="M4 13l2.5-7.5A2 2 0 018.4 4h7.2a2 2 0 011.9 1.5L20 13" key="a"/>, <path d="M4 13v5a2 2 0 002 2h12a2 2 0 002-2v-5h-5l-1.5 2.5h-3L9 13H4z" key="b"/>),
   calendar:  I(<rect x="4" y="5" width="16" height="16" rx="2" key="a"/>, <line x1="4" y1="9" x2="20" y2="9" key="b"/>, <line x1="9" y1="3" x2="9" y2="6" key="c"/>, <line x1="15" y1="3" x2="15" y2="6" key="d"/>),
   habits:    I(<path d="M12 3c1.5 3-1 4.5-1 7a3 3 0 006 0c0-1-.4-2-1-2.6.2 2-1 2.6-1 2.6C13 8 12 5 12 3z" key="a"/>, <path d="M9 15a3 3 0 006 0" key="b"/>),
   todos:     I(<rect x="4" y="4" width="16" height="16" rx="3" key="a"/>, <path d="M8 12l3 3 5-6" key="b"/>),
@@ -43,6 +52,7 @@ const navIcons = {
 
 const NAV_MAIN = [
   { id: 'home',     label: 'Home' },
+  { id: 'inbox',    label: 'Inbox' },
   { id: 'calendar', label: 'Calendar' },
   { id: 'habits',   label: 'Habits' },
   { id: 'todos',    label: 'To-do' },
@@ -57,10 +67,19 @@ const NAV_BOTTOM = [
   { id: 'assistant', label: 'Assistant' },
 ]
 
-function NavBtn({ id, label, active, onClick }) {
+// Collapsed, labels fade and clip rather than unmount, so the width
+// animation has text to slide over and screen readers still get a name.
+const labelStyle = collapsed => ({
+  whiteSpace: 'nowrap', overflow: 'hidden', minWidth: 0,
+  opacity: collapsed ? 0 : 1, transition: `opacity ${collapsed ? '.12s' : '.2s .08s'}`,
+})
+
+function NavBtn({ id, label, active, onClick, collapsed, badge }) {
   return (
     <button
       onClick={onClick}
+      title={collapsed ? label + (badge ? ` · ${badge} unread` : '') : undefined}
+      aria-label={badge ? `${label}, ${badge} unread` : label}
       style={{
         display: 'flex', alignItems: 'center', gap: 11, width: '100%', padding: '9px 12px',
         border: 'none', borderRadius: 9, cursor: 'pointer', textAlign: 'left',
@@ -70,8 +89,13 @@ function NavBtn({ id, label, active, onClick }) {
         color: active ? 'var(--ink)' : 'var(--mid)',
       }}
     >
-      <span style={{ display: 'flex', width: 19, height: 19, flex: 'none' }}>{navIcons[id]}</span>
-      <span>{label}</span>
+      <span style={{ display: 'flex', width: 19, height: 19, flex: 'none', position: 'relative' }}>
+        {navIcons[id]}
+        {/* Collapsed, the count shrinks to a dot on the icon. */}
+        {badge > 0 && collapsed && <span style={{ position: 'absolute', top: -2, right: -3, width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', border: '1.5px solid var(--surface-2)' }} />}
+      </span>
+      <span style={{ ...labelStyle(collapsed), flex: 1 }}>{label}</span>
+      {badge > 0 && !collapsed && <span style={{ flex: 'none', minWidth: 18, padding: '1px 6px', borderRadius: 99, background: 'var(--accent)', color: '#fff', fontSize: 11, fontWeight: 700, textAlign: 'center' }}>{badge}</span>}
     </button>
   )
 }
@@ -202,6 +226,12 @@ export default function DesktopLayout() {
   // Its shortcut (Ctrl+. by default) toggles it from anywhere, and the voice
   // shortcut opens it when no chat is on screen.
   useEffect(() => onShortcut('assistantPanel', () => setPanelOpen(o => !o)), [])
+  // The sidebar folds down to an icon rail (Ctrl+B by default). Remembered.
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(SIDEBAR_KEY) === '1' } catch { return false } })
+  useEffect(() => { try { localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0') } catch { /* not kept */ } }, [collapsed])
+  useEffect(() => onShortcut('sidebar', () => setCollapsed(c => !c)), [])
+  const sidebarWidth = collapsed ? SIDEBAR_RAIL : SIDEBAR_WIDE
+  const { counts: inboxCounts } = useInbox()
   useEffect(() => {
     const show = () => setPanelOpen(true)
     window.addEventListener('atlas:show-assistant', show)
@@ -238,6 +268,7 @@ export default function DesktopLayout() {
 
   const pages = {
     home:      <HomePage />,
+    inbox:     <InboxPage />,
     calendar:  <CalendarPage />,
     habits:    <HabitsPage />,
     todos:     <TodoPage />,
@@ -253,28 +284,28 @@ export default function DesktopLayout() {
     <div style={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden', background: 'var(--bg)' }}>
 
       {/* Sidebar */}
-      <aside style={{ width: 236, flex: 'none', height: '100%', display: 'flex', flexDirection: 'column', padding: '22px 16px 16px', background: 'var(--surface-2)', borderRight: '1px solid var(--bd)' }}>
+      <aside style={{ width: sidebarWidth, flex: 'none', height: '100%', display: 'flex', flexDirection: 'column', padding: collapsed ? '22px 12px 16px' : '22px 16px 16px', background: 'var(--surface-2)', borderRight: '1px solid var(--bd)', overflow: 'hidden', transition: `width ${SLIDE}, padding ${SLIDE}` }}>
 
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '4px 8px 22px' }}>
-          <div style={{ width: 30, height: 30, borderRadius: 9, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px var(--accent-line)' }}>
+          <div style={{ width: 30, height: 30, flex: 'none', borderRadius: 9, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px var(--accent-line)' }}>
             <div style={{ width: 11, height: 11, borderRadius: '50%', background: 'var(--surface-2)' }} />
           </div>
-          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 19, fontWeight: 600, letterSpacing: '.01em', color: 'var(--ink)' }}>Atlas</div>
+          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 19, fontWeight: 600, letterSpacing: '.01em', color: 'var(--ink)', ...labelStyle(collapsed) }}>Atlas</div>
         </div>
 
         {/* Main nav */}
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, overflow: 'auto' }}>
+        <nav style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
           {NAV_MAIN.map(({ id, label }) => (
-            <NavBtn key={id} id={id} label={label} active={active === id} onClick={() => setActive(id)} />
+            <NavBtn key={id} id={id} label={label} active={active === id} onClick={() => setActive(id)} collapsed={collapsed} badge={id === 'inbox' ? inboxCounts.unread : 0} />
           ))}
           <div style={{ height: 1, background: 'var(--bd)', margin: '8px 4px' }} />
           {NAV_APPS.map(({ id, label }) => (
-            <NavBtn key={id} id={id} label={label} active={active === id} onClick={() => setActive(id)} />
+            <NavBtn key={id} id={id} label={label} active={active === id} onClick={() => setActive(id)} collapsed={collapsed} />
           ))}
           <div style={{ flex: 1 }} />
           {NAV_BOTTOM.map(({ id, label }) => (
-            <NavBtn key={id} id={id} label={label} active={active === id} onClick={() => setActive(id)} />
+            <NavBtn key={id} id={id} label={label} active={active === id} onClick={() => setActive(id)} collapsed={collapsed} />
           ))}
         </nav>
 
@@ -284,12 +315,13 @@ export default function DesktopLayout() {
             onClick={() => setShowAccountModal(v => !v)}
             onMouseEnter={() => setUserHover(true)}
             onMouseLeave={() => setUserHover(false)}
-            style={{ display: 'flex', alignItems: 'center', gap: 11, background: showAccountModal || userHover ? 'var(--surface-3)' : 'transparent', border: 'none', cursor: 'pointer', padding: '7px 8px', borderRadius: 10, width: '100%', textAlign: 'left', fontFamily: 'inherit', transition: 'background .12s' }}
+            title={collapsed ? profile.name || 'Your profile' : undefined}
+            style={{ display: 'flex', alignItems: 'center', gap: 11, background: showAccountModal || userHover ? 'var(--surface-3)' : 'transparent', border: 'none', cursor: 'pointer', padding: collapsed ? '7px 6px' : '7px 8px', transition: `padding ${SLIDE}, background .12s`, borderRadius: 10, width: '100%', textAlign: 'left', fontFamily: 'inherit', transition: 'background .12s' }}
           >
             <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,#c88a5f,#9a6d84)', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 14 }}>
               {initial}
             </div>
-            <div style={{ lineHeight: 1.25, minWidth: 0, flex: 1 }}>
+            <div style={{ lineHeight: 1.25, minWidth: 0, flex: 1, ...labelStyle(collapsed) }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{profile.name || 'Your name'}</div>
               <div style={{ fontSize: 11.5, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile.email || 'Add your email'}</div>
             </div>
@@ -308,6 +340,11 @@ export default function DesktopLayout() {
       {/* Main */}
       <main style={{ flex: 1, height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <header style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 16, padding: '16px 34px', background: 'var(--bg-blur)', backdropFilter: 'blur(10px)', borderBottom: '1px solid var(--bd-sm)' }}>
+          <button onClick={() => setCollapsed(c => !c)} aria-pressed={collapsed}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={`${collapsed ? 'Expand' : 'Collapse'} sidebar${bindings.sidebar ? ` (${displayCombo(bindings.sidebar)})` : ''}`}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, marginLeft: -10, borderRadius: 'var(--radius-sm)', border: 'none', background: 'none', color: 'var(--muted)', cursor: 'pointer', flex: 'none' }}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5" /><line x1="9.5" y1="4" x2="9.5" y2="20" />{!collapsed && <rect x="4" y="5" width="4.5" height="14" rx="1" fill="currentColor" stroke="none" opacity=".35" />}</svg>
+          </button>
           <div style={{ flex: 1 }}>
             <div style={{ ...eyebrow, fontSize: 12 }}>{dateLabel}</div>
           </div>
@@ -332,14 +369,13 @@ export default function DesktopLayout() {
             </Button>
           )}
         </header>
-        <div style={{ padding: active === 'assistant' ? '0px 34px 0' : '30px 34px 40px', flex: 1, minHeight: 0, overflowY: active === 'calendar' ? 'hidden' : 'auto', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: active === 'assistant' ? '0px 34px 0' : '30px 34px 40px', flex: 1, minHeight: 0, overflowY: active === 'calendar' || active === 'inbox' ? 'hidden' : 'auto', display: 'flex', flexDirection: 'column' }}>
           {pages[active]}
         </div>
       </main>
 
       {searchOpen && <SearchPalette initialQuery={searchQuery} onClose={() => setSearchOpen(false)} navigate={setActive} />}
-      {/* Bottom left of the page, just clear of the sidebar. */}
-      <VoiceDock left={236 + 20} bottom={22} />
+      <VoiceDock right={24} bottom={22} />
       {panelMounted && <AssistantPanel open={showPanel} onExited={() => setPanelMounted(false)}
         onClose={() => setPanelOpen(false)} onExpand={() => { setPanelOpen(false); setActive('assistant') }} />}
     </div>

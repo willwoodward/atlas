@@ -12,3 +12,6 @@ mcp==1.9.0
 # crashed on startup (main.py imports mcp_server). Move with mcp, not alone.
 pydantic==2.13.5
 tzdata==2024.2
+# Web Push for inbox notifications (push.py). Sends with requests in a worker
+# thread; its aiohttp extra isn't used.
+pywebpush==2.5.0

@@ -25,6 +25,7 @@ const MUTATING_TOOLS = new Set([
   'create_event', 'update_event', 'delete_event',
   'set_transaction_category', 'rename_category', 'add_category_rule', 'set_budget',
   'create_habit', 'update_goal', 'add_subtask', 'append_to_note', 'delete_note',
+  'create_routine', 'update_routine', 'delete_routine', 'run_routine',
 ])
 
 /**

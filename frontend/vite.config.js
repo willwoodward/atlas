@@ -63,6 +63,8 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       workbox: {
+        // Shows inbox notifications and opens the item when one is tapped.
+        importScripts: ['push-sw.js'],
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
           {

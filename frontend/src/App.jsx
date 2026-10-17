@@ -3,6 +3,7 @@ import { ThemeProvider }         from './context/ThemeContext.jsx'
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
 import { RefreshProvider }        from './context/RefreshContext.jsx'
 import { AssistantProvider }      from './context/AssistantContext.jsx'
+import { InboxProvider }          from './context/InboxContext.jsx'
 import { UserProvider }          from './context/UserContext.jsx'
 import { HabitsProvider }        from './context/HabitsContext.jsx'
 import { IntegrationsProvider }  from './context/IntegrationsContext.jsx'
@@ -79,12 +80,14 @@ function Dashboard() {
                   <GitHubProvider>
                     <NotesProvider>
                      <AssistantProvider>
+                     <InboxProvider>
                       <KeybindsProvider>
                       <QuickAddProvider>
                       <SyncManager />
                       {layout === 'desktop' ? <DesktopLayout /> : layout === 'tablet' ? <TabletLayout /> : <MobileLayout />}
                       </QuickAddProvider>
                       </KeybindsProvider>
+                     </InboxProvider>
                      </AssistantProvider>
                     </NotesProvider>
                   </GitHubProvider>

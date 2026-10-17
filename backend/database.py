@@ -362,6 +362,61 @@ async def init_db():
                 undone_at TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_agent_actions_created ON agent_actions(created_at DESC);
+
+            -- Inbox: routines run Atlas in the background on a schedule; each
+            -- run leaves an item (a thread you can reply in). See inbox.py.
+            CREATE TABLE IF NOT EXISTS routines (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                days TEXT NOT NULL DEFAULT 'mon,tue,wed,thu,fri,sat,sun',
+                time TEXT NOT NULL DEFAULT '08:00',      -- HH:MM, local time
+                approval TEXT NOT NULL DEFAULT 'ask',    -- ask: changes wait for approval | auto
+                notify INTEGER NOT NULL DEFAULT 1,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_run_at TEXT,
+                next_run_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS inbox_items (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                title TEXT NOT NULL,
+                preview TEXT NOT NULL DEFAULT '',
+                routine_id TEXT,
+                session_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running',  -- running|done|error
+                read INTEGER NOT NULL DEFAULT 0,
+                archived INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_inbox_updated ON inbox_items(updated_at DESC);
+
+            -- A change a background run wanted to make, waiting for a yes.
+            CREATE TABLE IF NOT EXISTS inbox_proposals (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                run_id TEXT,
+                created_at TEXT NOT NULL,
+                tool TEXT NOT NULL,
+                args TEXT NOT NULL,                      -- JSON
+                summary TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',  -- pending|approved|rejected|failed
+                result TEXT,
+                undo_id TEXT,
+                decided_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_proposals_session ON inbox_proposals(session_id);
+
+            -- Browsers to send notifications to (Web Push).
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                endpoint TEXT PRIMARY KEY,
+                keys TEXT NOT NULL,                      -- JSON {p256dh, auth}
+                created_at TEXT NOT NULL,
+                user_agent TEXT NOT NULL DEFAULT ''
+            );
         """)
         await db.commit()
 
@@ -376,6 +431,8 @@ async def init_db():
             # them for every turn; edits apply from the next session.
             "ALTER TABLE agent_sessions ADD COLUMN memory_version INTEGER",
             "ALTER TABLE agent_sessions ADD COLUMN prompt_version INTEGER",
+            # chat: the assistant chat | routine: an inbox thread
+            "ALTER TABLE agent_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'",
             "ALTER TABLE todos ADD COLUMN parent_id TEXT",
             "ALTER TABLE todos ADD COLUMN completed_at TEXT",
             "ALTER TABLE user_integrations ADD COLUMN gcal_refresh_token TEXT",

@@ -8,6 +8,7 @@ export const SHORTCUTS = [
   { id: 'search', label: 'Search', hint: 'Notes, to-dos, events, goals, transactions', default: 'Mod+/' },
   { id: 'voice', label: 'Start / stop voice input', hint: 'Opens the assistant if it isn’t on screen', default: 'Mod+K' },
   { id: 'assistantPanel', label: 'Open / close the assistant panel', hint: 'Desktop', default: 'Mod+.' },
+  { id: 'sidebar', label: 'Collapse / expand the sidebar', hint: 'Desktop', default: 'Mod+B' },
 ]
 
 export const isMac = () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '')

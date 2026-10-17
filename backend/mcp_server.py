@@ -16,6 +16,7 @@ import aiosqlite
 import assistant_memory
 import agent_actions as actions
 import agent_tools
+import inbox
 from agent_actions import snapshot, restore_rows, delete_rows
 from crypto import enc, dec
 from mcp.server import Server
@@ -284,6 +285,7 @@ async def list_tools() -> list[Tool]:
         ))
 
     tools += [t for t in agent_tools.TOOLS if MCP_TRANSACTIONS != "off" or t.name not in _TXN_TOOLS]
+    tools += inbox.TOOLS
     return tools
 
 
@@ -300,7 +302,14 @@ async def call_tool(name: str, arguments: dict):
 async def run_tool(name: str, args: dict, db):
     """Run a tool. A change also says where to see it (`show`), so the app
     can follow along as the assistant works."""
-    result = await _dispatch(name, args, db)
+    # A background run set to "ask": changes wait in the inbox for approval.
+    ctx = inbox.RUN_CONTEXT.get()
+    if ctx and ctx.get("approval") == "ask" and name in inbox.WRITE_TOOLS:
+        return await inbox.propose(db, name, args, ctx)
+    if name in inbox.NAMES:
+        result = await inbox.dispatch(name, args, db)
+    else:
+        result = await _dispatch(name, args, db)
     if isinstance(result, dict) and result.get("undo_id") and "show" not in result:
         show = await actions.show_for(db, result["undo_id"])
         if show:
@@ -782,6 +791,11 @@ async def _check_auth(request: Request) -> bool:
 async def handle_sse(request: Request) -> Response:
     if not await _check_auth(request):
         return Response("Unauthorized", status_code=401)
+    # Which run this connection serves, and whether its changes must wait for
+    # approval (see inbox.py). Tool calls on the connection inherit this.
+    run_id = request.headers.get("x-atlas-run")
+    if run_id:
+        inbox.RUN_CONTEXT.set({"run_id": run_id, "approval": request.headers.get("x-atlas-approval", "auto")})
     async with sse_transport.connect_sse(request.scope, request.receive, request._send) as streams:
         await server.run(streams[0], streams[1], server.create_initialization_options())
     return Response()

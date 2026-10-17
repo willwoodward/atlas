@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -12,6 +13,7 @@ from mcp_server import mcp_app
 from routers import auth_router, habits, todos, goals, finances, notes, calendar, integrations, assistant, employment, fitness
 from routers.github_drafts import router as github_drafts_router
 from routers.mcp_auth import router as mcp_auth_router
+from routers import inbox as inbox_router
 
 ALLOWED_ORIGINS = [
     o.strip()
@@ -37,7 +39,15 @@ async def lifespan(app: FastAPI):
         else:
             raise RuntimeError("Refusing to start — fix .env.production:\n  - " + "\n  - ".join(problems))
     await init_db()
+    # Routines (inbox.py). One API process, so one scheduler; off for tests
+    # and for a second copy of the API pointed at the same database.
+    task = None
+    if os.getenv("ATLAS_SCHEDULER", "on").strip().lower() not in ("0", "off", "false", "no"):
+        import inbox
+        task = asyncio.create_task(inbox.scheduler())
     yield
+    if task:
+        task.cancel()
 
 
 # The interactive API docs list every endpoint to anyone; off unless asked for.
@@ -65,6 +75,7 @@ app.include_router(notes.router)
 app.include_router(calendar.router)
 app.include_router(integrations.router)
 app.include_router(assistant.router)
+app.include_router(inbox_router.router)
 app.include_router(github_drafts_router)
 app.include_router(mcp_auth_router)
 

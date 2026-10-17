@@ -15,10 +15,13 @@ import NotesPage     from '../desktop/NotesPage.jsx'
 import FinancesPage  from '../desktop/FinancesPage.jsx'
 import FitnessPage   from '../desktop/FitnessPage.jsx'
 import AssistantPage from '../desktop/AssistantPage.jsx'
+import InboxPage     from '../desktop/InboxPage.jsx'
+import { useInbox } from '../context/InboxContext.jsx'
 import AccountsPage  from '../desktop/AccountsPage.jsx'
 
 const PAGES = [
   { id: 'home',      label: 'Home',      component: HomePage },
+  { id: 'inbox',     label: 'Inbox',     component: InboxPage },
   { id: 'calendar',  label: 'Calendar',  component: CalendarPage },
   { id: 'habits',    label: 'Habits',    component: HabitsPage },
   { id: 'todos',     label: 'To-do',     component: TodoPage },
@@ -31,13 +34,14 @@ const PAGES = [
 ]
 
 // Pages shown in the drawer nav (excludes accounts — accessed via avatar)
-const NAV_PAGES = ['home', 'calendar', 'habits', 'todos', 'goals', 'notes', 'finances', 'fitness', 'assistant']
+const NAV_PAGES = ['home', 'inbox', 'calendar', 'habits', 'todos', 'goals', 'notes', 'finances', 'fitness', 'assistant']
 
 const I = (...kids) => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{kids}</svg>
 )
 const icons = {
   home:      I(<path d="M4 11l8-7 8 7" key="a"/>, <path d="M6 10v9h4v-6h4v6h4v-9" key="b"/>),
+  inbox:     I(<path d="M4 13l2.5-7.5A2 2 0 018.4 4h7.2a2 2 0 011.9 1.5L20 13" key="a"/>, <path d="M4 13v5a2 2 0 002 2h12a2 2 0 002-2v-5h-5l-1.5 2.5h-3L9 13H4z" key="b"/>),
   calendar:  I(<rect x="4" y="5" width="16" height="16" rx="2" key="a"/>, <line x1="4" y1="9" x2="20" y2="9" key="b"/>, <line x1="9" y1="3" x2="9" y2="6" key="c"/>, <line x1="15" y1="3" x2="15" y2="6" key="d"/>),
   habits:    I(<path d="M12 3c1.5 3-1 4.5-1 7a3 3 0 006 0c0-1-.4-2-1-2.6.2 2-1 2.6-1 2.6C13 8 12 5 12 3z" key="a"/>, <path d="M9 15a3 3 0 006 0" key="b"/>),
   todos:     I(<rect x="4" y="4" width="16" height="16" rx="3" key="a"/>, <path d="M8 12l3 3 5-6" key="b"/>),
@@ -89,12 +93,13 @@ export default function MobileLayout() {
     return () => window.removeEventListener('atlas:show-assistant', show)
   }, []) // eslint-disable-line
   const quickAdd = useQuickAddAction(active, navigate)
+  const { counts: inboxCounts } = useInbox()
 
   const ActivePage = PAGES.find(p => p.id === active)?.component ?? HomePage
   const activeLabel = PAGES.find(p => p.id === active)?.label ?? ''
 
   // Pages that manage their own layout (no outer padding, manage own scroll)
-  const noPad = active === 'assistant' || active === 'notes' || active === 'calendar'
+  const noPad = active === 'assistant' || active === 'notes' || active === 'calendar' || active === 'inbox'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: 'var(--bg)', overflow: 'hidden' }}>
@@ -108,9 +113,10 @@ export default function MobileLayout() {
       }}>
         {/* Hamburger */}
         <button
-          onClick={() => setDrawerOpen(true)}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--ink)', display: 'flex', flex: 'none' }}
+          onClick={() => setDrawerOpen(true)} aria-label={inboxCounts.unread ? `Menu, ${inboxCounts.unread} unread in inbox` : 'Menu'}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--ink)', display: 'flex', flex: 'none', position: 'relative' }}
         >
+          {inboxCounts.unread > 0 && <span style={{ position: 'absolute', top: 2, right: 0, width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', border: '1.5px solid var(--surface-2)' }} />}
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
             <line x1="3" y1="6" x2="21" y2="6"/>
             <line x1="3" y1="12" x2="21" y2="12"/>
@@ -183,7 +189,7 @@ export default function MobileLayout() {
         <nav style={{ flex: 1, overflowY: 'auto', padding: '0 12px' }}>
           {NAV_PAGES.map(id => {
             const p = PAGES.find(p => p.id === id)
-            return <NavItem key={id} id={id} label={p.label} active={active === id} onClick={() => navigate(id)} />
+            return <NavItem key={id} id={id} label={p.label} active={active === id} onClick={() => navigate(id)} badge={id === 'inbox' ? inboxCounts.unread : 0} />
           })}
         </nav>
 
@@ -212,12 +218,12 @@ export default function MobileLayout() {
         </div>
       </div>
       {searchOpen && <SearchPalette initialQuery={searchQuery} onClose={() => setSearchOpen(false)} navigate={navigate} />}
-      <VoiceDock left={16} bottom="max(16px, calc(env(safe-area-inset-bottom) + 8px))" />
+      <VoiceDock right={16} bottom="max(16px, calc(env(safe-area-inset-bottom) + 8px))" />
     </div>
   )
 }
 
-function NavItem({ id, label, active, onClick }) {
+function NavItem({ id, label, active, onClick, badge }) {
   return (
     <button
       onClick={onClick}
@@ -231,7 +237,8 @@ function NavItem({ id, label, active, onClick }) {
       }}
     >
       <span style={{ display: 'flex', flex: 'none' }}>{icons[id]}</span>
-      <span>{label}</span>
+      <span style={{ flex: 1 }}>{label}</span>
+      {badge > 0 && <span style={{ minWidth: 20, padding: '1px 7px', borderRadius: 99, background: 'var(--accent)', color: '#fff', fontSize: 11.5, fontWeight: 700, textAlign: 'center' }}>{badge}</span>}
     </button>
   )
 }

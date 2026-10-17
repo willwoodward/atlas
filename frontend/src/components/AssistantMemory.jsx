@@ -256,7 +256,7 @@ function VoiceSettings() {
       </>}
 
       <SettingRow title="Corner mic"
-        detail="A mic button in the bottom-left corner when the chat isn't open, so you can talk to Atlas from any page. The reply shows in a small card above it.">
+        detail="A mic button in the bottom-right corner when the chat isn't open, so you can talk to Atlas from any page. The reply shows in a small card above it.">
         <Switch checked={floatingMic} onChange={v => setVoiceSettings({ floatingMic: v })} label="Corner mic" />
       </SettingRow>
       <SettingRow title="Voice shortcut opens the chat"

@@ -15,6 +15,11 @@ import { displayCombo } from '../lib/keybinds.js'
 
 // MCP tool name → what to show while it runs
 const TOOL_LABELS = {
+  list_routines: 'Checking your routines',
+  create_routine: 'Setting up a routine',
+  update_routine: 'Changing a routine',
+  delete_routine: 'Deleting a routine',
+  run_routine: 'Starting a routine',
   list_todos: 'Reading your to-dos',
   add_todo: 'Adding a to-do',
   complete_todo: 'Completing a to-do',
@@ -80,7 +85,7 @@ function prettyJson(raw) {
   try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw }
 }
 
-function ToolTrace({ tools = [], latestUndo }) {
+export function ToolTrace({ tools = [], latestUndo }) {
   const [open, setOpen] = useState({})
   if (tools.length === 0) return null
   return (

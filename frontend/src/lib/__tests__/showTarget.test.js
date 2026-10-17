@@ -29,4 +29,8 @@ describe('readToolResult', () => {
     m = reduceMessage(m, { type: 'tool_result', toolUseId: 't1', status: 'success', output: '{"ok": true, "undo_id": "u9"}' })
     expect(m.tools[0].undoId).toBe('u9')
   })
+  it('opens an inbox item', () => {
+    expect(showTarget({ kind: 'inbox', id: 'abc' })).toEqual({ page: 'inbox', target: { kind: 'inbox', id: 'abc' } })
+    expect(showTarget({ kind: 'inbox' })).toEqual({ page: 'inbox', target: null })
+  })
 })

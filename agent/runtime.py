@@ -72,11 +72,12 @@ another way, such as calling a code-hosting API through a web tool.
 
 """
 
-def local_tools() -> list:
+def local_tools(background: bool = False) -> list:
     """Tools the orchestrator gets beyond the MCP dashboard tools. The web
     reader depends on "Safer web access" (web_fetch.py); the coding tool is
-    only included when coding is switched on."""
-    return [delegate_research, ask_user, tavily.tavily_search, *web_tools(),
+    only included when coding is switched on. A background run has no one to
+    answer ask_user, so it doesn't get it."""
+    return [delegate_research, *([] if background else [ask_user]), tavily.tavily_search, *web_tools(),
             *([delegate_coding] if CODING_ENABLED else [])]
 
 
@@ -162,8 +163,38 @@ forty euros"). Cards your tools draw still appear on screen, so you can say \
 detail, give the gist and offer to go through it."""
 
 
+BACKGROUND_SECTION = """
+
+Running in the background: this is the routine "{routine}", started \
+{trigger}. {name} isn't watching. Your final reply becomes a message in their \
+inbox (with a notification), so write it to be read later: lead with what \
+matters, keep it short, and don't ask questions you need answered now — \
+don't use ask_user; if something needs their input, say so in the message \
+and they can reply in the thread.
+{approval}"""
+
+ASK_NOTE = """Changes need their approval: when you use a tool that changes \
+something (to-dos, calendar, notes, finances…), it isn't done straight away — \
+it's queued in the inbox for them to approve, edit or reject. Propose what you \
+think is right; don't hold back because it needs approval. End your message \
+with the suggested changes in a short list, so they know what they're \
+approving."""
+
+AUTO_NOTE = """You can make changes directly: they're logged and {name} can undo \
+any of them. Say what you changed in your message."""
+
+
+def _background_section(background: dict | None, name: str) -> str:
+    if not background:
+        return ""
+    trigger = "by hand from the inbox" if background.get("trigger") == "manual" else "on its schedule"
+    note = ASK_NOTE if background.get("approval", "ask") == "ask" else AUTO_NOTE.format(name=name)
+    return BACKGROUND_SECTION.format(routine=background.get("routine") or "a routine", trigger=trigger,
+                                     name=name, approval=note)
+
+
 def build_system_prompt(template: str | None, name: str, today: str, memory: str | None,
-                        spoken: bool = False) -> str:
+                        spoken: bool = False, background: dict | None = None) -> str:
     """The editable prompt, then the fixed sections: coding, memory.
 
     The editable part is filled with plain replacement, not str.format — it is
@@ -177,7 +208,8 @@ def build_system_prompt(template: str | None, name: str, today: str, memory: str
     # Voice goes last: everything before it stays the same between turns, so
     # the prompt cache still covers it.
     voice = VOICE_SECTION.format(name=name) if spoken else ""
-    return f"{base}\n\n{coding.rstrip()}\n\n{APP_SECTION.rstrip()}" + _memory_section(memory, name) + voice
+    return (f"{base}\n\n{coding.rstrip()}\n\n{APP_SECTION.rstrip()}" + _memory_section(memory, name)
+            + voice + _background_section(background, name))
 
 
 def _model() -> OpenAIResponsesModel:
@@ -201,8 +233,13 @@ def _model() -> OpenAIResponsesModel:
     )
 
 
-def _mcp_client() -> MCPClient:
+def _mcp_client(run_id: str | None = None, approval: str | None = None) -> MCPClient:
     headers = {"Authorization": f"Bearer {MCP_KEY}"} if MCP_KEY else {}
+    # Tells the dashboard which run is calling, and for a background routine
+    # set to "ask", that changes must wait for approval (backend/inbox.py).
+    if run_id:
+        headers["X-Atlas-Run"] = run_id
+        headers["X-Atlas-Approval"] = approval or "auto"
     return MCPClient(lambda: sse_client(MCP_URL, headers=headers))
 
 
@@ -217,7 +254,7 @@ def _to_strands(messages: list[dict]) -> list[dict]:
 
 async def stream_reply(messages: list[dict], user_name: str, run_id: str | None = None,
                        memory: str | None = None, system_prompt: str | None = None,
-                       safe_web: bool = False, spoken: bool = False):
+                       safe_web: bool = False, spoken: bool = False, background: dict | None = None):
     """Yield (event_type, payload) tuples: ("token", str) | ("tool", str) | ("error", str)."""
     history = _to_strands(messages)
     if not history or history[-1]["role"] != "user":
@@ -226,9 +263,9 @@ async def stream_reply(messages: list[dict], user_name: str, run_id: str | None 
     prompt, prior = history[-1]["content"], history[:-1]
 
     today = datetime.now(ZoneInfo(TIMEZONE)).strftime("%A %-d %B %Y")
-    system_prompt = build_system_prompt(system_prompt, user_name or "the user", today, memory, spoken)
+    system_prompt = build_system_prompt(system_prompt, user_name or "the user", today, memory, spoken, background)
 
-    client = _mcp_client()
+    client = _mcp_client(run_id, (background or {}).get("approval") if background else None)
     try:
         await asyncio.to_thread(client.start)
     except Exception:
@@ -257,7 +294,7 @@ async def stream_reply(messages: list[dict], user_name: str, run_id: str | None 
             system_prompt=system_prompt,
             # Dashboard tools over MCP, plus web access and the ability to
             # delegate to a research team it composes itself.
-            tools=[*tools, *local_tools()],
+            tools=[*tools, *local_tools(background=bool(background))],
             messages=prior,
             hooks=[ToolTracer(
                 emit=queue.put_nowait,

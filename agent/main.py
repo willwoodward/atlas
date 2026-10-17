@@ -8,6 +8,7 @@ JWT independently (see auth.py).
 """
 import json
 import logging
+from typing import Literal
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import StreamingResponse
@@ -27,6 +28,12 @@ class Message(BaseModel):
     content: str
 
 
+class Background(BaseModel):
+    routine: str = Field("", max_length=200)
+    approval: Literal["ask", "auto"] = "ask"
+    trigger: str = Field("schedule", max_length=20)
+
+
 class ChatRequest(BaseModel):
     messages: list[Message] = Field(..., min_length=1, max_length=60)
     # The API's durable run id. Answers to ask_user are routed back by it, so
@@ -40,6 +47,9 @@ class ChatRequest(BaseModel):
     safe_web: bool = False
     # The user spoke this and the reply will be read aloud.
     spoken: bool = False
+    # A routine running in the background (the inbox): {routine, approval:
+    # "ask"|"auto", trigger}. With "ask", changes wait for the user's approval.
+    background: Background | None = None
 
 
 class AnswerRequest(BaseModel):
@@ -66,7 +76,8 @@ async def chat(req: ChatRequest, user: dict = Depends(get_current_user)):
         try:
             async for kind, payload in stream_reply(messages, name, run_id=req.run_id, memory=req.memory,
                                                      system_prompt=req.system_prompt, safe_web=req.safe_web,
-                                                     spoken=req.spoken):
+                                                     spoken=req.spoken,
+                                                     background=req.background.model_dump() if req.background else None):
                 if kind == "progress":
                     # Already a full event dict (research_plan / research_done).
                     yield f"data: {json.dumps(payload)}\n\n"

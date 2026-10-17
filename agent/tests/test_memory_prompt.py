@@ -52,3 +52,33 @@ def test_a_spoken_turn_asks_for_a_speakable_reply_at_the_end():
     assert "read out" not in typed
     assert spoken.startswith(typed)          # same prefix, so the cache still applies
     assert "read out loud to Will" in spoken
+
+
+def test_a_background_run_says_so_and_how_changes_work():
+    ask = build_system_prompt("Be brief.", "Will", "Monday", "", background={"routine": "Morning plan", "approval": "ask", "trigger": "schedule"})
+    auto = build_system_prompt("Be brief.", "Will", "Monday", "", background={"routine": "Morning plan", "approval": "auto", "trigger": "manual"})
+    plain = build_system_prompt("Be brief.", "Will", "Monday", "")
+    assert ask.startswith(plain) and "the routine \"Morning plan\", started on its schedule" in ask
+    assert "queued in the inbox for them to approve" in ask and "don't use ask_user" in ask
+    assert "make changes directly" in auto and "by hand from the inbox" in auto
+    assert "Running in the background" not in plain
+
+
+def test_background_runs_have_no_ask_user():
+    import runtime
+    names = lambda ts: {getattr(t, "tool_name", getattr(t, "__name__", "")) for t in ts}
+    assert "ask_user" in names(runtime.local_tools())
+    assert "ask_user" not in names(runtime.local_tools(background=True))
+
+
+def test_the_mcp_connection_carries_the_run_and_approval():
+    import runtime
+    captured = {}
+    orig = runtime.sse_client
+    runtime.sse_client = lambda url, headers=None: captured.update(headers) or orig(url, headers=headers)
+    try:
+        client = runtime._mcp_client("run-1", "ask")
+        client._transport_callable()
+    finally:
+        runtime.sse_client = orig
+    assert captured["X-Atlas-Run"] == "run-1" and captured["X-Atlas-Approval"] == "ask"

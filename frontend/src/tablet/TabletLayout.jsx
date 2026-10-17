@@ -10,10 +10,18 @@ import NotesPage     from './NotesPage.jsx'
 import FinancesPage  from './FinancesPage.jsx'
 import FitnessPage   from './FitnessPage.jsx'
 import GoalsPage     from './GoalsPage.jsx'
+import InboxPage     from '../desktop/InboxPage.jsx'
+import { requestFocus, showTarget } from '../lib/focus.js'
+
+// The inbox is the desktop page in a padded, fixed-height frame (it scrolls inside).
+const TabletInbox = () => (
+  <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '24px 28px 8px', boxSizing: 'border-box' }}><InboxPage /></div>
+)
 
 const PAGES = [
   { id: 'assistant', component: AssistantPage },
   { id: 'home',      component: HomePage },
+  { id: 'inbox',     component: TabletInbox },
   { id: 'agenda',    component: AgendaPage },
   { id: 'habits',    component: HabitsPage },
   { id: 'todos',     component: TodoPage },
@@ -26,6 +34,17 @@ const N = PAGES.length
 
 export default function TabletLayout() {
   const [index, setIndex] = useState(0)
+  // A tapped notification (or anything else) asking to show an inbox item.
+  useEffect(() => {
+    const onShow = e => {
+      const where = showTarget(e.detail)
+      if (where?.page !== 'inbox') return
+      setIndex(PAGES.findIndex(p => p.id === 'inbox'))
+      if (where.target) requestFocus(where.target)
+    }
+    window.addEventListener('atlas:show', onShow)
+    return () => window.removeEventListener('atlas:show', onShow)
+  }, [])
   // Every page stays mounted on the tablet, so the assistant always has a chat
   // to take the voice shortcut — just bring it into view.
   useEffect(() => onShortcut('voice', () => setIndex(0)), [])

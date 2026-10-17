@@ -28,7 +28,7 @@ const CheckIcon = () => <svg width="17" height="17" viewBox="0 0 24 24" fill="no
  * above the button and is read aloud, and "Open in chat" carries on there.
  * Changes Atlas makes still show on the page as they happen.
  */
-export default function VoiceDock({ left = 16, bottom = 16 }) {
+export default function VoiceDock({ right = 16, bottom = 16 }) {
   const { messages, busy, queued, registerVoiceDock, chatsOnScreen } = useAssistant()
   const { floatingMic } = useVoiceSettings()
   const { bindings } = useKeybinds() || {}
@@ -87,10 +87,10 @@ export default function VoiceDock({ left = 16, bottom = 16 }) {
 
   return (
     <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      style={{ position: 'fixed', left, bottom, zIndex: 150, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10, pointerEvents: 'none' }}>
+      style={{ position: 'fixed', right, bottom, zIndex: 150, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10, pointerEvents: 'none' }}>
       {round && (
         <div role="status" aria-live="polite" className="voice-dock-card"
-          style={{ pointerEvents: 'auto', width: 'min(360px, calc(100vw - 32px))', borderRadius: 'var(--radius-lg)', background: 'var(--surface)', border: '1px solid var(--bd)', boxShadow: 'var(--shadow-pop)', overflow: 'hidden', transformOrigin: 'bottom left' }}>
+          style={{ pointerEvents: 'auto', width: 'min(360px, calc(100vw - 32px))', borderRadius: 'var(--radius-lg)', background: 'var(--surface)', border: '1px solid var(--bd)', boxShadow: 'var(--shadow-pop)', overflow: 'hidden', transformOrigin: 'bottom right' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 10px 8px 14px' }}>
             <span className={listening || busy ? 'voice-dock-pulse' : undefined}
               style={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', background: listening ? 'var(--accent)' : busy || speaking ? 'var(--sage)' : 'var(--faint)' }} />
