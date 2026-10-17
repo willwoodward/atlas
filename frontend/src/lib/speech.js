@@ -219,8 +219,14 @@ function flushCurrent() { if (utterance) { flush(true); utterance = null } }
 
 export const useSpeaking = () => useSyncExternalStore(speech.subscribe, () => snapshot.speaking)
 
-/** Should the reply to this message be read aloud? */
-export function shouldSpeak(spoken) {
-  const mode = getVoiceSettings().speakReplies
-  return mode === 'always' || (mode === 'voice' && !!spoken)
+/**
+ * Should the reply to this message be read aloud?
+ * `spoken`: said, not typed. `viaDock`: said to the corner mic, so the chat
+ * isn't open to read the reply in.
+ */
+export function shouldSpeak(spoken, viaDock = false, mode = getVoiceSettings().speakReplies) {
+  if (mode === 'always') return true
+  if (mode === 'voice') return !!spoken
+  if (mode === 'dock') return !!spoken && !!viaDock
+  return false
 }

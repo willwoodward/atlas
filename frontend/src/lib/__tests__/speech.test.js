@@ -56,3 +56,29 @@ describe('isEcho', () => {
     expect(isEcho('yes', 'Shall I add it? Yes or no.')).toBe(false)
   })
 })
+
+import { shouldSpeak } from '../speech.js'
+import { loadVoiceSettings } from '../voiceSettings.js'
+
+describe('shouldSpeak', () => {
+  it('"Corner mic only" speaks only what was said to the corner mic', () => {
+    expect(shouldSpeak(true, true, 'dock')).toBe(true)
+    expect(shouldSpeak(true, false, 'dock')).toBe(false)   // the chat's own mic
+    expect(shouldSpeak(false, false, 'dock')).toBe(false)  // typed
+  })
+  it('the other modes', () => {
+    expect(shouldSpeak(true, false, 'voice')).toBe(true)
+    expect(shouldSpeak(false, false, 'voice')).toBe(false)
+    expect(shouldSpeak(false, false, 'always')).toBe(true)
+    expect(shouldSpeak(true, true, 'never')).toBe(false)
+  })
+})
+
+describe('loadVoiceSettings', () => {
+  it('drops the old saved-by-default read-aloud mode, keeping the rest', () => {
+    expect(loadVoiceSettings('{"speakReplies":"voice","keepListening":true}')).toEqual({ keepListening: true })
+  })
+  it('keeps a choice made since', () => {
+    expect(loadVoiceSettings('{"speakReplies":"always","v":2}')).toEqual({ speakReplies: 'always' })
+  })
+})

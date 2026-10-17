@@ -6,8 +6,9 @@ import { useSyncExternalStore } from 'react'
 //                    in the box to edit first
 //   keepListening  — conversation mode: after Atlas replies, start listening
 //                    again. Always sends on a pause, whatever the two above say.
-//   speakReplies   — read Atlas's replies aloud: 'voice' (when you spoke),
-//                    'always' or 'never'
+//   speakReplies   — read Atlas's replies aloud: 'dock' (only what you said
+//                    to the corner mic, i.e. with the chat closed), 'voice'
+//                    (whenever you spoke), 'always' or 'never'
 //   ttsVoice       — which OpenAI voice reads them
 //   bargeIn        — talking over a reply stops it
 //   floatingMic    — the mic button in the corner when no chat is on screen
@@ -17,7 +18,7 @@ import { useSyncExternalStore } from 'react'
 const KEY = 'atlas:voice-settings'
 export const VOICE_DEFAULTS = {
   silenceSeconds: 3, autoSend: true, keepListening: false,
-  speakReplies: 'voice', ttsVoice: 'coral', bargeIn: true,
+  speakReplies: 'dock', ttsVoice: 'coral', bargeIn: true,
   floatingMic: true, voiceOpensChat: false,
 }
 export const TTS_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse']
@@ -27,14 +28,27 @@ export const CONVERSATION_SILENCE = 3
 // giving up — long enough to think.
 export const CONVERSATION_WAIT = 120
 
-let current = (() => {
-  try { return { ...VOICE_DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}') } } catch { return { ...VOICE_DEFAULTS } }
-})()
+// Only settings you've changed are stored, so a new default reaches you.
+// Version 1 stored every setting whenever one changed, so its speakReplies
+// was usually just the old default ('voice') rather than a choice — it's
+// dropped, and the current default applies.
+const VERSION = 2
+export function loadVoiceSettings(raw) {
+  let saved = {}
+  try { saved = JSON.parse(raw || '{}') || {} } catch { /* start afresh */ }
+  if ((saved.v || 1) < VERSION) delete saved.speakReplies
+  delete saved.v
+  return saved
+}
+
+let saved = (() => { try { return loadVoiceSettings(localStorage.getItem(KEY)) } catch { return {} } })()
+let current = { ...VOICE_DEFAULTS, ...saved }
 const listeners = new Set()
 
 export function setVoiceSettings(patch) {
-  current = { ...current, ...patch }
-  try { localStorage.setItem(KEY, JSON.stringify(current)) } catch { /* this session only */ }
+  saved = { ...saved, ...patch }
+  current = { ...VOICE_DEFAULTS, ...saved }
+  try { localStorage.setItem(KEY, JSON.stringify({ ...saved, v: VERSION })) } catch { /* this session only */ }
   listeners.forEach(fn => fn())
 }
 

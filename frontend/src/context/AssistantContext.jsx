@@ -475,15 +475,16 @@ export function AssistantProvider({ children }) {
 
   // `spoken`: said aloud, not typed. Whether the reply is read out follows
   // Assistant settings → Voice → "Read replies aloud".
-  const send = useCallback(async (text, { spoken = false } = {}) => {
+  // `viaDock`: said to the corner mic, with no chat open.
+  const send = useCallback(async (text, { spoken = false, viaDock = false } = {}) => {
     const prompt = (text || '').trim()
     if (!prompt) return
     // Atlas is mid-answer: hold this one and send it when the turn finishes.
     if (busyRef.current) {
-      setQueued(q => [...q, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, text: prompt, spoken }])
+      setQueued(q => [...q, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, text: prompt, spoken, viaDock }])
       return
     }
-    const aloud = shouldSpeak(spoken)
+    const aloud = shouldSpeak(spoken, viaDock)
 
     // Only the new message goes up; the server holds the rest of the session.
     setMessages(prev => [...prev, { role: 'user', content: prompt }, { role: 'assistant', content: '', tools: [] }])
@@ -503,7 +504,7 @@ export function AssistantProvider({ children }) {
         // it ends. The hold stops a tight retry loop if the server is a
         // moment behind.
         setMessages(prev => prev.slice(0, -2))
-        setQueued(q => [{ id: `${Date.now()}-retry`, text: prompt, spoken }, ...q])
+        setQueued(q => [{ id: `${Date.now()}-retry`, text: prompt, spoken, viaDock }, ...q])
         setHold(true)
         setTimeout(() => setHold(false), 2000)
         setBusyBoth(false)
@@ -536,7 +537,7 @@ export function AssistantProvider({ children }) {
     if (busy || hold || queued.length === 0) return
     const [next, ...rest] = queued
     setQueued(rest)
-    send(next.text, { spoken: next.spoken })
+    send(next.text, { spoken: next.spoken, viaDock: next.viaDock })
   }, [busy, hold, queued, send])
   const unqueue = useCallback(id => setQueued(q => q.filter(x => x.id !== id)), [])
 

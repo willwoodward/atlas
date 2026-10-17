@@ -42,7 +42,7 @@ export default function VoiceDock({ left = 16, bottom = 16 }) {
   const messagesRef = useRef(messages)
   messagesRef.current = messages
 
-  const { voice, live, conversing, listening, toggle, end } = useVoiceConversation()
+  const { voice, live, conversing, listening, toggle, end } = useVoiceConversation({ viaDock: true })
   const working = voice.state !== 'idle' || conversing
   const begun = () => { if (sinceRef.current === null) setSince(messagesRef.current.length) }
 

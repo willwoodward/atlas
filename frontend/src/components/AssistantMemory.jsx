@@ -206,7 +206,7 @@ function SettingRow({ title, detail, children }) {
   )
 }
 
-const SPEAK_OPTIONS = [['voice', 'When I speak'], ['always', 'Always'], ['never', 'Never']]
+const SPEAK_OPTIONS = [['dock', 'Corner mic only'], ['voice', 'Whenever I speak'], ['always', 'Always'], ['never', 'Never']]
 
 function VoiceSettings() {
   const { silenceSeconds, autoSend, keepListening, speakReplies, ttsVoice, bargeIn, floatingMic, voiceOpensChat } = useVoiceSettings()
@@ -235,7 +235,7 @@ function VoiceSettings() {
       </SettingRow>
 
       <SettingRow title="Read replies aloud"
-        detail="Atlas talks back, starting as soon as the first sentence is ready. “When I speak” keeps typed chats quiet. Replies to be read out are kept short.">
+        detail="Atlas talks back, starting as soon as the first sentence is ready. “Corner mic only” speaks when you used the corner mic with the chat closed; “Whenever I speak” also covers the chat's own mic. Replies to be read out are kept short.">
         <Select aria-label="Read replies aloud" value={speakReplies} onChange={e => setVoiceSettings({ speakReplies: e.target.value })} style={{ fontSize: 13 }}>
           {SPEAK_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </Select>

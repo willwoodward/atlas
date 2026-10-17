@@ -26,7 +26,7 @@ const joinText = (a, b) => (a.trim() && b ? a.trimEnd() + ' ' : a) + b
  *
  * `draft` is text already typed, which the transcript is added to.
  */
-export function useVoiceConversation({ draft = '', onSend, onDraft } = {}) {
+export function useVoiceConversation({ draft = '', onSend, onDraft, viaDock = false } = {}) {
   const { send } = useAssistant()
   const [live, setLive] = useState('')
   const [conversing, setConversing] = useState(false)
@@ -34,7 +34,7 @@ export function useVoiceConversation({ draft = '', onSend, onDraft } = {}) {
   const startedAt = useRef(0)
   const conversingRef = useRef(false)
   conversingRef.current = conversing
-  const deliver = onSend || (text => send(text, { spoken: true }))
+  const deliver = onSend || (text => send(text, { spoken: true, viaDock }))
   const conversationOpts = () => ({ silenceSeconds: getVoiceSettings().silenceSeconds || CONVERSATION_SILENCE, nothingSeconds: CONVERSATION_WAIT })
 
   // Words over Atlas's voice that aren't its own: they want to cut in.
