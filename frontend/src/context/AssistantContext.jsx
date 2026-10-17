@@ -21,7 +21,26 @@ const MUTATING_TOOLS = new Set([
   'log_habit', 'create_note', 'update_note',
   'write_github_note', 'create_github_folder',
   'create_event', 'update_event', 'delete_event',
+  'set_transaction_category', 'rename_category', 'add_category_rule', 'set_budget',
+  'create_habit', 'update_goal', 'add_subtask', 'append_to_note', 'delete_note',
 ])
+
+/**
+ * What the chat needs from a tool's JSON result:
+ *   undoId — the change was logged and can be undone
+ *   card   — something to draw (a breakdown, a day, a list)
+ *   show   — what to open to see it
+ * Undefined fields when the result has none (or isn't JSON).
+ */
+export function readToolResult(output) {
+  if (!output || output[0] !== '{') return {}
+  try {
+    const r = JSON.parse(output)
+    return { undoId: r.undo_id || undefined, card: r.card || undefined, show: r.show || undefined }
+  } catch {
+    return {}   // cut off by the size cap, or not JSON
+  }
+}
 
 /** What a memory / system-prompt tool's result says changed, for the chat's Undo. */
 export function memoryEdit(name, output) {
@@ -54,7 +73,7 @@ export function reduceMessage(msg, ev) {
         tools: (msg.tools || []).map(t =>
           (typeof t === 'object' && t.toolUseId === ev.toolUseId)
             ? { ...t, status: ev.status, input: ev.input, output: ev.output,
-                memory: memoryEdit(t.name, ev.output) }
+                memory: memoryEdit(t.name, ev.output), ...readToolResult(ev.output) }
             : t),
       }
     case 'question':
@@ -191,6 +210,7 @@ export function AssistantProvider({ children }) {
   const [error, setError] = useState(null)
   const abortRef = useRef(null)
   const runRef = useRef(null)
+  const sentHere = useRef(new Set())   // runs this device started
   const busyRef = useRef(false)
   const sessionRef = useRef(initialSession)
   useEffect(() => { sessionRef.current = sessionId }, [sessionId])
@@ -203,7 +223,8 @@ export function AssistantProvider({ children }) {
       const slim = messages.slice(-MAX_STORED).map(({ rehydrated, ...m }) => ({
         ...m,
         tools: (m.tools || []).map(t => typeof t === 'string'
-          ? t : { name: t.name, status: t.status, toolUseId: t.toolUseId, memory: t.memory }),
+          ? t : { name: t.name, status: t.status, toolUseId: t.toolUseId, memory: t.memory,
+                  undoId: t.undoId, card: t.card, show: t.show }),
         research: m.research?.map(({ objective, status, retried }) => ({ objective, status, retried })),
         question: m.question,
         coding: m.coding && { repo: m.coding.repo, branch: m.coding.branch,
@@ -267,6 +288,16 @@ export function AssistantProvider({ children }) {
           if (ev.type === 'tool' && MUTATING_TOOLS.has(ev.name)) { touchedData = true; writes.add(ev.toolUseId) }
           // Show each change as soon as it lands, not only when the reply ends.
           if (ev.type === 'tool_result' && writes.has(ev.toolUseId) && ev.status !== 'error') refresh()
+          // Open what a tool points at — only on the device that asked, so the
+          // phone doesn't jump around while you're using the laptop.
+          // Two cases: an explicit `show`, or a change Atlas made (follow-along).
+          // A read-only tool's `show` is only for its card's Open button.
+          if (ev.type === 'tool_result' && ev.status !== 'error' && sentHere.current.has(runId)) {
+            const { show } = readToolResult(ev.output)
+            if (show && (show.explicit || writes.has(ev.toolUseId))) {
+              window.dispatchEvent(new CustomEvent('atlas:show', { detail: show }))
+            }
+          }
           patchLast(m => m.runId === runId || !m.runId ? reduceMessage(m, ev) : m)
         }
       }
@@ -442,6 +473,7 @@ export function AssistantProvider({ children }) {
           : `Assistant error (${res.status})`)
       }
       const { run_id, session_id, new_session } = await res.json()
+      sentHere.current.add(run_id)
       setSessionId(session_id)
       sessionRef.current = session_id
       const pair = [{ role: 'user', content: prompt, runId: run_id }, { role: 'assistant', content: '', tools: [], runId: run_id }]

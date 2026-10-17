@@ -5,6 +5,9 @@ import { useVoiceSettings, setVoiceSettings, CONVERSATION_SILENCE } from '../lib
 import { useKeybinds } from '../context/KeybindsContext.jsx'
 import { displayCombo } from '../lib/keybinds.js'
 import { Button, Switch, field, kbd } from './ui.jsx'
+import { useAssistantPrefs, setAssistantPrefs } from '../lib/assistantPrefs.js'
+import { useRefresh } from '../context/RefreshContext.jsx'
+import { openShow } from '../lib/focus.js'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -77,9 +80,10 @@ export function SettingsButton({ style }) {
 
 function SettingsSheet({ onClose }) {
   const [kind, setKind] = useState('memory')
-  const tabs = [...Object.entries(DOCS), ['voice', { label: 'Voice' }]]
+  const tabs = [...Object.entries(DOCS), ['voice', { label: 'Voice' }], ['changes', { label: 'Changes' }]]
   return (
     <Sheet title="Assistant settings" onClose={onClose} width={680} height="84vh">
+      {close => <>
       <div role="tablist" style={{ display: 'flex', gap: 4, padding: 3, borderRadius: 9, background: 'var(--surface-2)', alignSelf: 'flex-start', marginBottom: 14 }}>
         {tabs.map(([k, d]) => (
           <button key={k} role="tab" aria-selected={kind === k} onClick={() => setKind(k)}
@@ -91,8 +95,71 @@ function SettingsSheet({ onClose }) {
         ))}
       </div>
       {/* Keyed so switching tabs loads the other document fresh. */}
-      {kind === 'voice' ? <VoiceSettings /> : <DocEditor key={kind} kind={kind} />}
+      {kind === 'voice' ? <VoiceSettings /> : kind === 'changes' ? <ChangesLog onOpen={close} /> : <DocEditor key={kind} kind={kind} />}
+      </>}
     </Sheet>
+  )
+}
+
+// Everything Atlas has changed, newest first, each with Undo (and Open, where
+// there's something to look at).
+function ChangesLog({ onOpen }) {
+  const { token } = useAuth()
+  const { refresh } = useRefresh()
+  const { followAlong } = useAssistantPrefs()
+  const [actions, setActions] = useState(null)
+  const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(null)
+
+  const load = async () => {
+    try {
+      const res = await fetch(`${API}/assistant/actions?limit=50`, { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) throw new Error(`Couldn't load changes (${res.status})`)
+      setActions((await res.json()).actions)
+    } catch (e) { setErr(e.message) }
+  }
+  useEffect(() => { load() }, []) // eslint-disable-line
+
+  const undo = async (a, i) => {
+    const newerLive = actions.slice(0, i).some(x => x.undoable)
+    if (newerLive && !window.confirm('Atlas has made changes since this one. Undo it anyway? Later changes to the same thing will be reverted too.')) return
+    setBusy(a.id)
+    try {
+      const res = await fetch(`${API}/assistant/actions/${a.id}/undo`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) {
+        let detail = ''
+        try { detail = (await res.json()).detail } catch { /* not JSON */ }
+        throw new Error(detail || `Undo failed (${res.status})`)
+      }
+      refresh()
+      await load()
+    } catch (e) { setErr(e.message) } finally { setBusy(null) }
+  }
+
+  return (
+    <div>
+      <SettingRow title="Show me what Atlas changes"
+        detail="When Atlas edits something, open it so you see the change (on a laptop; the chat moves to the side panel). Asking it to show you something always works.">
+        <Switch checked={followAlong} onChange={v => setAssistantPrefs({ followAlong: v })} label="Show me what Atlas changes" />
+      </SettingRow>
+      <div style={{ fontSize: 12.5, color: 'var(--mid)', margin: '14px 0 8px' }}>Every change Atlas makes is listed here and can be undone.</div>
+      {err && <div style={{ fontSize: 12.5, color: 'var(--accent)', marginBottom: 8 }}>{err}</div>}
+      {actions === null && !err && <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</div>}
+      {actions?.length === 0 && <div style={{ fontSize: 13, color: 'var(--muted)' }}>No changes yet.</div>}
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {actions?.map((a, i) => (
+          <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i ? '1px solid var(--bd-sm)' : 'none' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, color: a.undone_at ? 'var(--muted)' : 'var(--ink)', textDecoration: a.undone_at ? 'line-through' : 'none',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.summary}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>{when(a.created_at)}{a.undone_at ? ' · undone' : ''}</div>
+            </div>
+            {a.show && !a.undone_at && <Button variant="ghost" size="sm" onClick={() => { onOpen?.(); openShow(a.show) }}>Open</Button>}
+            {a.undoable && <Button variant="ghost" size="sm" disabled={busy === a.id} onClick={() => undo(a, i)}>{busy === a.id ? '…' : 'Undo'}</Button>}
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 

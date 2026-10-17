@@ -19,12 +19,21 @@ const SIGN_OFFS = [
 const FILLER = "(?:\\s*(?:,|\\.|!|ok(?:ay)?|no|yeah|yes|great|perfect|cool|nice|thanks|thank you|thanks a lot|cheers|atlas|for now|then|so)\\s*)*"
 const RE = new RegExp(`(?:^|[\\s,.!?])${FILLER}(?:${SIGN_OFFS.join('|')})${FILLER}[.!?]*\\s*$`, 'i')
 
+// A message that is *only* thanks or praise ("Brilliant, thanks very much")
+// is a sign-off too: there's nothing in it to act on, and replying "You're
+// welcome!" and listening again is the wrong move.
+const PRAISE = 'brilliant|perfect|great|amazing|awesome|lovely|nice one|nice|cool|excellent|fantastic|superb|wonderful|sweet|legend|cheers|good stuff|sound|grand|class|ok(?:ay)?|right|yeah|yes|that\'?s? (?:great|perfect|brilliant|amazing|lovely)|that works|sorted'
+const THANKS = "thanks?(?: you)?(?: (?:so|very) much| a lot| a million| loads)?|thank you(?: (?:so|very) much)?|ta|cheers|much appreciated|appreciate it"
+const ONLY_THANKS = new RegExp(`^(?:\\s*(?:${PRAISE}|${THANKS}|atlas|mate|that'?s|so|very|really)[\\s,.!]*)+$`, 'i')
+const HAS_THANKS = new RegExp(`\\b(?:${THANKS})\\b`, 'i')
+
 /**
  * { end, rest }: whether `text` ends the conversation, and the part of it
  * still worth sending (empty when it was only a sign-off).
  */
 export function checkSignOff(text) {
   const t = (text || '').trim()
+  if (t && ONLY_THANKS.test(t) && HAS_THANKS.test(t)) return { end: true, rest: '' }
   const m = RE.exec(t)
   if (!m) return { end: false, rest: t }
   const rest = t.slice(0, m.index).replace(/[\s,.;:–—-]+$/, '').trim()

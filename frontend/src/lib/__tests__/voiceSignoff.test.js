@@ -15,6 +15,25 @@ describe('checkSignOff', () => {
     expect(checkSignOff(said)).toEqual({ end: true, rest: '' })
   })
 
+  it.each([
+    'Brilliant, thanks very much.',
+    'Perfect, thank you!',
+    'Great stuff, cheers Atlas',
+    'Thanks so much',
+    "That's great, thanks a lot.",
+    'Amazing, thanks mate',
+  ])('ends on thanks alone: “%s”', said => {
+    expect(checkSignOff(said)).toEqual({ end: true, rest: '' })
+  })
+
+  it('does not end on praise without thanks, or thanks with a request', () => {
+    expect(checkSignOff('Perfect').end).toBe(false)
+    expect(checkSignOff('Thanks, now add gym at 7 tomorrow').end).toBe(false)
+    expect(checkSignOff('Great, can you move the gym to 7').end).toBe(false)
+    expect(checkSignOff('Thanks, what is on tomorrow?').end).toBe(false)
+    expect(checkSignOff('Cheers, add milk to my list').end).toBe(false)
+  })
+
   it('sends what came before the sign-off', () => {
     expect(checkSignOff("Move my run to 7am tomorrow, that's all thanks"))
       .toEqual({ end: true, rest: 'Move my run to 7am tomorrow' })

@@ -39,9 +39,9 @@ function Highlight({ text, tokens }) {
     i % 2 ? <mark key={i} style={{ background: 'rgba(193,95,60,.16)', color: 'inherit', borderRadius: 3, padding: '0 1px' }}>{part}</mark> : part)
 }
 
-export default function SearchPalette({ onClose, navigate }) {
+export default function SearchPalette({ onClose, navigate, initialQuery = '' }) {
   const isMobile = useIsMobile()
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(initialQuery)
   const [active, setActive] = useState(0)
   const inputRef = useRef(null)
   const listRef = useRef(null)

@@ -30,6 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+import agent_actions
 import assistant_memory as memory
 from auth import get_current_user
 from database import DATABASE_PATH
@@ -614,6 +615,29 @@ def _document_routes(kind: str) -> None:
 
 for _kind in memory.KINDS:
     _document_routes(_kind)
+
+
+# ── Action log ───────────────────────────────────────────────────────────────
+
+@router.get("/actions")
+async def list_actions(limit: int = 30, user: dict = Depends(get_current_user)):
+    """The assistant's recent changes, newest first, with whether each can still be undone."""
+    db = await _connect()
+    try:
+        return {"actions": await agent_actions.recent(db, min(max(limit, 1), 200))}
+    finally:
+        await db.close()
+
+
+@router.post("/actions/{action_id}/undo")
+async def undo_action(action_id: str, user: dict = Depends(get_current_user)):
+    db = await _connect()
+    try:
+        return await agent_actions.undo(db, action_id)
+    except agent_actions.UndoError as exc:
+        raise HTTPException(409, str(exc))
+    finally:
+        await db.close()
 
 
 # ── Voice ────────────────────────────────────────────────────────────────────

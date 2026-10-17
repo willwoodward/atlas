@@ -15,7 +15,9 @@ from typing import Any, Callable
 
 from strands.hooks import AfterToolCallEvent, HookProvider, HookRegistry
 
-MAX_DETAIL_CHARS = 2000
+# Big enough for the cards some tools return for the chat to draw (a category
+# breakdown, a day's events), which are parsed from this text.
+MAX_DETAIL_CHARS = 8000
 
 
 def summarise_args(args: Any) -> str:

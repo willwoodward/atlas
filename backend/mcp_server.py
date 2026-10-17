@@ -14,6 +14,9 @@ import httpx
 
 import aiosqlite
 import assistant_memory
+import agent_actions as actions
+import agent_tools
+from agent_actions import snapshot, restore_rows, delete_rows
 from crypto import enc, dec
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
@@ -32,12 +35,16 @@ GCAL_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/even
 TIMEZONE = os.getenv("TZ", "Europe/London")
 
 # How much transaction detail the assistant may see. The agent container talks
-# to a third-party model, so merchant-level spending history leaves this box the
-# moment the tool is callable — that is a deliberate choice, not a default.
-#   off      — the tool is not offered at all (default)
+# to a third-party model, so merchant-level spending history leaves this box
+# whenever the tools are callable.
+#   full     — everything, merchant names included (default: the user chose
+#              this on 2026-10-17 so Atlas can investigate and categorise)
 #   redacted — dates, amounts and categories, but no merchant names
-#   full     — everything
-MCP_TRANSACTIONS = os.getenv("ATLAS_MCP_TRANSACTIONS", "off").strip().lower()
+#   off      — no transaction-level tools at all
+MCP_TRANSACTIONS = os.getenv("ATLAS_MCP_TRANSACTIONS", "full").strip().lower()
+# Finance tools that read individual transactions; hidden when off.
+_TXN_TOOLS = {"finance_breakdown", "compare_spending", "search_transactions", "list_categories",
+              "list_recurring", "get_budgets", "set_transaction_category", "rename_category", "add_category_rule"}
 
 
 def _gh_headers(token):
@@ -141,6 +148,7 @@ async def _gcal_events(db, day_from: _date, day_to: _date) -> list[dict]:
             "all_day": all_day,
             "location": e.get("location", ""),
             "description": e.get("description", ""),
+            "color": _GCAL_COLOR_NAMES.get(e.get("colorId"), "default"),
         })
     return events
 
@@ -170,6 +178,48 @@ async def _gcal_write(db, method: str, path: str = "", json_body: dict | None = 
     if resp.status_code not in (200, 201, 204):
         return False, f"Google Calendar rejected the request ({resp.status_code}): {resp.text[:200]}"
     return True, (resp.json() if resp.content and resp.status_code != 204 else {})
+
+
+async def _gcal_get(db, event_id: str) -> dict | None:
+    """One Google event as stored, for undo snapshots."""
+    ok, data = await _gcal_write(db, "GET", f"/{event_id}")
+    return data if ok and isinstance(data, dict) and data.get("id") else None
+
+
+# Fields that can be put back on a Google event to undo an edit.
+_GCAL_FIELDS = ("summary", "description", "location", "start", "end", "colorId")
+
+
+def _gcal_recreate_body(ev: dict) -> dict:
+    return {k: ev[k] for k in _GCAL_FIELDS if k in ev}
+
+
+# Atlas shows Google's 11 event colours as six of its own (see
+# frontend/src/integrations/googleCalendar.js COLOR_MAP). Either name works.
+_GCAL_COLORS = {
+    "coral": "6", "sage": "2", "blue": "9", "gold": "5", "mauve": "3", "grey": "8", "gray": "8", "stone": "8",
+    "lavender": "1", "grape": "3", "flamingo": "4", "banana": "5", "tangerine": "6", "peacock": "7",
+    "graphite": "8", "blueberry": "9", "basil": "10", "tomato": "11",
+}
+ATLAS_COLOR_NAMES = ["coral", "sage", "blue", "gold", "mauve", "grey", "default"]
+# colorId → the Atlas colour it's shown as.
+_GCAL_COLOR_NAMES = {"1": "mauve", "2": "sage", "3": "mauve", "4": "coral", "5": "gold", "6": "coral",
+                     "7": "blue", "8": "grey", "9": "blue", "10": "sage", "11": "coral"}
+
+
+def _gcal_color_id(name: str) -> str | None:
+    """A colour name (or Google colorId) → colorId; "default" → None (calendar colour)."""
+    n = str(name).strip().lower()
+    if n in ("default", "none", ""):
+        return None
+    if n.isdigit() and 1 <= int(n) <= 11:
+        return n
+    return _GCAL_COLORS.get(n, "9")
+
+
+def _first_line(body: str) -> str:
+    line = next((l for l in (body or "").splitlines() if l.strip()), "Untitled")
+    return line.lstrip("# ").strip()[:60]
 
 
 server = Server("atlas")
@@ -204,8 +254,8 @@ async def list_tools() -> list[Tool]:
         Tool(name="create_note", description="Create a new quick note", inputSchema={"type":"object","properties":{"body":{"type":"string"}},"required":["body"]}),
         Tool(name="update_note", description="Update an existing note body", inputSchema={"type":"object","properties":{"id":{"type":"string"},"body":{"type":"string"}},"required":["id","body"]}),
         Tool(name="list_events", description="List calendar events — both the user's Google Calendar and local Atlas events. Pass a date (YYYY-MM-DD) for a single day; without one you get local events plus the next 7 days of Google Calendar. Each event has a 'source' of 'google' or 'local'.", inputSchema={"type":"object","properties":{"date":{"type":"string"}},"required":[]}),
-        Tool(name="create_event", description="Create a calendar event in the user's Google Calendar. Times are local (Europe/London) decimal hours: 14.5 = 2:30pm. For an all-day event pass all_day=true and omit start/end.", inputSchema={"type":"object","properties":{"title":{"type":"string"},"date":{"type":"string","description":"YYYY-MM-DD"},"start":{"type":"number","description":"Start hour, e.g. 9.25 for 9:15am"},"end":{"type":"number","description":"End hour, e.g. 10.5 for 10:30am"},"description":{"type":"string"},"location":{"type":"string"},"all_day":{"type":"boolean"}},"required":["title","date"]}),
-        Tool(name="update_event", description="Update or reschedule an existing Google Calendar event. Use the event 'id' from list_events. Only pass the fields you want to change.", inputSchema={"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"date":{"type":"string","description":"YYYY-MM-DD — required if changing start/end"},"start":{"type":"number"},"end":{"type":"number"},"description":{"type":"string"},"location":{"type":"string"}},"required":["id"]}),
+        Tool(name="create_event", description="Create a calendar event in the user's Google Calendar. Times are local (Europe/London) decimal hours: 14.5 = 2:30pm. For an all-day event pass all_day=true and omit start/end.", inputSchema={"type":"object","properties":{"title":{"type":"string"},"date":{"type":"string","description":"YYYY-MM-DD"},"start":{"type":"number","description":"Start hour, e.g. 9.25 for 9:15am"},"end":{"type":"number","description":"End hour, e.g. 10.5 for 10:30am"},"description":{"type":"string"},"location":{"type":"string"},"all_day":{"type":"boolean"},"color":{"type":"string","enum":["coral","sage","blue","gold","mauve","grey","default"],"description":"Event colour as Atlas shows it; default = the calendar colour"}},"required":["title","date"]}),
+        Tool(name="update_event", description="Update, reschedule or recolour an existing Google Calendar event. Use the event 'id' from list_events. Only pass the fields you want to change.", inputSchema={"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"date":{"type":"string","description":"YYYY-MM-DD — required if changing start/end"},"start":{"type":"number"},"end":{"type":"number"},"description":{"type":"string"},"location":{"type":"string"},"color":{"type":"string","enum":["coral","sage","blue","gold","mauve","grey","default"],"description":"Event colour as Atlas shows it; default = the calendar colour"}},"required":["id"]}),
         Tool(name="delete_event", description="Delete a Google Calendar event by its 'id' from list_events", inputSchema={"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}),
         Tool(name="delete_todo", description="Delete a todo permanently", inputSchema={"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}),
         Tool(name="set_week_outcomes", description="Set the weekly outcomes / intentions text", inputSchema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}),
@@ -233,6 +283,7 @@ async def list_tools() -> list[Tool]:
             inputSchema={"type": "object", "properties": {"limit": {"type": "integer", "default": 20}}, "required": []},
         ))
 
+    tools += [t for t in agent_tools.TOOLS if MCP_TRANSACTIONS != "off" or t.name not in _TXN_TOOLS]
     return tools
 
 
@@ -240,10 +291,21 @@ async def list_tools() -> list[Tool]:
 async def call_tool(name: str, arguments: dict):
     db = await _db()
     try:
-        result = await _dispatch(name, arguments, db)
+        result = await run_tool(name, arguments, db)
     finally:
         await db.close()
     return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
+
+
+async def run_tool(name: str, args: dict, db):
+    """Run a tool. A change also says where to see it (`show`), so the app
+    can follow along as the assistant works."""
+    result = await _dispatch(name, args, db)
+    if isinstance(result, dict) and result.get("undo_id") and "show" not in result:
+        show = await actions.show_for(db, result["undo_id"])
+        if show:
+            result["show"] = show
+    return result
 
 
 async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
@@ -268,17 +330,30 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
             (new_id, args["text"], bucket, args.get("goal_id"), today, order),
         )
         await db.commit()
-        return {"id": new_id, "ok": True}
+        undo_id = await actions.record(db, name, f"Added to-do “{args['text']}”",
+                                       {"sql": delete_rows("todos", "id", [new_id])}, {"kind": "todo", "id": new_id})
+        return {"id": new_id, "ok": True, "undo_id": undo_id}
 
     if name == "complete_todo":
+        before = await snapshot(db, "todos", "id = ?", (args["id"],))
+        if not before:
+            return {"error": "No to-do with that id"}
         await db.execute("UPDATE todos SET done = NOT done WHERE id = ?", (args["id"],))
         await db.commit()
-        return {"ok": True}
+        verb = "Reopened" if before[0]["done"] else "Completed"
+        undo_id = await actions.record(db, name, f"{verb} “{before[0]['text']}”",
+                                       {"sql": restore_rows("todos", before)}, {"kind": "todo", "id": args["id"]})
+        return {"ok": True, "done": not before[0]["done"], "undo_id": undo_id}
 
     if name == "move_todo":
+        before = await snapshot(db, "todos", "id = ?", (args["id"],))
+        if not before:
+            return {"error": "No to-do with that id"}
         await db.execute("UPDATE todos SET bucket = ? WHERE id = ?", (args["bucket"], args["id"]))
         await db.commit()
-        return {"ok": True}
+        undo_id = await actions.record(db, name, f"Moved “{before[0]['text']}” to {args['bucket']}",
+                                       {"sql": restore_rows("todos", before)}, {"kind": "todo", "id": args["id"]})
+        return {"ok": True, "undo_id": undo_id}
 
     if name == "get_week_outcomes":
         # Get Monday of current week
@@ -306,10 +381,16 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
             exists = await c.fetchone()
         if exists:
             await db.execute("DELETE FROM habit_completions WHERE habit_id=? AND date=?", (args["id"], date))
+            undo = {"sql": [["INSERT OR IGNORE INTO habit_completions (habit_id,date) VALUES (?,?)", [args["id"], date]]]}
         else:
             await db.execute("INSERT INTO habit_completions (habit_id,date) VALUES (?,?)", (args["id"], date))
+            undo = {"sql": [["DELETE FROM habit_completions WHERE habit_id=? AND date=?", [args["id"], date]]]}
         await db.commit()
-        return {"ok": True, "now_done": not exists}
+        async with db.execute("SELECT name FROM habits WHERE id=?", (args["id"],)) as c:
+            h = await c.fetchone()
+        undo_id = await actions.record(db, name, f"{'Unticked' if exists else 'Ticked'} “{h['name'] if h else 'habit'}” for {date}",
+                                       undo, {"kind": "habit", "id": args["id"]})
+        return {"ok": True, "now_done": not exists, "undo_id": undo_id}
 
     if name == "list_goals":
         async with db.execute("SELECT * FROM goals ORDER BY created_at") as c:
@@ -374,12 +455,19 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         new_id = str(_uuid.uuid4())
         await db.execute("INSERT INTO notes (id,body,updated_at) VALUES (?,?,?)", (new_id, args["body"], today))
         await db.commit()
-        return {"id": new_id, "ok": True}
+        undo_id = await actions.record(db, name, f"Created note “{_first_line(args['body'])}”",
+                                       {"sql": delete_rows("notes", "id", [new_id])}, {"kind": "note", "id": new_id})
+        return {"id": new_id, "ok": True, "undo_id": undo_id}
 
     if name == "update_note":
+        before = await snapshot(db, "notes", "id = ?", (args["id"],))
+        if not before:
+            return {"error": "No note with that id"}
         await db.execute("UPDATE notes SET body=?, updated_at=? WHERE id=?", (args["body"], today, args["id"]))
         await db.commit()
-        return {"ok": True}
+        undo_id = await actions.record(db, name, f"Edited note “{_first_line(before[0]['body'])}”",
+                                       {"sql": restore_rows("notes", before)}, {"kind": "note", "id": args["id"]})
+        return {"ok": True, "undo_id": undo_id}
 
     if name == "list_events":
         date = args.get("date")
@@ -417,10 +505,15 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
             body["start"] = {"dateTime": _rfc3339(date_str, start_h), "timeZone": TIMEZONE}
             body["end"] = {"dateTime": _rfc3339(date_str, end_h), "timeZone": TIMEZONE}
 
+        if args.get("color"):
+            body["colorId"] = _gcal_color_id(args["color"])
         ok, data = await _gcal_write(db, "POST", "", body)
         if not ok:
             return {"error": data}
-        return {"ok": True, "id": data.get("id"), "title": title, "date": date_str, "source": "google"}
+        undo_id = await actions.record(db, name, f"Added “{title}” on {date_str}",
+                                       {"gcal": [{"method": "DELETE", "path": f"/{data.get('id')}"}]},
+                                       {"kind": "event", "id": data.get("id"), "date": date_str})
+        return {"ok": True, "id": data.get("id"), "title": title, "date": date_str, "source": "google", "undo_id": undo_id}
 
     if name == "update_event":
         body = {}
@@ -440,34 +533,57 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
             if args.get("end") is not None:
                 body["end"] = {"dateTime": _rfc3339(date_str, args["end"]), "timeZone": TIMEZONE}
 
+        if args.get("color"):
+            body["colorId"] = _gcal_color_id(args["color"])
         if not body:
             return {"error": "Nothing to update — pass at least one field to change"}
 
+        before = await _gcal_get(db, args["id"])
         ok, data = await _gcal_write(db, "PATCH", f"/{args['id']}", body)
         if not ok:
             return {"error": data}
-        return {"ok": True, "id": data.get("id"), "title": data.get("summary")}
+        # Put back every field this edit touched; one that was unset before is
+        # cleared (null for colour, empty text for the rest).
+        restore = ({k: before.get(k, None if k in ("colorId", "start", "end") else "") for k in body}
+                   if before else None)
+        ev_date = ((data.get("start") or {}).get("dateTime") or (data.get("start") or {}).get("date") or "")[:10]
+        undo_id = await actions.record(db, name, f"Changed “{(before or data).get('summary', 'event')}”",
+                                       {"gcal": [{"method": "PATCH", "path": f"/{args['id']}", "body": restore}]} if restore else None,
+                                       {"kind": "event", "id": args["id"], "date": ev_date})
+        return {"ok": True, "id": data.get("id"), "title": data.get("summary"), "date": ev_date, "undo_id": undo_id}
 
     if name == "delete_event":
+        before = await _gcal_get(db, args["id"])
         ok, data = await _gcal_write(db, "DELETE", f"/{args['id']}")
         if not ok:
             return {"error": data}
-        return {"ok": True, "id": args["id"]}
+        # Undo recreates it (Google gives the copy a new id).
+        undo_id = await actions.record(db, name, f"Deleted “{(before or {}).get('summary', 'event')}”",
+                                       {"gcal": [{"method": "POST", "path": "", "body": _gcal_recreate_body(before)}]} if before else None)
+        return {"ok": True, "id": args["id"], "undo_id": undo_id}
 
     if name == "delete_todo":
+        before = await snapshot(db, "todos", "id = ?", (args["id"],))
+        if not before:
+            return {"error": "No to-do with that id"}
         await db.execute("DELETE FROM todos WHERE id = ?", (args["id"],))
         await db.commit()
-        return {"ok": True}
+        undo_id = await actions.record(db, name, f"Deleted to-do “{before[0]['text']}”",
+                                       {"sql": restore_rows("todos", before)}, {"kind": "todo", "id": args["id"]})
+        return {"ok": True, "undo_id": undo_id}
 
     if name == "set_week_outcomes":
         d = datetime.now(timezone.utc).date()
         monday = (d - timedelta(days=d.weekday())).isoformat()
+        before = await snapshot(db, "week_outcomes", "week_str = ?", (monday,))
         await db.execute(
             "INSERT INTO week_outcomes (week_str, text) VALUES (?, ?) ON CONFLICT(week_str) DO UPDATE SET text=excluded.text",
             (monday, args["text"]),
         )
         await db.commit()
-        return {"ok": True, "week": monday}
+        undo = {"sql": restore_rows("week_outcomes", before) if before else delete_rows("week_outcomes", "week_str", [monday])}
+        undo_id = await actions.record(db, name, "Updated this week's outcomes", undo, {"kind": "page", "page": "todos"})
+        return {"ok": True, "week": monday, "undo_id": undo_id}
 
     if name == "get_today_summary":
         d = datetime.now(timezone.utc).date()
@@ -550,13 +666,16 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
                 path += ".md"
             content = args["content"]
         now = datetime.now(timezone.utc).isoformat()
+        before = await snapshot(db, "github_drafts", "path = ?", (path,))
         await db.execute(
             "INSERT INTO github_drafts (path, content, saved_at) VALUES (?, ?, ?)"
             " ON CONFLICT(path) DO UPDATE SET content=excluded.content, saved_at=excluded.saved_at",
             (path, content, now),
         )
         await db.commit()
-        return {"ok": True, "path": path, "status": "saved as draft — open Atlas to review and publish"}
+        undo = {"sql": restore_rows("github_drafts", before) if before else delete_rows("github_drafts", "path", [path])}
+        undo_id = await actions.record(db, name, f"Saved draft {path}", undo, {"kind": "github", "path": path})
+        return {"ok": True, "path": path, "status": "saved as draft — open Atlas to review and publish", "undo_id": undo_id}
 
     if name == "list_github_drafts":
         async with db.execute("SELECT path, saved_at FROM github_drafts ORDER BY saved_at DESC") as c:
@@ -592,7 +711,33 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
                 "unchanged": saved.get("unchanged", False),
                 "applies": "from the next conversation"}
 
+    if name in agent_tools.NAMES:
+        if name in _TXN_TOOLS and MCP_TRANSACTIONS == "off":
+            return {"error": "Transaction access is disabled on this server (ATLAS_MCP_TRANSACTIONS=off)."}
+        result = await agent_tools.dispatch(name, args, db, gcal_events=_gcal_events)
+        if result is not None:
+            if MCP_TRANSACTIONS == "redacted":
+                _redact(result)
+            return result
+
     return {"error": f"Unknown tool: {name}"}
+
+
+def _redact(result):
+    """ATLAS_MCP_TRANSACTIONS=redacted: strip merchant names from any result."""
+    if isinstance(result, dict):
+        for k, v in result.items():
+            if k == "merchant":
+                result[k] = "[redacted]"
+            else:
+                _redact(v)
+        if result.get("by") == "merchant":
+            for r in result.get("rows", []):
+                if isinstance(r, dict) and "label" in r:
+                    r["label"] = "[redacted]"
+    elif isinstance(result, list):
+        for v in result:
+            _redact(v)
 
 
 # ── SSE Transport + auth middleware ───────────────────────────────────────────

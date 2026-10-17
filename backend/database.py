@@ -349,6 +349,19 @@ async def init_db():
                 source TEXT NOT NULL DEFAULT 'user'  -- user|assistant|restore
             );
             -- (kind column added by migration below: memory|prompt)
+
+            -- Every change the assistant makes, with how to undo it
+            -- (see agent_actions.py).
+            CREATE TABLE IF NOT EXISTS agent_actions (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                tool TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                undo TEXT,            -- JSON recipe, NULL if it can't be undone
+                show TEXT,            -- JSON: what to open to see the change
+                undone_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_agent_actions_created ON agent_actions(created_at DESC);
         """)
         await db.commit()
 

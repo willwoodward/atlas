@@ -39,3 +39,8 @@ def test_the_fixed_sections_follow_whatever_the_prompt_says():
 def test_no_prompt_falls_back():
     assert "You are Atlas" in build_system_prompt(None, "Will", "Monday", "")
     assert "You are Atlas" in build_system_prompt("   ", "Will", "Monday", "")
+
+
+def test_the_app_guidance_is_always_there():
+    p = build_system_prompt("Be brief.", "Will", "Monday", "")
+    assert "show opens a view" in p and "can be undone" in p

@@ -38,7 +38,6 @@ if not CODING_ENABLED:
 # Covers reasoning tokens too, so this needs more headroom than a visible-reply budget.
 MAX_TOKENS = int(os.getenv("AGENT_MAX_TOKENS", "8192"))
 TIMEZONE = os.getenv("TZ", "Europe/London")
-TOOL_DETAIL_CHARS = 2000  # cap on tool args/results echoed to the UI
 
 CODING_SECTION = """Coding: for anything that means changing code in a repository, use \
 delegate_coding. It clones the repo into an isolated sandbox, works on its own \
@@ -85,6 +84,29 @@ def local_tools() -> list:
 FALLBACK_PROMPT = """You are Atlas, {name}'s personal assistant inside their own \
 life dashboard. Today is {today}. Use your tools to look things up rather than \
 guessing, and be concise."""
+
+
+APP_SECTION = """In the app: the user sees the chat inside their Atlas app, and your tools \
+work with it.
+
+- Pictures over paragraphs. finance_breakdown, compare_spending, \
+search_transactions and show_day draw a chart or list in the chat. When you use \
+them, don't repeat every number in text: give the takeaway in a line or two.
+- Investigating money: start broad (finance_breakdown, compare_spending), then \
+drill in (a category by merchant, search_transactions). Tidy categories when \
+asked or when it clearly helps: set_transaction_category, rename_category \
+(merges), add_category_rule for repeat merchants.
+- Scheduling: check find_free_time or the day's events before adding or moving \
+things. Event colours: coral, sage, blue, gold, mauve, grey, default.
+- show opens a view in their app (a page, finances for a category, a calendar \
+day or event, a note, a search). Use it when they ask to see or open \
+something. Changes you make are shown to them as they happen, so you don't \
+need show just to point at an edit.
+- Every change you make is logged and can be undone with one tap, so act \
+rather than asking permission for ordinary changes. Say what you changed in \
+a line.
+
+"""
 
 
 MEMORY_SECTION = """
@@ -139,7 +161,7 @@ def build_system_prompt(template: str | None, name: str, today: str, memory: str
         base += "\n\nToday is {today}."  # the date is not optional, whatever the edit
     base = base.replace("{name}", name).replace("{today}", today)
     coding = CODING_SECTION if CODING_ENABLED else CODING_DISABLED_SECTION
-    return f"{base}\n\n{coding.rstrip()}" + _memory_section(memory, name)
+    return f"{base}\n\n{coding.rstrip()}\n\n{APP_SECTION.rstrip()}" + _memory_section(memory, name)
 
 
 def _model() -> OpenAIResponsesModel:

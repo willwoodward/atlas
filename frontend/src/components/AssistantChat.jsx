@@ -6,6 +6,7 @@ import { useAssistant } from '../context/AssistantContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { assistantPrompts } from '../data.js'
 import { SettingsButton, MemoryEditChip } from './AssistantMemory.jsx'
+import { ToolCards, ActionUndoChip } from './ChatCards.jsx'
 import { useVoiceInput, voiceSupported } from '../hooks/useVoiceInput.js'
 import { useVoiceSettings, getVoiceSettings, CONVERSATION_SILENCE, CONVERSATION_WAIT } from '../lib/voiceSettings.js'
 import { checkSignOff } from '../lib/voiceSignoff.js'
@@ -51,6 +52,25 @@ const TOOL_LABELS = {
   read_system_prompt: 'Reading its instructions',
   write_system_prompt: 'Updated its system prompt',
   edit_system_prompt: 'Updated its system prompt',
+  finance_breakdown: 'Breaking down your money',
+  compare_spending: 'Comparing periods',
+  search_transactions: 'Searching transactions',
+  list_categories: 'Reading your categories',
+  list_recurring: 'Finding subscriptions and bills',
+  get_budgets: 'Checking budgets',
+  set_transaction_category: 'Categorised transactions',
+  rename_category: 'Renamed a category',
+  add_category_rule: 'Added a category rule',
+  set_budget: 'Set a budget',
+  search_events: 'Searching your calendar',
+  find_free_time: 'Finding free time',
+  show_day: 'Drawing the day',
+  create_habit: 'Added a habit',
+  update_goal: 'Updated a goal',
+  add_subtask: 'Added a sub-task',
+  append_to_note: 'Added to a note',
+  delete_note: 'Deleted a note',
+  show: 'Opening it for you',
 }
 
 const toolLabel = name => TOOL_LABELS[name] || name.replace(/_/g, ' ')
@@ -60,7 +80,7 @@ function prettyJson(raw) {
   try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw }
 }
 
-function ToolTrace({ tools = [] }) {
+function ToolTrace({ tools = [], latestUndo }) {
   const [open, setOpen] = useState({})
   if (tools.length === 0) return null
   return (
@@ -81,6 +101,7 @@ function ToolTrace({ tools = [] }) {
               {toolLabel(tool.name)}
               {failed && <span style={{ fontSize: 11 }}>· failed</span>}
               {tool.memory && <MemoryEditChip edit={tool.memory} />}
+              {tool.undoId && !tool.memory && <ActionUndoChip id={tool.undoId} isLatest={tool.undoId === latestUndo} />}
               {hasDetail && (
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
                   style={{ color: 'var(--faint)', transition: 'transform .18s', transform: isOpen ? 'rotate(90deg)' : 'none' }}>
@@ -382,6 +403,8 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
   const taRef = useRef(null)
 
   const empty = messages.length === 0
+  // The newest change Atlas made in this thread: undoing anything older asks first.
+  const latestUndo = [...messages].reverse().flatMap(m => [...(m.tools || [])].reverse()).find(t => t?.undoId)?.undoId
 
   // Only stick to the bottom if you were already there. Research turns update
   // many times a second, and yanking the view down while you are reading
@@ -596,7 +619,8 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
           </div>
         ) : (
           <div key={i} style={{ maxWidth: '100%' }}>
-            <ToolTrace tools={m.tools} />
+            <ToolTrace tools={m.tools} latestUndo={latestUndo} />
+            <ToolCards tools={m.tools} />
             <ResearchPanel research={m.research} />
             <CodingPanel coding={m.coding} />
             <QuestionPanel question={m.question} runId={m.runId} onAnswer={answer} />

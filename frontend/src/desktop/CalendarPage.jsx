@@ -196,6 +196,11 @@ export default function CalendarPage() {
   const stepDay = (n) => setSelDay(d => localDateStr(addDays(parseLocalDate(d), n)))
 
   // From search: go to the event's day/week and open it.
+  useFocusRequest(['calendar'], t => {
+    const weeks = Math.round((mondayOf(parseLocalDate(t.date)) - mondayOf(new Date())) / (7 * 86_400_000))
+    setWeekOffset(weeks)
+    setSelDay(t.date)
+  })
   useFocusRequest(['event'], t => {
     const weeks = Math.round((mondayOf(parseLocalDate(t.date)) - mondayOf(new Date())) / (7 * 86_400_000))
     setWeekOffset(weeks)

@@ -1,5 +1,5 @@
 import { Button, eyebrow, kbd } from '../components/ui.jsx'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { dateLabel } from '../data.js'
 import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import { useTheme } from '../context/ThemeContext.jsx'
@@ -19,6 +19,8 @@ import AssistantPage from './AssistantPage.jsx'
 import AccountsPage  from './AccountsPage.jsx'
 import AssistantPanel from './AssistantPanel.jsx'
 import SearchPalette from '../components/SearchPalette.jsx'
+import { requestFocus, showTarget } from '../lib/focus.js'
+import { getAssistantPrefs } from '../lib/assistantPrefs.js'
 
 const PANEL_KEY = 'atlas:assistant-panel'
 
@@ -206,7 +208,28 @@ export default function DesktopLayout() {
   }, [])
   const { bindings } = useKeybinds()
   const [searchOpen, setSearchOpen] = useState(false)
-  useEffect(() => onShortcut('search', () => setSearchOpen(o => !o)), [])
+  const [searchQuery, setSearchQuery] = useState('')
+  useEffect(() => onShortcut('search', () => { setSearchQuery(''); setSearchOpen(o => !o) }), [])
+
+  // Atlas (or a card in the chat) wants to show something. Explicit requests
+  // always open; changes Atlas makes open only with "follow along" on. From
+  // the full Assistant page the chat moves to the side panel, so it stays in view.
+  const activeRef = useRef(active)
+  activeRef.current = active
+  useEffect(() => {
+    const onShow = e => {
+      const show = e.detail
+      if (!show.explicit && !getAssistantPrefs().followAlong) return
+      if (show.kind === 'search') { setSearchQuery(show.query || ''); setSearchOpen(true); return }
+      const where = showTarget(show)
+      if (!where) return
+      if (activeRef.current === 'assistant' && where.page !== 'assistant') setPanelOpen(true)
+      setActive(where.page)
+      if (where.target) requestFocus(where.target)
+    }
+    window.addEventListener('atlas:show', onShow)
+    return () => window.removeEventListener('atlas:show', onShow)
+  }, [])
   const showPanel = panelOpen && active !== 'assistant'
   // Kept mounted through its exit animation.
   const [panelMounted, setPanelMounted] = useState(showPanel)
@@ -313,7 +336,7 @@ export default function DesktopLayout() {
         </div>
       </main>
 
-      {searchOpen && <SearchPalette onClose={() => setSearchOpen(false)} navigate={setActive} />}
+      {searchOpen && <SearchPalette initialQuery={searchQuery} onClose={() => setSearchOpen(false)} navigate={setActive} />}
       {panelMounted && <AssistantPanel open={showPanel} onExited={() => setPanelMounted(false)}
         onClose={() => setPanelOpen(false)} onExpand={() => { setPanelOpen(false); setActive('assistant') }} />}
     </div>

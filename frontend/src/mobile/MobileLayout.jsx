@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useUser } from '../context/UserContext.jsx'
 import { onShortcut } from '../context/KeybindsContext.jsx'
 import SearchPalette from '../components/SearchPalette.jsx'
+import { requestFocus, showTarget } from '../lib/focus.js'
 import { useTheme } from '../context/ThemeContext.jsx'
 import { useQuickAddAction } from '../context/QuickAddContext.jsx'
 import HomePage      from '../desktop/HomePage.jsx'
@@ -63,7 +64,23 @@ export default function MobileLayout() {
 
   const navigate = (id) => { setActive(id); setDrawerOpen(false) }
   const [searchOpen, setSearchOpen] = useState(false)
-  useEffect(() => onShortcut('search', () => setSearchOpen(o => !o)), [])
+  const [searchQuery, setSearchQuery] = useState('')
+  useEffect(() => onShortcut('search', () => { setSearchQuery(''); setSearchOpen(o => !o) }), [])
+  // Only what you asked to see: following Atlas's edits on a phone would pull
+  // you out of the conversation every time it changed something.
+  useEffect(() => {
+    const onShow = e => {
+      const show = e.detail
+      if (!show.explicit) return
+      if (show.kind === 'search') { setSearchQuery(show.query || ''); setSearchOpen(true); return }
+      const where = showTarget(show)
+      if (!where) return
+      navigate(where.page)
+      if (where.target) requestFocus(where.target)
+    }
+    window.addEventListener('atlas:show', onShow)
+    return () => window.removeEventListener('atlas:show', onShow)
+  }, []) // eslint-disable-line
   // The voice shortcut, pressed with no chat on screen (e.g. a keyboard on a tablet-size phone).
   useEffect(() => {
     const show = () => navigate('assistant')
@@ -193,7 +210,7 @@ export default function MobileLayout() {
           </button>
         </div>
       </div>
-      {searchOpen && <SearchPalette onClose={() => setSearchOpen(false)} navigate={navigate} />}
+      {searchOpen && <SearchPalette initialQuery={searchQuery} onClose={() => setSearchOpen(false)} navigate={navigate} />}
     </div>
   )
 }

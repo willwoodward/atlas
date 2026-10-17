@@ -49,3 +49,27 @@ export function flash(selector, { tries = 20 } = {}) {
   el.classList.add('search-flash')
   setTimeout(() => el.classList.remove('search-flash'), 2000)
 }
+
+/**
+ * Where a "show" (from a tool result or a chat card) leads: the page to open
+ * and the focus target to hand it. `null` target just opens the page.
+ */
+export function showTarget(show) {
+  switch (show?.kind) {
+    case 'todo':     return { page: 'todos', target: { kind: 'todo', id: show.id } }
+    case 'goal':     return { page: 'goals', target: { kind: 'goal', id: show.id } }
+    case 'habit':    return { page: 'habits', target: { kind: 'habit', id: show.id } }
+    case 'note':     return { page: 'notes', target: { kind: 'note', id: show.id } }
+    case 'github':   return { page: 'notes', target: { kind: 'github', path: show.path } }
+    case 'event':    return show.date ? { page: 'calendar', target: { kind: 'event', id: show.id, date: show.date } } : { page: 'calendar', target: null }
+    case 'calendar': return { page: 'calendar', target: show.date ? { kind: 'calendar', date: show.date } : null }
+    case 'finances': return { page: 'finances', target: { kind: 'finances', category: show.category, range: show.range, type: show.type } }
+    case 'page':     return { page: show.page, target: null }
+    default:         return null
+  }
+}
+
+/** Ask the layout to open something (card "Open" buttons use this). */
+export function openShow(show) {
+  window.dispatchEvent(new CustomEvent('atlas:show', { detail: { ...show, explicit: true } }))
+}

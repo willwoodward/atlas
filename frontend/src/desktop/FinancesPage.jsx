@@ -677,6 +677,18 @@ export default function FinancesPage() {
     setTxnPage(Math.floor(i / TXN_PAGE))
     flash(`[data-search-id="txn:${t.id}"]`)
   })
+  // From Atlas: a category (and period) filters the log; without one, the charts.
+  const chartsRef = useRef(null)
+  useFocusRequest(['finances'], t => {
+    if (t.category) {
+      setTxnFilter({ type: t.type || null, label: t.category, categories: [t.category],
+                     range: t.range?.from || t.range?.to ? t.range : null })
+      setTxnPage(0)
+      setTimeout(() => flash('[data-search-id="txn-log"]'), 50)
+    } else {
+      chartsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  })
 
   const { removeTransaction } = useFinances()
   // Clamped, so deleting the last row on the final page, or a smaller ledger
@@ -751,7 +763,7 @@ export default function FinancesPage() {
       </div>
 
       {/* Where the money goes — right under the headline figures */}
-      <div style={{ marginBottom: 16 }}>
+      <div ref={chartsRef} style={{ marginBottom: 16 }}>
         <CategoryCharts selected={txnFilter} onSelect={filterBy} />
       </div>
 
@@ -835,7 +847,7 @@ export default function FinancesPage() {
         </div>
 
         {/* RIGHT col: Transactions + compensation */}
-        <div ref={txnCardRef} style={{ ...card, scrollMarginTop: 90 }}>
+        <div ref={txnCardRef} data-search-id="txn-log" style={{ ...card, scrollMarginTop: 90 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
             <h2 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 19, fontWeight: 600 }}>Transactions</h2>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
