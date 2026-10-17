@@ -42,7 +42,8 @@ export default function VoiceDock({ right = 16, bottom = 16 }) {
   const messagesRef = useRef(messages)
   messagesRef.current = messages
 
-  const { voice, live, conversing, listening, toggle, end } = useVoiceConversation({ viaDock: true })
+  // In a conversation it waits for Atlas to answer before listening again.
+  const { voice, live, conversing, listening, toggle, end, fast } = useVoiceConversation({ viaDock: true, waitForReply: true })
   const working = voice.state !== 'idle' || conversing
   const begun = () => { if (sinceRef.current === null) setSince(messagesRef.current.length) }
 
@@ -72,10 +73,14 @@ export default function VoiceDock({ right = 16, bottom = 16 }) {
   if (chatsOnScreen > 0 && !round && !working) return null
 
   const lastTool = reply?.tools?.filter(t => typeof t === 'object').slice(-1)[0]
-  const status = listening ? 'Listening'
+  const atlasStatus = lastTool && !lastTool.status ? toolLabel(lastTool.name) : reply?.content ? 'Answering' : 'Thinking'
+  const status = fast
+    ? (fast.phase === 'connecting' ? 'Connecting' : fast.phase === 'closing' ? 'Ending'
+      : busy ? atlasStatus : fast.speaking ? 'Speaking' : fast.active ? 'Listening' : 'Atlas')
+    : listening ? 'Listening'
     : voice.state === 'transcribing' ? 'Transcribing'
     : speaking ? 'Speaking'
-    : busy ? (lastTool && !lastTool.status ? toolLabel(lastTool.name) : reply?.content ? 'Answering' : 'Thinking')
+    : busy ? atlasStatus
     : conversing ? 'Voice mode' : 'Atlas'
   const shortcut = bindings?.voice ? ` (${displayCombo(bindings.voice)})` : ''
 
@@ -95,7 +100,7 @@ export default function VoiceDock({ right = 16, bottom = 16 }) {
             <span className={listening || busy ? 'voice-dock-pulse' : undefined}
               style={{ width: 8, height: 8, borderRadius: '50%', flex: 'none', background: listening ? 'var(--accent)' : busy || speaking ? 'var(--sage)' : 'var(--faint)' }} />
             <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: 'var(--mid)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {[status, conversing && status !== 'Voice mode' ? 'voice mode' : null, queued.length ? `${queued.length} queued` : null].filter(Boolean).join(' · ')}
+              {[status, fast?.active ? 'fast voice' : conversing && status !== 'Voice mode' ? 'voice mode' : null, queued.length ? `${queued.length} queued` : null].filter(Boolean).join(' · ')}
             </span>
             <IconButton size={28} aria-label="Open in chat" title="Open in chat"
               onClick={() => { setSince(null); window.dispatchEvent(new CustomEvent('atlas:show-assistant')) }}>
@@ -106,7 +111,9 @@ export default function VoiceDock({ right = 16, bottom = 16 }) {
             </IconButton>
           </div>
           <div ref={bodyRef} style={{ maxHeight: 'min(38vh, 320px)', overflowY: 'auto', padding: '0 14px 12px', textAlign: 'left' }}>
-            {voice.state !== 'idle'
+            {/* Fast voice: what you said, then Atlas's answer as it comes. */}
+            {fast?.active && fast.userText && (busy || reply?.content) && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 6 }}>“{fast.userText}”</div>}
+            {voice.state !== 'idle' && !(fast?.active && (busy || reply?.content))
               ? <div style={{ fontSize: 13.5, lineHeight: 1.5, color: live ? 'var(--ink)' : 'var(--faint)' }}>{live || (listening ? 'Go ahead…' : '…')}</div>
               : reply?.content
                 ? <div className="md-prose" style={{ fontSize: 13.5, lineHeight: 1.55 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(reply.content) }} />

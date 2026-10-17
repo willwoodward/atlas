@@ -52,7 +52,6 @@ const navIcons = {
 
 const NAV_MAIN = [
   { id: 'home',     label: 'Home' },
-  { id: 'inbox',    label: 'Inbox' },
   { id: 'calendar', label: 'Calendar' },
   { id: 'habits',   label: 'Habits' },
   { id: 'todos',    label: 'To-do' },
@@ -64,6 +63,7 @@ const NAV_APPS = [
   { id: 'fitness',  label: 'Fitness' },
 ]
 const NAV_BOTTOM = [
+  { id: 'inbox',     label: 'Inbox' },
   { id: 'assistant', label: 'Assistant' },
 ]
 
@@ -297,7 +297,7 @@ export default function DesktopLayout() {
         {/* Main nav */}
         <nav style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
           {NAV_MAIN.map(({ id, label }) => (
-            <NavBtn key={id} id={id} label={label} active={active === id} onClick={() => setActive(id)} collapsed={collapsed} badge={id === 'inbox' ? inboxCounts.unread : 0} />
+            <NavBtn key={id} id={id} label={label} active={active === id} onClick={() => setActive(id)} collapsed={collapsed} />
           ))}
           <div style={{ height: 1, background: 'var(--bd)', margin: '8px 4px' }} />
           {NAV_APPS.map(({ id, label }) => (
@@ -305,7 +305,7 @@ export default function DesktopLayout() {
           ))}
           <div style={{ flex: 1 }} />
           {NAV_BOTTOM.map(({ id, label }) => (
-            <NavBtn key={id} id={id} label={label} active={active === id} onClick={() => setActive(id)} collapsed={collapsed} />
+            <NavBtn key={id} id={id} label={label} active={active === id} onClick={() => setActive(id)} collapsed={collapsed} badge={id === 'inbox' ? inboxCounts.unread : 0} />
           ))}
         </nav>
 

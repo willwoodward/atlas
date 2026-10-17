@@ -14,12 +14,15 @@ import { useSyncExternalStore } from 'react'
 //   floatingMic    — the mic button in the corner when no chat is on screen
 //   voiceOpensChat — the voice shortcut opens the assistant panel instead of
 //                    using the corner mic
+//   engine         — 'classic' (the pipeline below) or 'live' (Fast: GPT-Live
+//                    listens and talks; Atlas does the work)
 
 const KEY = 'atlas:voice-settings'
 export const VOICE_DEFAULTS = {
   silenceSeconds: 1.5, autoSend: true, keepListening: false,
   speakReplies: 'dock', ttsVoice: 'marin', bargeIn: false,
   floatingMic: true, voiceOpensChat: false,
+  engine: 'classic',
 }
 // The voices of OpenAI's realtime speech model; marin and cedar sound best.
 export const TTS_VOICES = ['marin', 'cedar', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse']

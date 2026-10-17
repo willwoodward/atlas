@@ -307,8 +307,12 @@ async def _busy(db, session_id: str) -> bool:
         return await c.fetchone() is not None
 
 
-async def start_routine(routine_id: str, trigger: str = "schedule") -> dict | None:
-    """Run a routine now. Returns the new item, or None if it's already running."""
+async def start_routine(routine_id: str, trigger: str = "schedule", test: bool = False) -> dict | None:
+    """Run a routine now. Returns the new item, or None if it's already running.
+
+    `test`: a test run, to see what it would do. Whatever the routine's
+    setting, changes only become suggestions (nothing happens unless you
+    approve one), there's no notification, and the item says it's a test."""
     from routers import assistant
     db = await connect()
     try:
@@ -329,17 +333,18 @@ async def start_routine(routine_id: str, trigger: str = "schedule") -> dict | No
             "VALUES (?,?,?, 'running', ?, ?, ?)", (run_id, now, now, r["prompt"][:500], r["prompt"], session_id),
         )
         await db.execute(
-            "INSERT INTO inbox_items (id, created_at, updated_at, title, routine_id, session_id, status, read) "
-            "VALUES (?,?,?,?,?,?, 'running', 0)", (item_id, now, now, r["name"], routine_id, session_id),
+            "INSERT INTO inbox_items (id, created_at, updated_at, title, routine_id, session_id, status, read, test) "
+            "VALUES (?,?,?,?,?,?, 'running', 0, ?)", (item_id, now, now, r["name"], routine_id, session_id, int(test)),
         )
-        await db.execute("UPDATE routines SET last_run_at=? WHERE id=?", (now, routine_id))
+        if not test:
+            await db.execute("UPDATE routines SET last_run_at=? WHERE id=?", (now, routine_id))
         await db.commit()
         body = await assistant.run_body(
             db, run_id, session_id, [{"role": "user", "content": r["prompt"]}],
-            background={"routine": r["name"], "approval": r["approval"], "trigger": trigger},
+            background={"routine": r["name"], "approval": "ask" if test else r["approval"], "trigger": trigger, "test": test},
         )
         auth = await _service_auth_for(db)
-        notify = bool(r["notify"])
+        notify = bool(r["notify"]) and not test
     finally:
         await db.close()
     assistant._tasks[run_id] = asyncio.create_task(_drive_and_finish(item_id, run_id, body, auth, notify))
@@ -440,6 +445,8 @@ async def item_view(db, item_id: str) -> dict | None:
 def _item_row(r) -> dict:
     d = dict(r)
     d["read"], d["archived"] = bool(d["read"]), bool(d["archived"])
+    if "test" in d:
+        d["test"] = bool(d["test"])
     return d
 
 
@@ -627,8 +634,10 @@ TOOLS = [
          inputSchema={"type": "object", "properties": {"id": {"type": "string"}, **_ROUTINE_PROPS, "enabled": {"type": "boolean"}}, "required": ["id"]}),
     Tool(name="delete_routine", description="Delete a routine. Its past inbox items stay.",
          inputSchema={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}),
-    Tool(name="run_routine", description="Run a routine now, in the background; the result arrives in the inbox.",
-         inputSchema={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}),
+    Tool(name="run_routine", description="Run a routine now, in the background; the result arrives in the inbox. test=true does a test run: nothing is changed (changes become suggestions) and there's no notification.",
+         inputSchema={"type": "object", "properties": {"id": {"type": "string"}, "test": {"type": "boolean"}}, "required": ["id"]}),
+    Tool(name="list_inbox", description="List recent inbox items (results of routines): id, title, when, status, suggestions waiting, and a preview. Use to find an item to open with show(view='inbox', inbox_item_id=…).",
+         inputSchema={"type": "object", "properties": {"limit": {"type": "integer", "description": "default 15"}}, "required": []}),
 ]
 NAMES = {t.name for t in TOOLS}
 
@@ -638,14 +647,18 @@ async def dispatch(name: str, args: dict, db) -> dict:
     from agent_actions import snapshot, restore_rows, delete_rows
     show = {"kind": "page", "page": "inbox"}
     try:
+        if name == "list_inbox":
+            out = await list_items(db, "all", limit=max(1, min(int(args.get("limit") or 15), 50)))
+            return {"items": [{k: i.get(k) for k in ("id", "title", "created_at", "status", "pending", "read", "test", "preview", "routine_id")}
+                              for i in out["items"]], "counts": out["counts"]}
         if name == "list_routines":
             return {"routines": [{k: r[k] for k in ("id", "name", "prompt", "schedule", "approval", "notify", "enabled", "next_run_at")}
                                  for r in await list_routines(db)]}
         if name == "create_routine":
             r = await create_routine(db, args)
             undo_id = await actions.record(db, name, f"Created routine “{r['name']}” ({r['schedule']})",
-                                           {"sql": delete_rows("routines", "id", [r["id"]])}, show)
-            return {"ok": True, "routine": r, "undo_id": undo_id}
+                                           {"sql": delete_rows("routines", "id", [r["id"]])}, {"kind": "routine", "id": r["id"]})
+            return {"ok": True, "routine": r, "undo_id": undo_id, "show": {"kind": "routine", "id": r["id"]}}
         if name in ("update_routine", "delete_routine"):
             before = await snapshot(db, "routines", "id = ?", (args.get("id"),))
             if not before:
@@ -664,11 +677,14 @@ async def dispatch(name: str, args: dict, db) -> dict:
                     ("Instruction", b["prompt"], r["prompt"]), ("Asks first", "yes" if b["approval"] == "ask" else "no", "yes" if r["approval"] == "ask" else "no"),
                     ("On", "yes" if b["enabled"] else "no", "yes" if r["enabled"] else "no")], show)
                 out = {"ok": True, "routine": r, "card": card}
-            out["undo_id"] = await actions.record(db, name, summary, {"sql": restore_rows("routines", before)}, show)
+            routine_show = {"kind": "routine", "id": args["id"]} if name == "update_routine" else show
+            out["undo_id"] = await actions.record(db, name, summary, {"sql": restore_rows("routines", before)}, routine_show)
+            out["show"] = routine_show
             return out
         if name == "run_routine":
-            item = await start_routine(args.get("id", ""), "manual")
-            return {"ok": True, "started": item} if item else {"error": "No such routine, or it's already running"}
+            item = await start_routine(args.get("id", ""), "manual", test=bool(args.get("test")))
+            return ({"ok": True, "started": item, "show": {"kind": "inbox", "id": item["id"]}} if item
+                    else {"error": "No such routine, or it's already running"})
     except ValueError as exc:
         return {"error": str(exc)}
     return {"error": f"Unknown tool {name}"}

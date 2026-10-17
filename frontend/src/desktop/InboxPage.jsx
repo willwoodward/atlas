@@ -72,6 +72,7 @@ function ItemRow({ item, selected, onClick }) {
         <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', marginTop: 3, fontSize: 12.5, lineHeight: 1.45, color: 'var(--muted)' }}>
           {item.status === 'running' ? 'Atlas is working on this…' : item.preview || '—'}
         </span>
+        {item.test && <span style={{ display: 'inline-block', marginTop: 6, marginRight: 6, padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 600, background: 'var(--surface-3)', color: 'var(--mid)' }}>Test run</span>}
         {(item.pending > 0 || item.status === 'error') && (
           <span style={{ display: 'inline-block', marginTop: 6, padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 600,
                          background: 'var(--accent-soft)', color: 'var(--accent)' }}>
@@ -289,7 +290,7 @@ function Detail({ id, onBack, onChanged, isMobile, onRunAgain }) {
           </IconButton>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ ...eyebrow }}>{[item.routine_name ? 'Routine' : null, when(item.created_at)].filter(Boolean).join(' · ')}</div>
+          <div style={{ ...eyebrow }}>{[item.test ? 'Test run — nothing changes unless you approve it' : item.routine_name ? 'Routine' : null, when(item.created_at)].filter(Boolean).join(' · ')}</div>
           <h2 style={{ margin: '4px 0 0', fontFamily: 'var(--font-serif)', fontWeight: 500, fontSize: isMobile ? 22 : 26, color: 'var(--ink)' }}>{item.title}</h2>
         </div>
         {/* On a phone the actions go on their own row under the title. */}
@@ -383,7 +384,11 @@ export default function InboxPage() {
     if (!isMobile && !selected && items?.length) setSelected(items[0].id)
   }, [items, isMobile]) // eslint-disable-line
 
-  useFocusRequest(['inbox'], t => { setView('all'); setSelected(t.id); load('all') })
+  const [openRoutine, setOpenRoutine] = useState(null)
+  useFocusRequest(['inbox', 'routine'], t => {
+    if (t.kind === 'routine') { setOpenRoutine(t.id); setRoutinesOpen(true); return }
+    setView('all'); setSelected(t.id); load('all')
+  })
 
   const changed = () => { load(); reloadCounts() }
   const runAgain = async routineId => {
@@ -442,7 +447,7 @@ export default function InboxPage() {
               {list}
             </div>
           )}
-        {routinesOpen && <RoutinesSheet onClose={() => setRoutinesOpen(false)} onRan={id => { setSelected(id); load() }} />}
+        {routinesOpen && <RoutinesSheet openId={openRoutine} onClose={() => { setRoutinesOpen(false); setOpenRoutine(null) }} onRan={id => { setSelected(id); load() }} />}
       </div>
     )
   }
@@ -458,7 +463,7 @@ export default function InboxPage() {
             : <div style={{ padding: 24, fontSize: 13, color: 'var(--faint)' }}>—</div>}
         </div>
       </div>
-      {routinesOpen && <RoutinesSheet onClose={() => setRoutinesOpen(false)} onRan={id => { setSelected(id); load() }} />}
+      {routinesOpen && <RoutinesSheet openId={openRoutine} onClose={() => { setRoutinesOpen(false); setOpenRoutine(null) }} onRan={id => { setSelected(id); load() }} />}
     </div>
   )
 }

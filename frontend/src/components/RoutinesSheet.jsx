@@ -60,7 +60,7 @@ function Notifications() {
   )
 }
 
-function Editor({ initial, onSave, onCancel, onDelete }) {
+function Editor({ initial, onSave, onCancel, onDelete, onTest }) {
   const [f, setF] = useState(initial)
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -122,6 +122,7 @@ function Editor({ initial, onSave, onCancel, onDelete }) {
       {err && <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>{err}</div>}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         {onDelete && <Button variant="danger" size="sm" onClick={onDelete}>Delete</Button>}
+        {onTest && <Button variant="ghost" size="sm" onClick={onTest} title="Runs the saved version now: nothing changes unless you approve it, and no notification">Test run</Button>}
         <span style={{ flex: 1 }} />
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>
         <Button variant="primary" onClick={save} disabled={busy || !f.name.trim() || !f.prompt.trim() || !f.days.length}>{initial.id ? 'Save' : 'Create routine'}</Button>
@@ -130,14 +131,15 @@ function Editor({ initial, onSave, onCancel, onDelete }) {
   )
 }
 
-export default function RoutinesSheet({ onClose, onRan }) {
+export default function RoutinesSheet({ onClose, onRan, openId = null }) {
   const { token } = useAuth()
   const [routines, setRoutines] = useState(null)
   const [editing, setEditing] = useState(null)   // a routine, or EMPTY for a new one
   const [err, setErr] = useState(null)
 
-  const load = () => inboxFetch(token, '/routines').then(r => { setRoutines(r.routines); setErr(null) }).catch(e => setErr(e.message))
-  useEffect(() => { load() }, []) // eslint-disable-line
+  const load = () => inboxFetch(token, '/routines').then(r => { setRoutines(r.routines); setErr(null); return r.routines }).catch(e => setErr(e.message))
+  // Opened to show one routine ("show me my morning plan").
+  useEffect(() => { load().then(list => { const r = openId && list?.find(x => x.id === openId); if (r) setEditing({ ...r }) }) }, []) // eslint-disable-line
 
   const save = async f => {
     const body = { name: f.name, prompt: f.prompt, days: f.days, time: f.time, approval: f.approval, notify: f.notify }
@@ -153,9 +155,10 @@ export default function RoutinesSheet({ onClose, onRan }) {
     setRoutines(list => list.map(x => (x.id === r.id ? { ...x, enabled } : x)))
     try { await inboxFetch(token, `/routines/${r.id}`, { method: 'PUT', body: { enabled } }); load() } catch (e) { setErr(e.message); load() }
   }
-  const runNow = async r => {
+  // A test run: see what it would do. Changes only become suggestions, and there's no notification.
+  const runNow = async (r, test = false) => {
     try {
-      const out = await inboxFetch(token, `/routines/${r.id}/run`, { method: 'POST', body: {} })
+      const out = await inboxFetch(token, `/routines/${r.id}/run${test ? '?test=1' : ''}`, { method: 'POST', body: {} })
       onRan?.(out.id); onClose()
     } catch (e) { setErr(e.message) }
   }
@@ -163,7 +166,8 @@ export default function RoutinesSheet({ onClose, onRan }) {
   return (
     <Sheet title={editing ? (editing.id ? 'Edit routine' : 'New routine') : 'Routines'} onClose={onClose} width={560} ariaLabel="Routines">
       {editing
-        ? <Editor initial={editing} onSave={save} onCancel={() => setEditing(null)} onDelete={editing.id ? () => remove(editing) : null} />
+        ? <Editor initial={editing} onSave={save} onCancel={() => setEditing(null)} onDelete={editing.id ? () => remove(editing) : null}
+            onTest={editing.id ? () => runNow(editing, true) : null} />
         : (
           <div style={{ textAlign: 'left' }}>
             <Notifications />
@@ -181,6 +185,7 @@ export default function RoutinesSheet({ onClose, onRan }) {
                       {r.schedule} · {r.approval === 'ask' ? 'asks first' : 'acts itself'} · {r.enabled ? nextLabel(r.next_run_at) : 'Paused'}
                     </div>
                   </button>
+                  <Button size="sm" variant="ghost" onClick={() => runNow(r, true)} title="See what it would do: nothing changes unless you approve it, and no notification">Test run</Button>
                   <Button size="sm" variant="ghost" onClick={() => runNow(r)}>Run now</Button>
                   <Switch checked={r.enabled} onChange={v => toggle(r, v)} label={`${r.name} on`} />
                 </div>

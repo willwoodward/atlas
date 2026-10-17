@@ -70,7 +70,8 @@ async def remove_routine(routine_id: str, user: dict = Depends(get_current_user)
 
 
 @router.post("/routines/{routine_id}/run")
-async def run_routine_now(routine_id: str, user: dict = Depends(get_current_user)):
+async def run_routine_now(routine_id: str, test: bool = False, user: dict = Depends(get_current_user)):
+    """Run now. ?test=1 for a test run: suggestions only, no notification."""
     db = await inbox.connect()
     try:
         await inbox.remember_user(db, user)
@@ -79,7 +80,7 @@ async def run_routine_now(routine_id: str, user: dict = Depends(get_current_user
         await db.close()
     if not exists:
         raise HTTPException(404, "No such routine")
-    item = await inbox.start_routine(routine_id, "manual")
+    item = await inbox.start_routine(routine_id, "manual", test=test)
     if not item:
         raise HTTPException(409, "It's already running.")
     return item

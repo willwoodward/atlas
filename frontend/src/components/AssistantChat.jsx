@@ -13,72 +13,9 @@ import { speech, useSpeaking, unlockAudio } from '../lib/speech.js'
 import { useKeybinds } from '../context/KeybindsContext.jsx'
 import { displayCombo } from '../lib/keybinds.js'
 
-// MCP tool name → what to show while it runs
-const TOOL_LABELS = {
-  list_routines: 'Checking your routines',
-  create_routine: 'Setting up a routine',
-  update_routine: 'Changing a routine',
-  delete_routine: 'Deleting a routine',
-  run_routine: 'Starting a routine',
-  list_todos: 'Reading your to-dos',
-  add_todo: 'Adding a to-do',
-  complete_todo: 'Completing a to-do',
-  move_todo: 'Moving a to-do',
-  delete_todo: 'Deleting a to-do',
-  get_week_outcomes: 'Reading your weekly outcomes',
-  set_week_outcomes: 'Updating your weekly outcomes',
-  list_habits: 'Checking your habits',
-  log_habit: 'Logging a habit',
-  list_goals: 'Reading your goals',
-  get_finances_summary: 'Reviewing your finances',
-  list_transactions: 'Reading your transactions',
-  list_notes: 'Reading your notes',
-  search_notes: 'Searching your notes',
-  create_note: 'Writing a note',
-  update_note: 'Updating a note',
-  list_events: 'Checking your calendar',
-  delegate_research: 'Sending out a research team',
-  tavily_search: 'Searching the web',
-  tavily_extract: 'Reading a page',
-  http_request: 'Fetching a page',
-  create_event: 'Adding to your calendar',
-  update_event: 'Rescheduling an event',
-  delete_event: 'Removing a calendar event',
-  get_today_summary: 'Pulling together today',
-  list_github_notes: 'Listing your GitHub notes',
-  read_github_note: 'Reading a GitHub note',
-  write_github_note: 'Drafting a GitHub note',
-  create_github_folder: 'Drafting a new folder',
-  list_github_drafts: 'Checking your drafts',
-  read_github_draft: 'Reading a draft',
-  read_memory: 'Reading its memory',
-  write_memory: 'Saved to memory',
-  edit_memory: 'Saved to memory',
-  read_system_prompt: 'Reading its instructions',
-  write_system_prompt: 'Updated its system prompt',
-  edit_system_prompt: 'Updated its system prompt',
-  finance_breakdown: 'Breaking down your money',
-  compare_spending: 'Comparing periods',
-  search_transactions: 'Searching transactions',
-  list_categories: 'Reading your categories',
-  list_recurring: 'Finding subscriptions and bills',
-  get_budgets: 'Checking budgets',
-  set_transaction_category: 'Categorised transactions',
-  rename_category: 'Renamed a category',
-  add_category_rule: 'Added a category rule',
-  set_budget: 'Set a budget',
-  search_events: 'Searching your calendar',
-  find_free_time: 'Finding free time',
-  show_day: 'Drawing the day',
-  create_habit: 'Added a habit',
-  update_goal: 'Updated a goal',
-  add_subtask: 'Added a sub-task',
-  append_to_note: 'Added to a note',
-  delete_note: 'Deleted a note',
-  show: 'Opening it for you',
-}
+import { toolLabel } from '../lib/toolLabels.js'
+export { toolLabel }
 
-export const toolLabel = name => TOOL_LABELS[name] || name.replace(/_/g, ' ')
 
 function prettyJson(raw) {
   if (!raw) return ''
@@ -437,7 +374,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
   // on (the default) it goes straight off; otherwise it's left in the box so a
   // misheard word can be fixed first. Conversation mode, barge-in and the rest
   // live in useVoiceConversation, shared with the corner mic.
-  const { voice, live, conversing, listening, begin: beginVoice, end: endVoice, toggle: toggleVoice, joinText } = useVoiceConversation({
+  const { voice, live, conversing, listening, begin: beginVoice, end: endVoice, toggle: toggleVoice, joinText, fast } = useVoiceConversation({
     draft: input,
     onSend: text => submit(text, { spoken: true }),
     onDraft: text => {
@@ -491,6 +428,8 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
       )}
       {canVoice && (
         <button onClick={() => {
+            // Fast voice: the mic button ends the session.
+            if (fast?.active) { endVoice(); return }
             // While Atlas is talking, the tap only cuts the reply off.
             if (speech.speaking && !listening) { speech.cancel(); return }
             if (listening) voice.stop(); else beginVoice()
@@ -523,7 +462,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', maxWidth: 560, marginBottom: 6, fontSize: 12.5, color: 'var(--mid)' }}>
       <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flex: 'none' }} />
       <span style={{ flex: 1 }}>
-        {[conversing ? 'Voice mode' : null, speaking ? 'Atlas is speaking' : null, listening ? 'listening' : voice.state === 'transcribing' ? 'transcribing' : null, busy && !speaking ? 'Atlas is answering' : null,
+        {[fast?.active ? (fast.phase === 'connecting' ? 'Fast voice · connecting' : 'Fast voice') : conversing ? 'Voice mode' : null, speaking ? 'Atlas is speaking' : null, listening ? 'listening' : voice.state === 'transcribing' ? 'transcribing' : null, busy && !speaking ? 'Atlas is answering' : null,
           queued.length ? `${queued.length} queued` : null].filter(Boolean).join(' · ')}
       </span>
       {speaking && conversing && <button onClick={() => speech.cancel()} style={{ fontSize: 12, padding: '2px 9px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', fontFamily: 'inherit', cursor: 'pointer' }}>Skip</button>}

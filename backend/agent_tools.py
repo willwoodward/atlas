@@ -220,15 +220,18 @@ TOOLS = [
          inputSchema={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}),
     # The app itself
     Tool(name="show",
-         description="Open a view in the user's Atlas app so they can see something: a page, the finances for a category and period, a calendar day or event, a note, or a search. Use when they ask to see/open something, or to point at what you just changed.",
+         description="Open a view in the user's Atlas app so they can see something: a page, the finances for a category and period, a calendar day or event, a note, a routine or inbox item, or a search. Be as specific as you can: when they ask to see a particular thing, pass its id so that thing opens, not just its page (find ids with search_notes, list_routines, list_inbox, list_events…).",
          inputSchema={"type": "object", "properties": {
-             "view": {"type": "string", "enum": ["home", "calendar", "finances", "todos", "goals", "habits", "notes", "search"]},
+             "view": {"type": "string", "enum": ["home", "calendar", "finances", "todos", "goals", "habits", "notes", "inbox", "fitness", "search"]},
              "date": {"type": "string", "description": "calendar: day to open"},
              "event_id": {"type": "string", "description": "calendar: event to open"},
              "category": {"type": "string", "description": "finances: filter the transaction log to this category"},
              "period": {"type": "string", "enum": PERIODS, "description": "finances: period for the filter"},
              "kind": {"type": "string", "enum": ["spending", "income"]},
-             "note_id": {"type": "string"}, "item_id": {"type": "string", "description": "todos/goals/habits: item to highlight"},
+             "note_id": {"type": "string"}, "github_path": {"type": "string", "description": "notes: a GitHub note's path"},
+             "item_id": {"type": "string", "description": "todos/goals/habits: item to highlight"},
+             "routine_id": {"type": "string", "description": "inbox: open this routine's settings"},
+             "inbox_item_id": {"type": "string", "description": "inbox: open this item (a routine's result)"},
              "query": {"type": "string", "description": "search: what to search for"}},
              "required": ["view"]}),
 ]
@@ -556,6 +559,12 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
                     "range": {"from": s, "to": e}, "type": "income" if args.get("kind") == "income" else "expense"}
         elif v == "notes" and args.get("note_id"):
             show = {"kind": "note", "id": args["note_id"]}
+        elif v == "notes" and args.get("github_path"):
+            show = {"kind": "github", "path": args["github_path"]}
+        elif v == "inbox" and args.get("routine_id"):
+            show = {"kind": "routine", "id": args["routine_id"]}
+        elif v == "inbox" and args.get("inbox_item_id"):
+            show = {"kind": "inbox", "id": args["inbox_item_id"]}
         elif v in ("todos", "goals", "habits") and args.get("item_id"):
             show = {"kind": {"todos": "todo", "goals": "goal", "habits": "habit"}[v], "id": args["item_id"]}
         elif v == "search":

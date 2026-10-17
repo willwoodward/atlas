@@ -447,3 +447,47 @@ class TestVoiceOnly:
         assert resp.status_code == 200
         await asyncio.sleep(0)
         assert sent[-1]["voice_only"] is True and sent[-1]["spoken"] is True
+
+
+class TestLiveSession:
+    @pytest.fixture
+    def openai(self, monkeypatch):
+        import httpx
+        import routers.assistant as assistant
+        calls = []
+        real = httpx.AsyncClient
+
+        def handler(request: httpx.Request):
+            calls.append({"url": str(request.url), "body": json.loads(request.read()), "auth": request.headers["authorization"]})
+            return httpx.Response(201, json={"id": "sess_1", "transport": {"type": "webrtc", "sdp": "v=0 answer"}})
+
+        monkeypatch.setattr(assistant.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        return calls
+
+    async def test_the_offer_goes_to_openai_with_the_session_config(self, client, auth, openai):
+        resp = await client.post("/assistant/live/session", json={"sdp": "v=0 offer sdp", "voice": "cedar"}, headers=auth)
+        assert resp.status_code == 200 and resp.json() == {"sdp": "v=0 answer", "id": "sess_1"}
+        call = openai[0]
+        assert call["url"].endswith("/live/sessions") and call["auth"] == "Bearer sk-test"
+        s = call["body"]["session"]
+        assert s["model"] == "gpt-live-1" and s["delegation"] == {"type": "client"} and s["audio"]["output"]["voice"] == "cedar"
+        assert "Delegate to the backend" in s["instructions"]
+        assert call["body"]["transport"] == {"type": "webrtc", "sdp": "v=0 offer sdp"}
+
+    async def test_the_key_never_reaches_the_browser(self, client, auth, openai):
+        resp = await client.post("/assistant/live/session", json={"sdp": "v=0 offer sdp"}, headers=auth)
+        assert "sk-test" not in resp.text
+
+    async def test_openai_errors_are_passed_on(self, client, auth, monkeypatch):
+        import httpx
+        import routers.assistant as assistant
+        real = httpx.AsyncClient
+        monkeypatch.setattr(assistant.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(
+            lambda r: httpx.Response(403, json={"error": {"message": "Project does not have access to gpt-live-1"}})), **kw))
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        resp = await client.post("/assistant/live/session", json={"sdp": "v=0 offer sdp"}, headers=auth)
+        assert resp.status_code == 502 and "does not have access" in resp.json()["detail"]
+
+    async def test_needs_a_token(self, client, openai):
+        assert (await client.post("/assistant/live/session", json={"sdp": "v=0 offer sdp"})).status_code == 401

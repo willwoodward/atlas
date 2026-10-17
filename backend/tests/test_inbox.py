@@ -128,7 +128,7 @@ class TestBackgroundRuns:
         item = (await client.post(f"/inbox/routines/{r['id']}/run", headers=auth)).json()
         await _settle()
         body = agent.bodies[0]
-        assert body["background"] == {"routine": "Morning plan", "approval": "ask", "trigger": "manual"}
+        assert body["background"] == {"routine": "Morning plan", "approval": "ask", "trigger": "manual", "test": False}
         assert body["messages"] == [{"role": "user", "content": "Plan my day."}]
         assert body["auth"].startswith("Bearer ")   # a server-minted token, accepted by the agent
         listed = (await client.get("/inbox", headers=auth)).json()
@@ -284,7 +284,7 @@ class TestRoutineTools:
         try:
             out = await mcp_server.run_tool("create_routine", {"name": "Money check", "prompt": "Review spending.", "days": ["sun"], "time": "18:00"}, db)
             assert out["routine"]["schedule"] == "Sun at 18:00" and out["undo_id"]
-            assert out["show"] == {"kind": "page", "page": "inbox"}
+            assert out["show"] == {"kind": "routine", "id": out["routine"]["id"]}
         finally:
             await db.close()
         assert len((await client.get("/inbox/routines", headers=auth)).json()["routines"]) == 1
@@ -342,3 +342,48 @@ class TestPush:
 
 def test_previews_are_plain_text():
     assert inbox.preview_of("## Today\n\nA **light** day.\n\n- Renew [passport](https://x.y)") == "Today: A light day. Renew passport"
+
+
+class TestTestRuns:
+    async def test_a_test_run_never_acts_or_notifies(self, client, auth, agent, monkeypatch):
+        import push
+        sent = []
+        monkeypatch.setattr(push, "_send", lambda sub, payload, pem: sent.append(payload))
+        await client.post("/inbox/push/subscribe", json={"endpoint": "https://push.example/t", "keys": {"p256dh": "p", "auth": "a"}}, headers=auth)
+        agent.tools = [("add_todo", {"text": "Water plants", "bucket": "today"})]
+        r = await _routine(client, auth, approval="auto")   # even an "acts itself" routine
+        item = (await client.post(f"/inbox/routines/{r['id']}/run?test=1", headers=auth)).json()
+        await _settle()
+        assert agent.bodies[-1]["background"]["test"] is True and agent.bodies[-1]["background"]["approval"] == "ask"
+        assert await _todos() == []
+        view = (await client.get(f"/inbox/{item['id']}", headers=auth)).json()
+        assert view["test"] is True and len(view["proposals"]) == 1
+        assert sent == []
+        routine = (await client.get("/inbox/routines", headers=auth)).json()["routines"][0]
+        assert routine["last_run_at"] is None   # a test isn't a real run
+
+
+class TestDeepLinks:
+    async def test_show_opens_a_specific_routine_or_item(self):
+        import mcp_server, inbox
+        db = await inbox.connect()
+        try:
+            r = await mcp_server.run_tool("show", {"view": "inbox", "routine_id": "r1"}, db)
+            assert r["show"] == {"kind": "routine", "id": "r1", "explicit": True}
+            r = await mcp_server.run_tool("show", {"view": "inbox", "inbox_item_id": "i1"}, db)
+            assert r["show"] == {"kind": "inbox", "id": "i1", "explicit": True}
+            r = await mcp_server.run_tool("show", {"view": "notes", "github_path": "ideas/x.md"}, db)
+            assert r["show"]["kind"] == "github" and r["show"]["path"] == "ideas/x.md"
+        finally:
+            await db.close()
+
+    async def test_creating_a_routine_points_at_it(self):
+        import mcp_server, inbox
+        db = await inbox.connect()
+        try:
+            out = await mcp_server.run_tool("create_routine", {"name": "Plan", "prompt": "Plan my day."}, db)
+            assert out["show"] == {"kind": "routine", "id": out["routine"]["id"]}
+            listed = await mcp_server.run_tool("list_inbox", {}, db)
+            assert listed["items"] == []
+        finally:
+            await db.close()

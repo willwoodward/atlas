@@ -803,6 +803,73 @@ async def speak_warm(req: WarmIn, user: dict = Depends(get_current_user)):
     return {"ok": True}
 
 
+# ── Fast voice (GPT-Live) ────────────────────────────────────────────────────
+# Voice → "Fast": OpenAI's GPT-Live listens and talks (full duplex, over WebRTC
+# from the browser), and hands anything that needs Atlas back to the app —
+# "client delegation". The app runs a normal Atlas turn and gives GPT-Live the
+# answer to say. This endpoint starts the session: the browser sends its WebRTC
+# offer, the server adds the session config and its API key, and returns
+# OpenAI's answer. The key never reaches the browser.
+
+LIVE_MODEL = os.getenv("LIVE_MODEL", "gpt-live-1")
+LIVE_VOICES = ("marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse")
+
+LIVE_INSTRUCTIONS = """You are the voice of Atlas, {name}'s personal assistant, inside their own \
+life dashboard app. You handle the conversation; a backend assistant (also Atlas) has their \
+calendar, to-dos, notes, habits, goals, finances, memory and the web, and makes changes.
+
+Delegate to the backend for anything about {name}'s own life or data, anything that needs \
+current information, and anything that changes something (adding, moving, booking, \
+logging, deleting). Never guess their data, and never say something is done before the \
+backend says so. While it works, keep it brief: a few words at most ("Checking your \
+calendar"). When its answer arrives, say it naturally and briefly; keep the facts, \
+numbers and times exactly as given.
+
+Answer small talk and general questions yourself. Keep everything short and \
+conversational: no lists or markdown. If {name} says goodbye or that's all, say a \
+short goodbye. Today is {today}."""
+
+
+class LiveSessionIn(BaseModel):
+    sdp: str = Field(..., min_length=10, max_length=20_000)
+    voice: str = "marin"
+
+
+@router.post("/live/session")
+async def live_session(req: LiveSessionIn, user: dict = Depends(get_current_user)):
+    key = os.getenv("OPENAI_API_KEY")
+    if not key:
+        raise HTTPException(503, "Fast voice needs OPENAI_API_KEY on the server.")
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo(os.getenv("TZ", "Europe/London"))
+    name = (user.get("name") or "").split(" ")[0] or "the user"
+    session = {
+        "model": LIVE_MODEL,
+        "instructions": LIVE_INSTRUCTIONS.format(name=name, today=datetime.now(tz).strftime("%A %-d %B %Y")),
+        "audio": {"output": {"voice": req.voice if req.voice in LIVE_VOICES else "marin"}},
+        "delegation": {"type": "client"},
+    }
+    base = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0)) as client:
+            resp = await client.post(f"{base}/live/sessions", headers={"Authorization": f"Bearer {key}"},
+                                     json={"session": session, "transport": {"type": "webrtc", "sdp": req.sdp}})
+    except httpx.HTTPError:
+        raise HTTPException(502, "Couldn't reach OpenAI to start fast voice.")
+    if resp.status_code >= 400:
+        detail = resp.text[:300]
+        try:
+            detail = resp.json().get("error", {}).get("message") or detail
+        except ValueError:
+            pass
+        raise HTTPException(502, f"Fast voice couldn't start ({resp.status_code}): {detail}")
+    body = resp.json()
+    sdp = (body.get("transport") or {}).get("sdp")
+    if not sdp:
+        raise HTTPException(502, "Fast voice: OpenAI's answer had no connection details.")
+    return {"sdp": sdp, "id": body.get("id")}
+
+
 @router.get("/health")
 async def health(user: dict = Depends(get_current_user)):
     try:

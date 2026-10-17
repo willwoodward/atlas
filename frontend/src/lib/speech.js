@@ -310,6 +310,8 @@ export const speech = {
     setSpeaking(false)
   },
   get speaking() { return snapshot.speaking },
+  /** Talking, or about to: a reply still streaming in or waiting to play. */
+  get pending() { return snapshot.speaking || pumping || clips.length > 0 || utterance != null },
   /** Whether anything was said since `t` (ms). */
   activeSince(t) { return snapshot.speaking || lastActive >= t },
   recentText: () => recent,

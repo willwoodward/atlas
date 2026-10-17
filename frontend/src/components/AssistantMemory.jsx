@@ -209,14 +209,24 @@ function SettingRow({ title, detail, children }) {
 const SPEAK_OPTIONS = [['dock', 'Corner mic only'], ['voice', 'Whenever I speak'], ['always', 'Always'], ['never', 'Never']]
 
 function VoiceSettings() {
-  const { silenceSeconds, autoSend, keepListening, speakReplies, ttsVoice, bargeIn, floatingMic, voiceOpensChat } = useVoiceSettings()
+  const { silenceSeconds, autoSend, keepListening, speakReplies, ttsVoice, bargeIn, floatingMic, voiceOpensChat, engine } = useVoiceSettings()
+  const fast = engine === 'live'
   const { bindings } = useKeybinds() || { bindings: {} }
   return (
     <div>
       <p style={{ margin: '0 0 4px', fontSize: 13, color: 'var(--mid)', lineHeight: 1.5 }}>
         Tap the mic{bindings.voice ? <> or press <kbd style={kbd}>{displayCombo(bindings.voice)}</kbd></> : null} to talk to Atlas. These settings are kept on this device.
       </p>
-      <SettingRow title="Stop when I pause"
+      <SettingRow title="Voice engine"
+        detail={fast
+          ? 'Fast: OpenAI’s GPT-Live listens and talks at the same time, so answers start sooner and you can interrupt naturally. Atlas still does the work. About $0.05 a minute while it’s on, plus Atlas’s usage; it hangs up after a minute of quiet. The settings below marked Classic don’t apply.'
+          : 'Classic: Atlas listens until you pause, then reads its reply aloud. Cheaper, and the settings below fine-tune it. Fast uses GPT-Live instead: quicker and more natural, about $0.05 a minute.'}>
+        <Select aria-label="Voice engine" value={engine} onChange={e => setVoiceSettings({ engine: e.target.value })} style={{ fontSize: 13 }}>
+          <option value="classic">Classic</option>
+          <option value="live">Fast (GPT-Live)</option>
+        </Select>
+      </SettingRow>
+      <SettingRow title={fast ? 'Stop when I pause · Classic' : 'Stop when I pause'}
         detail="Stops listening after this long without speech, so you don't have to tap again. It waits a little longer if you trail off mid-sentence (“and…”, “um…”).">
         <select aria-label="Stop after a pause of" value={silenceSeconds}
           onChange={e => setVoiceSettings({ silenceSeconds: Number(e.target.value) })}
@@ -224,17 +234,17 @@ function VoiceSettings() {
           {SILENCE_OPTIONS.map(n => <option key={n} value={n}>{n === 0 ? 'Never' : `${n} second${n === 1 ? '' : 's'}`}</option>)}
         </select>
       </SettingRow>
-      <SettingRow title="Send automatically"
+      <SettingRow title={fast ? 'Send automatically · Classic' : 'Send automatically'}
         detail="Sends what you said as soon as it's transcribed. Turn off to check and edit it in the box first.">
         <Switch checked={autoSend || keepListening} onChange={v => setVoiceSettings({ autoSend: v })} label="Send automatically" disabled={keepListening}
           title={keepListening ? 'Always on while “Keep listening” is on' : undefined} />
       </SettingRow>
-      <SettingRow title="Keep listening"
+      <SettingRow title={fast ? 'Keep listening · Classic' : 'Keep listening'}
         detail={`A hands-free conversation: after Atlas replies, it starts listening again. Messages send when you pause${silenceSeconds ? '' : ` (${CONVERSATION_SILENCE} seconds, since stopping on a pause is off)`}. Say nothing, or press Esc, to end it.`}>
         <Switch checked={keepListening} onChange={v => setVoiceSettings({ keepListening: v })} label="Keep listening" />
       </SettingRow>
 
-      <SettingRow title="Read replies aloud"
+      <SettingRow title={fast ? 'Read replies aloud · Classic' : 'Read replies aloud'}
         detail="Atlas talks back, starting as soon as the first sentence is ready. “Corner mic only” speaks when you used the corner mic with the chat closed; “Whenever I speak” also covers the chat's own mic. Replies to be read out are kept short.">
         <Select aria-label="Read replies aloud" value={speakReplies} onChange={e => setVoiceSettings({ speakReplies: e.target.value })} style={{ fontSize: 13 }}>
           {SPEAK_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -249,7 +259,7 @@ function VoiceSettings() {
             <Button size="sm" variant="ghost" onClick={() => { unlockAudio(); speech.cancel(); speech.say('Hi, this is how I sound. Say the word and I’ll get on with it.') }}>Try</Button>
           </div>
         </SettingRow>
-        <SettingRow title="Stop when I talk"
+        <SettingRow title={fast ? "Stop when I talk · Classic" : "Stop when I talk"}
           detail="Keeps the mic on while Atlas talks, so you can interrupt by speaking. Off, the mic pauses while it talks, which keeps the volume steady (phones and some laptops turn playback down while the mic is on). The mic button and the voice shortcut always cut it off.">
           <Switch checked={bargeIn} onChange={v => setVoiceSettings({ bargeIn: v })} label="Stop when I talk" />
         </SettingRow>

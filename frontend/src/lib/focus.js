@@ -65,6 +65,7 @@ export function showTarget(show) {
     case 'calendar': return { page: 'calendar', target: show.date ? { kind: 'calendar', date: show.date } : null }
     case 'finances': return { page: 'finances', target: { kind: 'finances', category: show.category, range: show.range, type: show.type } }
     case 'inbox':    return { page: 'inbox', target: show.id ? { kind: 'inbox', id: show.id } : null }
+    case 'routine':  return { page: 'inbox', target: { kind: 'routine', id: show.id } }
     case 'page':     return { page: show.page, target: null }
     default:         return null
   }

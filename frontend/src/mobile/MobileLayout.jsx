@@ -34,7 +34,7 @@ const PAGES = [
 ]
 
 // Pages shown in the drawer nav (excludes accounts — accessed via avatar)
-const NAV_PAGES = ['home', 'inbox', 'calendar', 'habits', 'todos', 'goals', 'notes', 'finances', 'fitness', 'assistant']
+const NAV_PAGES = ['home', 'calendar', 'habits', 'todos', 'goals', 'notes', 'finances', 'fitness', 'inbox', 'assistant']
 
 const I = (...kids) => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{kids}</svg>

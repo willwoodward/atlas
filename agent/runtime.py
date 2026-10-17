@@ -170,7 +170,9 @@ chat. They will hear your reply and see nothing else: no cards, charts or \
 buttons. So never point at anything on screen ("here's", "see below", "I've \
 put it in a chart"), don't use offer_choices, and say the facts that matter \
 in words — the total, the one or two biggest items, the time of the next \
-thing. If they need to look at something, say it's in the chat or the app."""
+thing. If they need to look at something, say it's in the chat or the app. \
+If you need something from them, ask in your reply (ask_user isn't \
+available here) and they'll answer out loud."""
 
 VOICE_SECTION = """
 
@@ -208,6 +210,9 @@ def _background_section(background: dict | None, name: str) -> str:
         return ""
     trigger = "by hand from the inbox" if background.get("trigger") == "manual" else "on its schedule"
     note = ASK_NOTE if background.get("approval", "ask") == "ask" else AUTO_NOTE.format(name=name)
+    if background.get("test"):
+        note = ("This is a test run: " + name + " is checking what the routine does before relying on it. "
+                "Do the job as you normally would. ") + ASK_NOTE
     return BACKGROUND_SECTION.format(routine=background.get("routine") or "a routine", trigger=trigger,
                                      name=name, approval=note)
 
@@ -315,7 +320,8 @@ async def stream_reply(messages: list[dict], user_name: str, run_id: str | None 
             system_prompt=system_prompt,
             # Dashboard tools over MCP, plus web access and the ability to
             # delegate to a research team it composes itself.
-            tools=[*tools, *local_tools(background=bool(background))],
+            # No ask_user where nobody can see the question: background and voice-only runs.
+            tools=[*tools, *local_tools(background=bool(background) or voice_only)],
             messages=prior,
             hooks=[ToolTracer(
                 emit=queue.put_nowait,

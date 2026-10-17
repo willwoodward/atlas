@@ -32,5 +32,6 @@ describe('readToolResult', () => {
   it('opens an inbox item', () => {
     expect(showTarget({ kind: 'inbox', id: 'abc' })).toEqual({ page: 'inbox', target: { kind: 'inbox', id: 'abc' } })
     expect(showTarget({ kind: 'inbox' })).toEqual({ page: 'inbox', target: null })
+    expect(showTarget({ kind: 'routine', id: 'r1' })).toEqual({ page: 'inbox', target: { kind: 'routine', id: 'r1' } })
   })
 })

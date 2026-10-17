@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAssistant } from '../context/AssistantContext.jsx'
 import { useVoiceInput } from './useVoiceInput.js'
-import { getVoiceSettings, CONVERSATION_SILENCE, CONVERSATION_WAIT } from '../lib/voiceSettings.js'
+import { useLiveVoice } from './useLiveVoice.js'
+import { liveSupported } from '../lib/liveVoice.js'
+import { getVoiceSettings, useVoiceSettings, CONVERSATION_SILENCE, CONVERSATION_WAIT } from '../lib/voiceSettings.js'
 import { checkSignOff } from '../lib/voiceSignoff.js'
 import { speech, isEcho, unlockAudio, chime, useSpeaking } from '../lib/speech.js'
 
@@ -30,10 +32,19 @@ const joinText = (a, b) => (a.trim() && b ? a.trimEnd() + ' ' : a) + b
  * reply is ready, it waits for you to finish; and anything the mic picked up
  * that is only Atlas's own voice is dropped rather than sent.
  *
+ * `waitForReply` (the corner mic): in a conversation, don't listen while Atlas
+ * works — show it thinking, let it answer, then listen. The chat listens
+ * straight away instead, so you can queue up the next thing.
+ *
+ * Voice engine "Fast" (Assistant settings → Voice): GPT-Live does the
+ * listening and talking instead (useLiveVoice), behind the same interface.
+ *
  * `draft` is text already typed, which the transcript is added to.
  */
-export function useVoiceConversation({ draft = '', onSend, onDraft, viaDock = false } = {}) {
-  const { send } = useAssistant()
+export function useVoiceConversation({ draft = '', onSend, onDraft, viaDock = false, waitForReply = false } = {}) {
+  const { send, busy } = useAssistant()
+  const { engine } = useVoiceSettings()
+  const fast = useLiveVoice({ viaDock })
   const [live, setLive] = useState('')
   const [conversing, setConversing] = useState(false)
   const listenAgain = useRef(false)
@@ -108,13 +119,30 @@ export function useVoiceConversation({ draft = '', onSend, onDraft, viaDock = fa
   }, [speaking, voice.state]) // eslint-disable-line
 
   // The last message is away: listen for the next one (after Atlas has
-  // spoken, unless talking over it is allowed).
+  // spoken, unless talking over it is allowed; with waitForReply, after it
+  // has answered at all).
+  const waiting = useRef(false)
   useEffect(() => {
     if (!conversing || voice.state !== 'idle' || !listenAgain.current) return
     listenAgain.current = false
+    if (waitForReply) { waiting.current = true; return }
     if (speech.speaking && !getVoiceSettings().bargeIn) { pausedForSpeech.current = true; return }
     listen(conversationOpts())
   }, [conversing, voice.state]) // eslint-disable-line
+  // Waiting for the reply: done once Atlas has finished and said it.
+  useEffect(() => {
+    if (!waiting.current) return
+    const t = setInterval(() => {
+      if (!conversingRef.current) { waiting.current = false; clearInterval(t); return }
+      if (busyRef.current || speech.pending || voiceRef.current.state !== 'idle') return
+      waiting.current = false
+      clearInterval(t)
+      setTimeout(() => { if (conversingRef.current && !speech.pending && voiceRef.current.state === 'idle') listen(conversationOpts()) }, RESUME_AFTER_SPEECH_MS)
+    }, 200)
+    return () => clearInterval(t)
+  }, [busy, voice.state, conversing]) // eslint-disable-line
+  const busyRef = useRef(busy)
+  busyRef.current = busy
 
   // A soft tone when it starts listening, and when it has heard you.
   const lastState = useRef(voice.state)
@@ -135,12 +163,29 @@ export function useVoiceConversation({ draft = '', onSend, onDraft, viaDock = fa
   }
 
   const listening = voice.state === 'recording'
+  const useFast = engine === 'live' && liveSupported()
   useEffect(() => {
-    if (!listening && !conversing) return
-    const onEsc = e => { if (e.key === 'Escape') end() }
+    if (!listening && !conversing && !fast.active) return
+    const onEsc = e => { if (e.key === 'Escape') { end(); fast.stop() } }
     window.addEventListener('keydown', onEsc)
     return () => window.removeEventListener('keydown', onEsc)
-  }, [listening, conversing]) // eslint-disable-line
+  }, [listening, conversing, fast.active]) // eslint-disable-line
 
-  return { voice, live, conversing, listening, begin, end, toggle, joinText }
+  if (useFast) {
+    // GPT-Live behind the same shape the mics already use.
+    const state = fast.phase === 'connecting' ? 'transcribing' : fast.active ? 'recording' : 'idle'
+    const begin = () => { unlockAudio(); fast.start() }
+    return {
+      fast,
+      voice: { ...voice, state, seconds: 0, error: fast.error, clearError: fast.clearError, start: begin, stop: fast.stop, cancel: fast.stop, hasSpeech: () => false },
+      live: fast.userText,
+      conversing: fast.active,
+      listening: fast.active && !fast.speaking && !fast.atlasWorking,
+      begin,
+      end: fast.stop,
+      toggle: () => (fast.active ? fast.stop() : begin()),
+      joinText,
+    }
+  }
+  return { fast: null, voice, live, conversing, listening, waitingForReply: waitForReply && conversing && voice.state === 'idle' && (busy || speaking), begin, end, toggle, joinText }
 }

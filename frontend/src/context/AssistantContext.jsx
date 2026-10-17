@@ -216,6 +216,7 @@ export function AssistantProvider({ children }) {
   const runRef = useRef(null)
   const sentHere = useRef(new Set())   // runs this device started
   const speakRuns = useRef(new Set())  // …and whose replies are read aloud
+  const liveRuns = useRef(new Map())   // …and whose answers go back to fast voice (GPT-Live)
   const busyRef = useRef(false)
   const sessionRef = useRef(initialSession)
   useEffect(() => { sessionRef.current = sessionId }, [sessionId])
@@ -284,6 +285,9 @@ export function AssistantProvider({ children }) {
     // already said, so only a run followed from its first event is spoken.
     const speak = speakRuns.current.has(runId) && after === 0
     if (speak) speech.begin(runId)
+    // Fast voice: tools as they start, then the whole answer at the end.
+    const live = liveRuns.current.get(runId)
+    let liveText = '', liveError = null
 
     try {
       const res = await fetch(`${API}/assistant/runs/${runId}/events?after=${after}`, {
@@ -312,6 +316,12 @@ export function AssistantProvider({ children }) {
 
           if (ev.type === 'done') break outer
           if (speak && ev.type === 'token') speech.push(runId, ev.text)
+          if (live) {
+            if (ev.type === 'token') liveText += ev.text
+            if (ev.type === 'tool') live.onTool?.(ev.name)
+            if (ev.type === 'error') liveError = ev.message
+            if (ev.type === 'question') liveText += (liveText ? '\n\n' : '') + ev.question
+          }
           if (speak && ev.type === 'question') { speech.end(runId); speech.say(ev.question) }
           if (ev.type === 'error') { setError(ev.message); continue }
           if (ev.type === 'tool' && MUTATING_TOOLS.has(ev.name)) { touchedData = true; writes.add(ev.toolUseId) }
@@ -334,6 +344,11 @@ export function AssistantProvider({ children }) {
       if (err.name !== 'AbortError') setError(err.message || 'Lost contact with the assistant.')
     } finally {
       if (speak) { speech.end(runId); speakRuns.current.delete(runId) }
+      if (live) {
+        liveRuns.current.delete(runId)
+        if (liveError && !liveText) live.onError?.(liveError)
+        else live.onDone?.(liveText)
+      }
       setBusyBoth(false)
       abortRef.current = null
       runRef.current = null
@@ -482,15 +497,17 @@ export function AssistantProvider({ children }) {
   // `spoken`: said aloud, not typed. Whether the reply is read out follows
   // Assistant settings → Voice → "Read replies aloud".
   // `viaDock`: said to the corner mic, with no chat open.
-  const send = useCallback(async (text, { spoken = false, viaDock = false } = {}) => {
+  // `live`: from fast voice — { onTool, onDone, onError } get the turn's
+  // progress and answer, and it isn't read aloud here (GPT-Live speaks it).
+  const send = useCallback(async (text, { spoken = false, viaDock = false, live = null } = {}) => {
     const prompt = (text || '').trim()
     if (!prompt) return
     // Atlas is mid-answer: hold this one and send it when the turn finishes.
     if (busyRef.current) {
-      setQueued(q => [...q, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, text: prompt, spoken, viaDock }])
+      setQueued(q => [...q, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, text: prompt, spoken, viaDock, live }])
       return
     }
-    const aloud = shouldSpeak(spoken, viaDock)
+    const aloud = !live && shouldSpeak(spoken, viaDock)
 
     // Only the new message goes up; the server holds the rest of the session.
     setMessages(prev => [...prev, { role: 'user', content: prompt }, { role: 'assistant', content: '', tools: [] }])
@@ -501,7 +518,7 @@ export function AssistantProvider({ children }) {
       const res = await fetch(`${API}/assistant/runs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ message: prompt, session_id: sessionRef.current, spoken: aloud, voice_only: viaDock }),
+        body: JSON.stringify({ message: prompt, session_id: sessionRef.current, spoken: aloud || !!live, voice_only: viaDock }),
       })
       if (res.status === 409) {
         // A reply is still running that this device isn't following yet
@@ -510,7 +527,7 @@ export function AssistantProvider({ children }) {
         // it ends. The hold stops a tight retry loop if the server is a
         // moment behind.
         setMessages(prev => prev.slice(0, -2))
-        setQueued(q => [{ id: `${Date.now()}-retry`, text: prompt, spoken, viaDock }, ...q])
+        setQueued(q => [{ id: `${Date.now()}-retry`, text: prompt, spoken, viaDock, live }, ...q])
         setHold(true)
         setTimeout(() => setHold(false), 2000)
         setBusyBoth(false)
@@ -523,6 +540,7 @@ export function AssistantProvider({ children }) {
       const { run_id, session_id, new_session } = await res.json()
       sentHere.current.add(run_id)
       if (aloud) speakRuns.current.add(run_id)
+      if (live) liveRuns.current.set(run_id, live)
       setSessionId(session_id)
       sessionRef.current = session_id
       const pair = [{ role: 'user', content: prompt, runId: run_id }, { role: 'assistant', content: '', tools: [], runId: run_id }]
@@ -533,6 +551,7 @@ export function AssistantProvider({ children }) {
       setMessages(prev => prev.slice(0, -2))
       setError(err.message || 'Something went wrong.')
       setBusyBoth(false)
+      live?.onError?.(err.message)
     }
     // Pick up the saved reply and the session's new expiry.
     sync()
@@ -543,7 +562,7 @@ export function AssistantProvider({ children }) {
     if (busy || hold || queued.length === 0) return
     const [next, ...rest] = queued
     setQueued(rest)
-    send(next.text, { spoken: next.spoken, viaDock: next.viaDock })
+    send(next.text, { spoken: next.spoken, viaDock: next.viaDock, live: next.live })
   }, [busy, hold, queued, send])
   const unqueue = useCallback(id => setQueued(q => q.filter(x => x.id !== id)), [])
 
