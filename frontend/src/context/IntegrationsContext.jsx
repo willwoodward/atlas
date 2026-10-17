@@ -115,6 +115,26 @@ export function IntegrationsProvider({ children }) {
     }
   }, [gcalConnected, getAccessToken])
 
+  // Load several weeks in the background (e.g. the last 12, for goal-time
+  // history). Weeks already cached are skipped, and nothing shows as loading.
+  // Resolves when they're all in, so the caller can show its own state.
+  const loadWeeks = useCallback(async (ranges) => {
+    if (!gcalConnected) return
+    const todo = ranges.filter(({ weekStart }) => !(localDateStr(weekStart) in weeksRef.current))
+    if (todo.length === 0) return
+    try {
+      const accessToken = await getAccessToken()
+      const loaded = await Promise.all(todo.map(async ({ weekStart, weekEnd }) => {
+        try {
+          const data = await fetchEvents(accessToken, weekStart, weekEnd)
+          return [localDateStr(weekStart), toCalendarEvents(data.items || [])]
+        } catch { return null }
+      }))
+      const ok = loaded.filter(Boolean)
+      if (ok.length) setGcalWeeks(prev => ({ ...Object.fromEntries(ok), ...prev }))
+    } catch { /* not connected any more — the history just shows local events */ }
+  }, [gcalConnected, getAccessToken])
+
   // Every consumer filters by date, so the union of cached weeks works as-is.
   // A sleep event's wake-up hint can land in the next week's cache too — dedupe.
   const gcalEvents = useMemo(() => {
@@ -139,6 +159,7 @@ export function IntegrationsProvider({ children }) {
       connectGoogle,
       disconnectGoogle,
       refetchEvents,
+      loadWeeks,
       createGcalEvent,
       removeGcalEvent,
     }}>

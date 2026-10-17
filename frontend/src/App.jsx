@@ -15,6 +15,7 @@ import { NotesProvider }         from './context/NotesContext.jsx'
 import { GitHubProvider }        from './context/GitHubContext.jsx'
 import { GoalsProvider }         from './context/GoalsContext.jsx'
 import { TodosProvider }         from './context/TodosContext.jsx'
+import { KeybindsProvider }      from './context/KeybindsContext.jsx'
 import { useIntegrations }       from './context/IntegrationsContext.jsx'
 import { useLocalCalendar }      from './context/LocalCalendarContext.jsx'
 import DesktopLayout from './desktop/DesktopLayout.jsx'
@@ -78,10 +79,12 @@ function Dashboard() {
                   <GitHubProvider>
                     <NotesProvider>
                      <AssistantProvider>
+                      <KeybindsProvider>
                       <QuickAddProvider>
                       <SyncManager />
                       {layout === 'desktop' ? <DesktopLayout /> : layout === 'tablet' ? <TabletLayout /> : <MobileLayout />}
                       </QuickAddProvider>
+                      </KeybindsProvider>
                      </AssistantProvider>
                     </NotesProvider>
                   </GitHubProvider>

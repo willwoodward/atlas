@@ -6,6 +6,9 @@ import { useIsMobile } from '../hooks/useIsMobile.js'
 import { assistantPrompts } from '../data.js'
 import { SettingsButton, MemoryEditChip } from './AssistantMemory.jsx'
 import { useVoiceInput, voiceSupported } from '../hooks/useVoiceInput.js'
+import { useVoiceSettings, getVoiceSettings, CONVERSATION_SILENCE } from '../lib/voiceSettings.js'
+import { useKeybinds } from '../context/KeybindsContext.jsx'
+import { displayCombo } from '../lib/keybinds.js'
 
 // MCP tool name → what to show while it runs
 const TOOL_LABELS = {
@@ -360,13 +363,18 @@ function ResearchPanel({ research }) {
 // Both states share this measure so the column doesn't jump width on first send.
 const COLUMN = 720
 
-export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240, showNewChat = true }) {
+export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240, showNewChat = true, panel = false }) {
   // Thread state lives in AssistantContext so it survives navigating away and back.
-  const { messages, busy, error, send, stop, clear, answer } = useAssistant()
+  const { messages, busy, error, send, stop, clear, answer, registerVoiceTarget } = useAssistant()
+  const { autoSend } = useVoiceSettings()
+  const { bindings } = useKeybinds() || {}
   // The mobile shell renders the assistant with no padding (it was built for the
   // centred orb), so the chat supplies its own gutters and safe-area inset there.
   const isMobile = useIsMobile()
-  const gutter = isMobile ? 16 : 0
+  // `contained`: the chat scrolls itself and supplies its own gutters — on a
+  // phone, and in the desktop side panel. Elsewhere the page scrolls it.
+  const contained = isMobile || panel
+  const gutter = isMobile ? 16 : panel ? 14 : 0
   const [input, setInput] = useState('')
   const scrollRef = useRef(null)
   const taRef = useRef(null)
@@ -377,11 +385,11 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
   // many times a second, and yanking the view down while you are reading
   // something further up is worse than losing the follow.
   useEffect(() => {
-    const page = isMobile ? scrollRef.current : scrollRef.current?.parentElement
+    const page = contained ? scrollRef.current : scrollRef.current?.parentElement
     if (!page) return
     const nearBottom = page.scrollHeight - page.scrollTop - page.clientHeight < 120
     if (nearBottom) page.scrollTo({ top: page.scrollHeight, behavior: 'smooth' })
-  }, [messages, busy, isMobile])
+  }, [messages, busy, contained])
 
   const submit = (text) => {
     send(text)
@@ -395,23 +403,71 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
   }
 
   // Voice: words stream into the box as a live preview while you speak, then
-  // the accurate transcript replaces the preview when you stop. It's added to
-  // the box rather than sent, so a misheard word can be fixed first.
+  // the accurate transcript replaces the preview when you stop. With auto-send
+  // on (the default) it goes straight off; otherwise it's left in the box so a
+  // misheard word can be fixed first. Auto-send waits if Atlas is mid-answer.
   const [live, setLive] = useState('')
   const joinText = (a, b) => (a.trim() && b ? a.trimEnd() + ' ' : a) + b
+  // Conversation mode ("Keep listening"): after each voice message is sent
+  // and Atlas has answered, listening starts again by itself. It always sends
+  // on a pause. It ends on Cancel / Esc / the shortcut / "End", or when
+  // nothing is heard, an error comes back, or the chat goes away.
+  const [conversing, setConversing] = useState(false)
+  const awaitingReply = useRef(false)
+  const sendsItself = autoSend || conversing
+
   const voice = useVoiceInput(text => {
     setLive('')
+    if (sendsItself && text && !busy) {
+      submit(joinText(input, text))
+      if (conversing) awaitingReply.current = true
+      return
+    }
+    // A cough or a blank: in conversation mode just listen again.
+    if (conversing && !text) { awaitingReply.current = true; return }
     setInput(prev => joinText(prev, text))
     requestAnimationFrame(() => { autosize(); const el = taRef.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length) } })
-  }, text => { setLive(text); requestAnimationFrame(autosize) })
+  }, text => { setLive(text); requestAnimationFrame(autosize) }, {
+    onNothingHeard: () => setConversing(false),
+  })
+
+  const beginVoice = () => {
+    const { keepListening, silenceSeconds } = getVoiceSettings()
+    setConversing(keepListening)
+    awaitingReply.current = false
+    voice.start(keepListening ? { silenceSeconds: silenceSeconds || CONVERSATION_SILENCE } : {})
+  }
+  const endVoice = () => { setConversing(false); awaitingReply.current = false; voice.cancel() }
+
+  // Atlas has finished answering: listen for the next thing.
+  useEffect(() => {
+    if (!conversing || busy || voice.state !== 'idle' || !awaitingReply.current) return
+    awaitingReply.current = false
+    if (error) { setConversing(false); return }
+    const { silenceSeconds } = getVoiceSettings()
+    voice.start({ silenceSeconds: silenceSeconds || CONVERSATION_SILENCE })
+  }, [conversing, busy, voice.state, error]) // eslint-disable-line
+
   const canVoice = voiceSupported()
+  // The voice shortcut: start, or end — in conversation mode it ends the
+  // conversation; otherwise it stops and transcribes.
+  const voiceRef = useRef(null)
+  voiceRef.current = () => {
+    if (conversing) endVoice()
+    else if (voice.state === 'recording') voice.stop()
+    else if (voice.state === 'idle') beginVoice()
+  }
+  useEffect(() => {
+    if (!canVoice) return
+    return registerVoiceTarget(() => voiceRef.current())
+  }, [canVoice, registerVoiceTarget])
   const listening = voice.state === 'recording'
   useEffect(() => {
-    if (!listening) return
-    const onEsc = e => { if (e.key === 'Escape') voice.cancel() }
+    if (!listening && !conversing) return
+    const onEsc = e => { if (e.key === 'Escape') endVoice() }
     window.addEventListener('keydown', onEsc)
     return () => window.removeEventListener('keydown', onEsc)
-  }, [listening]) // eslint-disable-line
+  }, [listening, conversing]) // eslint-disable-line
   const clock = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
   const onKeyDown = e => {
@@ -441,12 +497,13 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
         style={{ flex: 1, alignSelf: 'center', resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontSize: 14, fontFamily: 'inherit', color: voice.state === 'idle' ? 'var(--ink)' : 'var(--mid)', lineHeight: 1.5, maxHeight: 140 }}
       />
       {listening && (
-        <button onClick={voice.cancel} aria-label="Cancel recording" title="Cancel (Esc)"
+        <button onClick={endVoice} aria-label="Cancel recording" title="Cancel (Esc)"
           style={{ alignSelf: 'center', background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12.5, fontFamily: 'inherit', cursor: 'pointer', padding: 4, flex: 'none' }}>Cancel</button>
       )}
       {canVoice && !busy && (
-        <button onClick={() => (listening ? voice.stop() : voice.start())} disabled={voice.state === 'transcribing'}
-          aria-label={listening ? 'Stop and transcribe' : 'Speak'} title={listening ? 'Stop and transcribe' : 'Speak'}
+        <button onClick={() => (listening ? voice.stop() : beginVoice())} disabled={voice.state === 'transcribing'}
+          aria-label={listening ? 'Stop and transcribe' : 'Speak'}
+          title={(listening ? 'Stop and transcribe' : 'Speak') + (bindings?.voice ? ` (${displayCombo(bindings.voice)})` : '')}
           style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 10, border: listening ? 'none' : '1px solid var(--bd)', background: listening ? '#c15f3c' : 'transparent', color: listening ? '#fff' : 'var(--muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: voice.state === 'transcribing' ? 'default' : 'pointer', transition: 'all .12s' }}>
           {listening
             ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5L20 7" /></svg>
@@ -464,6 +521,15 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
       </button>}
     </div>
   )
+  // While in conversation mode, a strip above the box says so (it's on even
+  // while Atlas is answering and the mic is off) and offers a way out.
+  const voiceBanner = conversing && (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', maxWidth: 560, marginBottom: 6, fontSize: 12.5, color: 'var(--mid)' }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#c15f3c', flex: 'none' }} />
+      <span style={{ flex: 1 }}>{listening ? 'Voice mode · listening' : busy ? 'Voice mode · Atlas is answering' : 'Voice mode'}</span>
+      <button onClick={endVoice} style={{ fontSize: 12, padding: '2px 9px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', fontFamily: 'inherit', cursor: 'pointer' }}>End</button>
+    </div>
+  )
   const voiceError = voice.error && (
     <div style={{ marginTop: 8, fontSize: 12.5, color: '#c15f3c' }}>{voice.error}</div>
   )
@@ -472,12 +538,12 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
     return (
       <div style={{ position: 'relative', flex: 1, minHeight: 0, height: '100%', width: '100%', maxWidth: COLUMN, margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: `24px ${Math.max(gutter, orbSize < 160 ? 20 : 0)}px`, paddingBottom: isMobile ? 'max(24px, env(safe-area-inset-bottom))' : 24 }}>
         <SettingsButton style={{ position: 'absolute', top: 6, right: gutter }} />
-        <AtlasOrb orbSize={orbSize} ring1={ring1} ring2={ring2} />
+        {!panel && <AtlasOrb orbSize={orbSize} ring1={ring1} ring2={ring2} />}
 
-        <h1 style={{ margin: '14px 0 6px', fontFamily: "'Newsreader', serif", fontSize: 30, fontWeight: 500, color: 'var(--ink)' }}>
+        <h1 style={{ margin: '14px 0 6px', fontFamily: "'Newsreader', serif", fontSize: panel ? 24 : 30, fontWeight: 500, color: 'var(--ink)' }}>
           How can I help you plan today?
         </h1>
-        <p style={{ margin: '0 0 26px', fontSize: 14.5, color: 'var(--mid)', maxWidth: 440, lineHeight: 1.55 }}>
+        <p style={{ margin: '0 0 26px', fontSize: panel ? 13.5 : 14.5, color: 'var(--mid)', maxWidth: 440, lineHeight: 1.55 }}>
           Ask me to schedule your week, review your spending, or reflect on a goal. I have the full picture.
         </p>
 
@@ -490,6 +556,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
           ))}
         </div>
 
+        {voiceBanner}
         {composer}
         {voiceError}
         {error && <div style={{ marginTop: 12, fontSize: 12.5, color: '#c15f3c' }}>{error}</div>}
@@ -500,7 +567,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
   return (
     // The desktop and tablet shells provide the page-level scroll container;
     // mobile keeps it here because its shell deliberately hides page overflow.
-    <div ref={scrollRef} style={{ flex: 1, minWidth: 0, minHeight: '100%', width: '100%', maxWidth: COLUMN, margin: '0 auto', display: 'flex', flexDirection: 'column', overflowY: isMobile ? 'auto' : 'visible', overflowX: 'hidden' }}>
+    <div ref={scrollRef} style={{ flex: 1, minWidth: 0, minHeight: '100%', width: '100%', maxWidth: COLUMN, margin: '0 auto', display: 'flex', flexDirection: 'column', overflowY: contained ? 'auto' : 'visible', overflowX: 'hidden', ...(panel && { height: '100%', minHeight: 0 }) }}>
       {/* Threads persist across navigation and reloads, so there has to be a way
           out. Desktop and mobile get it from the header "+ New chat"; the tablet
           deck has no header, so it keeps this one. */}
@@ -534,7 +601,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
         {error && <div style={{ fontSize: 12.5, color: '#c15f3c' }}>{error}</div>}
       </div>
 
-      <div style={{ position: 'sticky', bottom: 0, zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: `8px ${gutter}px`, paddingBottom: isMobile ? 'max(8px, env(safe-area-inset-bottom))' : 8, background: 'var(--bg)' }}>{composer}{voiceError}</div>
+      <div style={{ position: 'sticky', bottom: 0, zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: `8px ${gutter}px`, paddingBottom: isMobile ? 'max(8px, env(safe-area-inset-bottom))' : 8, background: 'var(--bg)' }}>{voiceBanner}{composer}{voiceError}</div>
     </div>
   )
 }

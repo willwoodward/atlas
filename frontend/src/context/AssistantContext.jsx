@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useRef, useEffect, useCallback } from 'react'
 import { useAuth } from './AuthContext.jsx'
 import { useRefresh } from './RefreshContext.jsx'
+import { onShortcut } from './KeybindsContext.jsx'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 // A copy of the current session, so the thread paints instantly on launch.
@@ -442,8 +443,28 @@ export function AssistantProvider({ children }) {
     sync()
   }, [token, follow, sync, setBusyBoth])
 
+  // ── Voice shortcut ──
+  // Each chat on screen registers a toggle; the shortcut goes to the most
+  // recent one. With no chat on screen, the layout is asked to show one (the
+  // desktop panel, or the Assistant page) and it starts listening as it mounts.
+  const voiceTargets = useRef([])
+  const pendingVoice = useRef(false)
+  const registerVoiceTarget = useCallback(fn => {
+    voiceTargets.current.push(fn)
+    if (pendingVoice.current) { pendingVoice.current = false; setTimeout(fn, 0) }
+    return () => { voiceTargets.current = voiceTargets.current.filter(f => f !== fn) }
+  }, [])
+  useEffect(() => onShortcut('voice', () => {
+    const target = voiceTargets.current[voiceTargets.current.length - 1]
+    if (target) target()
+    else {
+      pendingVoice.current = true
+      window.dispatchEvent(new CustomEvent('atlas:show-assistant'))
+    }
+  }), [])
+
   return (
-    <Ctx.Provider value={{ messages, busy, error, send, stop, clear, answer }}>
+    <Ctx.Provider value={{ messages, busy, error, send, stop, clear, answer, registerVoiceTarget }}>
       {children}
     </Ctx.Provider>
   )

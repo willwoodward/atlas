@@ -1,3 +1,4 @@
+import KeybindsSettings from '../components/KeybindsSettings.jsx'
 import { useState, useCallback } from 'react'
 import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import { useGitHub } from '../context/GitHubContext.jsx'
@@ -264,8 +265,8 @@ export default function AccountsPage() {
     <div>
       <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'flex-end', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', gap: isMobile ? 12 : 0, marginBottom: 28 }}>
         <div>
-          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>Accounts &amp; connections</h1>
-          <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>Link your services to bring everything into Atlas.</p>
+          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>Settings</h1>
+          <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>Connections, keyboard shortcuts and your data.</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 4 }}>
           {user && <span style={{ fontSize: 13, color: 'var(--mid)' }}>{user.email}</span>}
@@ -309,6 +310,14 @@ export default function AccountsPage() {
         <ComingSoonCard icon="✅" name="Todoist" description="Sync tasks and projects into the To-do view." />
 
       </div>
+
+      {/* Keyboard shortcuts — not on phones, which have no keyboard to bind */}
+      {!isMobile && (
+        <div style={{ maxWidth: 720, marginTop: 28 }}>
+          <h2 style={{ margin: '0 0 10px', fontFamily: "'Newsreader', serif", fontSize: 17, fontWeight: 600, color: 'var(--muted)' }}>Keyboard shortcuts</h2>
+          <KeybindsSettings />
+        </div>
+      )}
 
       {/* Data migration */}
       <div style={{ maxWidth: 720, marginTop: 28 }}>

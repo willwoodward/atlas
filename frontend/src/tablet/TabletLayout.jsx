@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react'
+import { onShortcut } from '../context/KeybindsContext.jsx'
+import { useState, useRef, useEffect } from 'react'
 import { user } from '../data.js'
 import AssistantPage from './AssistantPage.jsx'
 import HomePage      from './HomePage.jsx'
@@ -25,6 +26,9 @@ const N = PAGES.length
 
 export default function TabletLayout() {
   const [index, setIndex] = useState(0)
+  // Every page stays mounted on the tablet, so the assistant always has a chat
+  // to take the voice shortcut — just bring it into view.
+  useEffect(() => onShortcut('voice', () => setIndex(0)), [])
   const [dragX, setDragX] = useState(0)
   const [dragging, setDragging] = useState(0)
   const sx = useRef(0)

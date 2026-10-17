@@ -40,13 +40,14 @@ export function goalForEvent(title, goals) {
 }
 
 /**
- * Hours of this week's calendar spent on each goal, matched by the goal's tags.
+ * Hours of a week's calendar spent on each goal, matched by the goal's tags.
  * `spent` is time already elapsed; `planned` includes the rest of the week.
+ * The week is the one containing `now` unless `monday` (a Date) says otherwise.
  * Returns { perGoal: [{ goal, spent, planned }], spent, planned, hasTags }.
  */
-export function goalTime(events, goals, now = new Date()) {
-  const weekStart = localDateStr(mondayOf(now))
-  const weekEnd = localDateStr(addDays(mondayOf(now), 6))
+export function goalTime(events, goals, now = new Date(), monday = mondayOf(now)) {
+  const weekStart = localDateStr(monday)
+  const weekEnd = localDateStr(addDays(monday, 6))
   const todayStr = localDateStr(now)
   const nowH = now.getHours() + now.getMinutes() / 60
 
@@ -70,6 +71,18 @@ export function goalTime(events, goals, now = new Date()) {
     planned: perGoal.reduce((s, r) => s + r.planned, 0),
     hasTags: goals.some(g => parseTags(g.tags).length > 0),
   }
+}
+
+/**
+ * Goal time for each of the last `weeks` weeks, oldest first, ending with the
+ * current one: [{ week: 'YYYY-MM-DD' (Monday), perGoal, spent, planned, current }].
+ */
+export function goalWeeks(events, goals, weeks = 12, now = new Date()) {
+  const thisMonday = mondayOf(now)
+  return Array.from({ length: weeks }, (_, i) => {
+    const monday = addDays(thisMonday, (i - weeks + 1) * 7)
+    return { week: localDateStr(monday), current: i === weeks - 1, ...goalTime(events, goals, now, monday) }
+  })
 }
 
 export const fmtHours = h => {

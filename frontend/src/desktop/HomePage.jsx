@@ -13,7 +13,7 @@ import { getWeekRange } from '../integrations/googleCalendar.js'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { useCalendarEvents } from '../hooks/useCalendarEvents.js'
 import { currentWeekTodos, staysInBucket } from '../lib/week.js'
-import { goalTime, fmtHours } from '../lib/goalTime.js'
+import { goalTime, goalWeeks, fmtHours } from '../lib/goalTime.js'
 
 
 function getCurrentPeriod() {
@@ -200,10 +200,127 @@ function GoalTimeBreakdown({ data }) {
   )
 }
 
+const shortDate = key => {
+  const [y, m, d] = key.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+}
+
+// Goal time per week as stacked bars, one colour per goal. This week shows
+// what's done solid and what's still planned faint, like the bars above.
+function GoalTimeHistory({ weeks, loading, isMobile }) {
+  const [hover, setHover] = useState(null)
+  // Goals in a fixed order (their order on the Goals page), so a goal keeps its
+  // place in the stack from week to week.
+  const goalsSeen = weeks[0]?.perGoal.map(p => p.goal)
+    .filter(g => weeks.some(w => w.perGoal.some(p => p.goal.id === g.id && p.planned > 0))) || []
+  const past = weeks.filter(w => !w.current)
+  const avg = past.length ? past.reduce((s, w) => s + w.spent, 0) / past.length : 0
+  const top = Math.max(1, ...weeks.map(w => w.planned))
+  // Round the scale up to a tidy number of hours for the gridlines.
+  const step = top <= 4 ? 1 : top <= 10 ? 2 : top <= 25 ? 5 : 10
+  const max = Math.ceil(top / step) * step
+  const ticks = Array.from({ length: max / step + 1 }, (_, i) => i * step)
+  const H = 130
+  const every = isMobile ? 3 : 2
+  const tip = hover != null ? weeks[hover] : null
+
+  return (
+    <div style={{ marginTop: 26 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12, gap: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>
+          Last {weeks.length} weeks
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+          {loading ? 'Loading past weeks…' : `${fmtHours(avg)} a week on average`}
+        </div>
+      </div>
+
+      <div style={{ position: 'relative', display: 'flex', gap: 8 }}>
+        {/* Hour scale */}
+        <div style={{ position: 'relative', width: 22, height: H, flex: 'none' }}>
+          {ticks.map(t => (
+            <span key={t} style={{ position: 'absolute', right: 0, bottom: (t / max) * H - 6, fontSize: 10, color: 'var(--faint)' }}>{t}h</span>
+          ))}
+        </div>
+        <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+          <div onMouseLeave={() => setHover(null)} style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: isMobile ? 4 : 8, height: H }}>
+            {ticks.map(t => (
+              <div key={t} style={{ position: 'absolute', left: 0, right: 0, bottom: (t / max) * H, borderTop: `1px ${t === 0 ? 'solid' : 'dashed'} var(--bd-${t === 0 ? 'xl' : 'md'})`, pointerEvents: 'none' }} />
+            ))}
+            {weeks.map((w, i) => {
+              const segs = goalsSeen.map(g => w.perGoal.find(p => p.goal.id === g.id)).filter(p => p && p.planned > 0)
+              const active = hover === i
+              return (
+                <div key={w.week} role="button" tabIndex={0} aria-label={`Week of ${shortDate(w.week)}: ${fmtHours(w.spent)}`}
+                  onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} onClick={() => setHover(h => h === i ? null : i)}
+                  style={{ position: 'relative', flex: 1, height: '100%', display: 'flex', flexDirection: 'column-reverse', alignItems: 'center', cursor: 'pointer', outline: 'none' }}>
+                  <div style={{ width: '100%', maxWidth: 30, display: 'flex', flexDirection: 'column-reverse', gap: 2, opacity: hover == null || active ? 1 : 0.45, transition: 'opacity .12s' }}>
+                    {segs.map((p, k) => {
+                      const last = k === segs.length - 1
+                      const r = last ? '4px 4px 0 0' : 0
+                      return (
+                        <div key={p.goal.id} style={{ display: 'flex', flexDirection: 'column-reverse', gap: 0 }}>
+                          {p.spent > 0 && <div style={{ height: (p.spent / max) * H, background: p.goal.color, borderRadius: p.planned > p.spent ? 0 : r }} />}
+                          {p.planned > p.spent && <div style={{ height: ((p.planned - p.spent) / max) * H, background: p.goal.color, opacity: 0.28, borderRadius: r }} />}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          {/* Week labels */}
+          <div style={{ display: 'flex', gap: isMobile ? 4 : 8, marginTop: 6 }}>
+            {weeks.map((w, i) => (
+              <span key={w.week} style={{ flex: 1, minWidth: 0, textAlign: 'center', fontSize: 10.5, whiteSpace: 'nowrap', overflow: 'visible',
+                color: w.current ? 'var(--ink)' : 'var(--faint)', fontWeight: w.current ? 700 : 500 }}>
+                {w.current ? 'Now' : (weeks.length - 1 - i) % every === 0 ? shortDate(w.week) : ''}
+              </span>
+            ))}
+          </div>
+
+          {tip && (
+            <div style={{ position: 'absolute', bottom: H + 8, left: `${((hover + 0.5) / weeks.length) * 100}%`,
+              transform: `translateX(${hover < weeks.length / 3 ? '-15%' : hover > (weeks.length * 2) / 3 ? '-85%' : '-50%'})`,
+              background: 'var(--surface)', border: '1px solid var(--bd-lg)', borderRadius: 10, boxShadow: '0 6px 20px var(--bd-md)',
+              padding: '9px 11px', minWidth: 150, zIndex: 2, pointerEvents: 'none' }}>
+              <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 5 }}>
+                {tip.current ? 'This week' : `Week of ${shortDate(tip.week)}`}
+              </div>
+              <div style={{ fontFamily: "'Newsreader', serif", fontSize: 18, fontWeight: 500, color: 'var(--ink)', marginBottom: 4 }}>
+                {fmtHours(tip.spent)}{tip.planned > tip.spent ? <span style={{ fontSize: 12.5, color: 'var(--muted)', fontFamily: 'inherit' }}> of {fmtHours(tip.planned)} planned</span> : null}
+              </div>
+              {tip.perGoal.filter(p => p.planned > 0).map(p => (
+                <div key={p.goal.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--mid)', lineHeight: 1.6 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: p.goal.color, flex: 'none' }} />
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.goal.title}</span>
+                  <span style={{ color: 'var(--ink)' }}>{fmtHours(tip.current ? p.spent : p.planned)}</span>
+                </div>
+              ))}
+              {tip.planned === 0 && <div style={{ fontSize: 12, color: 'var(--faint)' }}>No goal time</div>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {goalsSeen.length > 1 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', marginTop: 12, paddingLeft: 30 }}>
+          {goalsSeen.map(g => (
+            <span key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--mid)' }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: g.color }} />{g.title}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function HomePage() {
   const isMobile = useIsMobile()
   const { user } = useAuth()
-  const { gcal, refetchEvents, connectGoogle, removeGcalEvent } = useIntegrations()
+  const { gcal, refetchEvents, loadWeeks, connectGoogle, removeGcalEvent } = useIntegrations()
   const { removeEvent } = useLocalCalendar()
   const { habits, last30 } = useHabits()
   const { goals } = useGoals()
@@ -253,6 +370,19 @@ export default function HomePage() {
   const todosLeft  = todosTotal - todosDone
 
   const gt = goalTime(allEvents, goals)
+
+  // Past weeks for the goal-time history, fetched when the panel first opens.
+  const HISTORY_WEEKS = 12
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const historyAsked = useRef(false)
+  useEffect(() => {
+    if (openStat !== 'goal' || historyAsked.current || !gcal.connected || !gt.hasTags) return
+    historyAsked.current = true
+    setHistoryLoading(true)
+    loadWeeks(Array.from({ length: HISTORY_WEEKS - 1 }, (_, i) => getWeekRange(-(i + 1))))
+      .finally(() => setHistoryLoading(false))
+  }, [openStat, gcal.connected, gt.hasTags]) // eslint-disable-line
+  const history = openStat === 'goal' && gt.hasTags ? goalWeeks(allEvents, goals, HISTORY_WEEKS) : null
 
   const liveStats = [
     {
@@ -317,6 +447,7 @@ export default function HomePage() {
         <div style={{ marginBottom: 38, padding: isMobile ? '16px 4px' : '18px 22px', borderBottom: '1px solid var(--bd-md)' }}>
           {openStat === 'habits' && <HabitsHistory habits={habits} last30={last30} />}
           {openStat === 'goal' && <GoalTimeBreakdown data={gt} />}
+          {history && <GoalTimeHistory weeks={history} loading={historyLoading} isMobile={isMobile} />}
         </div>
       )}
 

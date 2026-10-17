@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useUser } from '../context/UserContext.jsx'
 import { useTheme } from '../context/ThemeContext.jsx'
 import { useQuickAddAction } from '../context/QuickAddContext.jsx'
@@ -23,7 +23,7 @@ const PAGES = [
   { id: 'finances',  label: 'Finances',  component: FinancesPage },
   { id: 'fitness',   label: 'Fitness',   component: FitnessPage },
   { id: 'assistant', label: 'Assistant', component: AssistantPage },
-  { id: 'accounts',  label: 'Accounts',  component: AccountsPage },
+  { id: 'accounts',  label: 'Settings',  component: AccountsPage },
 ]
 
 // Pages shown in the drawer nav (excludes accounts — accessed via avatar)
@@ -60,6 +60,12 @@ export default function MobileLayout() {
   const { isDark, toggleTheme } = useTheme()
 
   const navigate = (id) => { setActive(id); setDrawerOpen(false) }
+  // The voice shortcut, pressed with no chat on screen (e.g. a keyboard on a tablet-size phone).
+  useEffect(() => {
+    const show = () => navigate('assistant')
+    window.addEventListener('atlas:show-assistant', show)
+    return () => window.removeEventListener('atlas:show-assistant', show)
+  }, []) // eslint-disable-line
   const quickAdd = useQuickAddAction(active, navigate)
 
   const ActivePage = PAGES.find(p => p.id === active)?.component ?? HomePage

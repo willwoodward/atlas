@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { dateLabel } from '../data.js'
 import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import { useTheme } from '../context/ThemeContext.jsx'
 import { useUser } from '../context/UserContext.jsx'
 import { useQuickAddAction } from '../context/QuickAddContext.jsx'
+import { onShortcut, useKeybinds } from '../context/KeybindsContext.jsx'
+import { displayCombo } from '../lib/keybinds.js'
 import HomePage      from './HomePage.jsx'
 import CalendarPage  from './CalendarPage.jsx'
 import HabitsPage    from './HabitsPage.jsx'
@@ -14,6 +16,9 @@ import FitnessPage   from './FitnessPage.jsx'
 import GoalsPage     from './GoalsPage.jsx'
 import AssistantPage from './AssistantPage.jsx'
 import AccountsPage  from './AccountsPage.jsx'
+import AssistantPanel from './AssistantPanel.jsx'
+
+const PANEL_KEY = 'atlas:assistant-panel'
 
 const I = (...kids) => (
   <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{kids}</svg>
@@ -170,7 +175,7 @@ function AccountModal({ onClose, setActive }) {
             onClick={() => { setActive('accounts'); onClose() }}
             style={{ fontSize: 12.5, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}
           >
-            Manage all accounts →
+            Settings &amp; accounts →
           </button>
         </div>
       </div>
@@ -185,6 +190,20 @@ export default function DesktopLayout() {
   const [userHover, setUserHover] = useState(false)
   const { profile, initial } = useUser()
   const quickAdd = useQuickAddAction(active, setActive)
+  // The assistant docked on the right. Remembered between visits; not shown
+  // on the Assistant page itself, which is the same chat full width.
+  const [panelOpen, setPanelOpen] = useState(() => { try { return localStorage.getItem(PANEL_KEY) === '1' } catch { return false } })
+  useEffect(() => { try { localStorage.setItem(PANEL_KEY, panelOpen ? '1' : '0') } catch { /* not kept */ } }, [panelOpen])
+  // Its shortcut (Ctrl+. by default) toggles it from anywhere, and the voice
+  // shortcut opens it when no chat is on screen.
+  useEffect(() => onShortcut('assistantPanel', () => setPanelOpen(o => !o)), [])
+  useEffect(() => {
+    const show = () => setPanelOpen(true)
+    window.addEventListener('atlas:show-assistant', show)
+    return () => window.removeEventListener('atlas:show-assistant', show)
+  }, [])
+  const { bindings } = useKeybinds()
+  const showPanel = panelOpen && active !== 'assistant'
 
   const pages = {
     home:      <HomePage />,
@@ -264,8 +283,14 @@ export default function DesktopLayout() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 14px', borderRadius: 11, background: 'var(--surface-2)', border: '1px solid var(--bd)', minWidth: 240, color: 'var(--muted)' }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
             <span style={{ fontSize: 13 }}>Search everything…</span>
-            <span style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 6px', borderRadius: 5, background: 'var(--surface-3)', color: 'var(--muted)', fontWeight: 600 }}>⌘K</span>
           </div>
+          {active !== 'assistant' && (
+            <button onClick={() => setPanelOpen(o => !o)} aria-pressed={panelOpen}
+              aria-label={panelOpen ? 'Close assistant panel' : 'Open assistant panel'} title={`${panelOpen ? 'Close' : 'Open'} assistant panel${bindings.assistantPanel ? ` (${displayCombo(bindings.assistantPanel)})` : ''}`}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 36, borderRadius: 11, border: '1px solid var(--bd)', background: panelOpen ? 'var(--surface-3)' : 'var(--surface-2)', color: panelOpen ? 'var(--ink)' : 'var(--muted)', cursor: 'pointer', flex: 'none' }}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5" /><line x1="14.5" y1="4" x2="14.5" y2="20" />{panelOpen && <rect x="15.5" y="5" width="4.5" height="14" rx="1" fill="currentColor" stroke="none" opacity=".35" />}</svg>
+            </button>
+          )}
           {/* The page's primary action. Hidden where a page has none (Accounts). */}
           {quickAdd && (
             <button onClick={quickAdd.run} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 15px', borderRadius: 11, border: 'none', background: '#c15f3c', color: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, lineHeight: 1, cursor: 'pointer', boxShadow: '0 2px 8px rgba(193,95,60,.32)', whiteSpace: 'nowrap' }}>
@@ -278,6 +303,8 @@ export default function DesktopLayout() {
           {pages[active]}
         </div>
       </main>
+
+      {showPanel && <AssistantPanel onClose={() => setPanelOpen(false)} onExpand={() => { setPanelOpen(false); setActive('assistant') }} />}
     </div>
   )
 }

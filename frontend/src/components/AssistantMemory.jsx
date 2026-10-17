@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import Sheet from './Sheet.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useVoiceSettings, setVoiceSettings, CONVERSATION_SILENCE } from '../lib/voiceSettings.js'
+import { useKeybinds } from '../context/KeybindsContext.jsx'
+import { displayCombo } from '../lib/keybinds.js'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -73,10 +76,11 @@ export function SettingsButton({ style }) {
 
 function SettingsSheet({ onClose }) {
   const [kind, setKind] = useState('memory')
+  const tabs = [...Object.entries(DOCS), ['voice', { label: 'Voice' }]]
   return (
     <Sheet title="Assistant settings" onClose={onClose} width={680} height="84vh">
       <div role="tablist" style={{ display: 'flex', gap: 4, padding: 3, borderRadius: 9, background: 'var(--surface-2)', alignSelf: 'flex-start', marginBottom: 14 }}>
-        {Object.entries(DOCS).map(([k, d]) => (
+        {tabs.map(([k, d]) => (
           <button key={k} role="tab" aria-selected={kind === k} onClick={() => setKind(k)}
             style={{ fontSize: 12.5, padding: '5px 12px', borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
                      background: kind === k ? 'var(--surface)' : 'transparent', color: kind === k ? 'var(--ink)' : 'var(--muted)',
@@ -86,8 +90,62 @@ function SettingsSheet({ onClose }) {
         ))}
       </div>
       {/* Keyed so switching tabs loads the other document fresh. */}
-      <DocEditor key={kind} kind={kind} />
+      {kind === 'voice' ? <VoiceSettings /> : <DocEditor key={kind} kind={kind} />}
     </Sheet>
+  )
+}
+
+const SILENCE_OPTIONS = [0, 1, 2, 3, 4, 5, 7, 10]
+
+function SettingRow({ title, detail, children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 0', borderBottom: '1px solid var(--bd-sm)' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, color: 'var(--ink)', fontWeight: 500 }}>{title}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3, lineHeight: 1.45 }}>{detail}</div>
+      </div>
+      <div style={{ flex: 'none' }}>{children}</div>
+    </div>
+  )
+}
+
+function VoiceSettings() {
+  const { silenceSeconds, autoSend, keepListening } = useVoiceSettings()
+  const { bindings } = useKeybinds() || { bindings: {} }
+  return (
+    <div>
+      <p style={{ margin: '0 0 4px', fontSize: 13, color: 'var(--mid)', lineHeight: 1.5 }}>
+        Tap the mic{bindings.voice ? <> or press <kbd style={kbd}>{displayCombo(bindings.voice)}</kbd></> : null} to talk to Atlas. These settings are kept on this device.
+      </p>
+      <SettingRow title="Stop when I pause"
+        detail="Stops listening after this long without speech, so you don't have to tap again.">
+        <select aria-label="Stop after a pause of" value={silenceSeconds}
+          onChange={e => setVoiceSettings({ silenceSeconds: Number(e.target.value) })}
+          style={{ fontSize: 13, padding: '6px 8px', borderRadius: 8, border: '1px solid var(--bd-xl)', background: 'var(--surface-2)', color: 'var(--ink)', fontFamily: 'inherit' }}>
+          {SILENCE_OPTIONS.map(n => <option key={n} value={n}>{n === 0 ? 'Never' : `${n} second${n === 1 ? '' : 's'}`}</option>)}
+        </select>
+      </SettingRow>
+      <SettingRow title="Send automatically"
+        detail="Sends what you said as soon as it's transcribed. Turn off to check and edit it in the box first.">
+        <Switch checked={autoSend || keepListening} onChange={v => setVoiceSettings({ autoSend: v })} label="Send automatically" disabled={keepListening} />
+      </SettingRow>
+      <SettingRow title="Keep listening"
+        detail={`A hands-free conversation: after Atlas replies, it starts listening again. Messages send when you pause${silenceSeconds ? '' : ` (${CONVERSATION_SILENCE} seconds, since stopping on a pause is off)`}. Say nothing, or press Esc, to end it.`}>
+        <Switch checked={keepListening} onChange={v => setVoiceSettings({ keepListening: v })} label="Keep listening" />
+      </SettingRow>
+    </div>
+  )
+}
+
+const kbd = { fontFamily: 'inherit', fontSize: 12, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--bd-xl)', background: 'var(--surface-2)', color: 'var(--ink)' }
+
+function Switch({ checked, onChange, label, disabled }) {
+  return (
+    <button role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)} disabled={disabled}
+      title={disabled ? 'Always on while “Keep listening” is on' : undefined}
+      style={{ width: 40, height: 23, borderRadius: 99, border: 'none', padding: 2, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.55 : 1, background: checked ? '#c15f3c' : 'var(--surface-3)', transition: 'background .15s', display: 'flex' }}>
+      <span style={{ width: 19, height: 19, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.25)', transform: checked ? 'translateX(17px)' : 'none', transition: 'transform .15s' }} />
+    </button>
   )
 }
 
