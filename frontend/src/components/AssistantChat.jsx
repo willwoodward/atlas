@@ -5,6 +5,7 @@ import { useAssistant } from '../context/AssistantContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { assistantPrompts } from '../data.js'
 import { SettingsButton, MemoryEditChip } from './AssistantMemory.jsx'
+import { useVoiceInput, voiceSupported } from '../hooks/useVoiceInput.js'
 
 // MCP tool name → what to show while it runs
 const TOOL_LABELS = {
@@ -388,26 +389,71 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
     if (taRef.current) taRef.current.style.height = 'auto'
   }
 
+  const autosize = () => {
+    const el = taRef.current
+    if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 140) + 'px' }
+  }
+
+  // Voice: words stream into the box as a live preview while you speak, then
+  // the accurate transcript replaces the preview when you stop. It's added to
+  // the box rather than sent, so a misheard word can be fixed first.
+  const [live, setLive] = useState('')
+  const joinText = (a, b) => (a.trim() && b ? a.trimEnd() + ' ' : a) + b
+  const voice = useVoiceInput(text => {
+    setLive('')
+    setInput(prev => joinText(prev, text))
+    requestAnimationFrame(() => { autosize(); const el = taRef.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length) } })
+  }, text => { setLive(text); requestAnimationFrame(autosize) })
+  const canVoice = voiceSupported()
+  const listening = voice.state === 'recording'
+  useEffect(() => {
+    if (!listening) return
+    const onEsc = e => { if (e.key === 'Escape') voice.cancel() }
+    window.addEventListener('keydown', onEsc)
+    return () => window.removeEventListener('keydown', onEsc)
+  }, [listening]) // eslint-disable-line
+  const clock = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+
   const onKeyDown = e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(input) }
   }
 
   const composer = (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, width: '100%', maxWidth: 560, padding: '12px 16px', borderRadius: 14, background: 'var(--surface)', border: '1px solid var(--bd-lg)', boxShadow: '0 4px 18px var(--bd-xs)' }}>
+    // Clicking anywhere in the box (its padding included) goes to the text field.
+    <div onMouseDown={e => { if (e.target === e.currentTarget) { e.preventDefault(); taRef.current?.focus() } }}
+      style={{ cursor: 'text', display: 'flex', alignItems: 'flex-end', gap: 12, width: '100%', maxWidth: 560, padding: '12px 16px', borderRadius: 14, background: 'var(--surface)', border: '1px solid var(--bd-lg)', boxShadow: '0 4px 18px var(--bd-xs)' }}>
+      {voice.state !== 'idle' && (
+        <div aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 36, flex: 'none', fontSize: 13, color: 'var(--mid)' }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: listening ? '#c15f3c' : 'var(--faint)', animation: 'atlas-pulse 1.2s ease-in-out infinite', flex: 'none' }} />
+          <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink)' }}>{listening ? clock(voice.seconds) : 'Finishing…'}</span>
+          <style>{'@keyframes atlas-pulse{0%,100%{opacity:.25}50%{opacity:1}}'}</style>
+        </div>
+      )}
       <textarea
         ref={taRef}
         rows={1}
-        value={input}
-        onChange={e => {
-          setInput(e.target.value)
-          const el = taRef.current
-          if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 140) + 'px' }
-        }}
+        // While listening, the box shows what you've typed plus the live preview.
+        value={voice.state === 'idle' ? input : joinText(input, live)}
+        readOnly={voice.state !== 'idle'}
+        onChange={e => { setInput(e.target.value); autosize(); if (voice.error) voice.clearError() }}
         onKeyDown={onKeyDown}
-        placeholder="Message Atlas…"
-        style={{ flex: 1, resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontSize: 14, fontFamily: 'inherit', color: 'var(--ink)', lineHeight: 1.5, maxHeight: 140 }}
+        placeholder={listening ? 'Listening…' : voice.state === 'transcribing' ? 'Transcribing…' : 'Message Atlas…'}
+        style={{ flex: 1, alignSelf: 'center', resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontSize: 14, fontFamily: 'inherit', color: voice.state === 'idle' ? 'var(--ink)' : 'var(--mid)', lineHeight: 1.5, maxHeight: 140 }}
       />
-      <button
+      {listening && (
+        <button onClick={voice.cancel} aria-label="Cancel recording" title="Cancel (Esc)"
+          style={{ alignSelf: 'center', background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12.5, fontFamily: 'inherit', cursor: 'pointer', padding: 4, flex: 'none' }}>Cancel</button>
+      )}
+      {canVoice && !busy && (
+        <button onClick={() => (listening ? voice.stop() : voice.start())} disabled={voice.state === 'transcribing'}
+          aria-label={listening ? 'Stop and transcribe' : 'Speak'} title={listening ? 'Stop and transcribe' : 'Speak'}
+          style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 10, border: listening ? 'none' : '1px solid var(--bd)', background: listening ? '#c15f3c' : 'transparent', color: listening ? '#fff' : 'var(--muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: voice.state === 'transcribing' ? 'default' : 'pointer', transition: 'all .12s' }}>
+          {listening
+            ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5L20 7" /></svg>
+            : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>}
+        </button>
+      )}
+      {!listening && <button
         onClick={() => (busy ? stop() : submit(input))}
         disabled={!busy && !input.trim()}
         style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 10, border: 'none', background: busy || input.trim() ? '#c15f3c' : 'var(--surface-3)', color: busy || input.trim() ? '#fff' : 'var(--faint)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: busy || input.trim() ? 'pointer' : 'default', transition: 'all .12s' }}
@@ -415,8 +461,11 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
         {busy
           ? <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2" /></svg>
           : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4l16 8-16 8 3-8z" /></svg>}
-      </button>
+      </button>}
     </div>
+  )
+  const voiceError = voice.error && (
+    <div style={{ marginTop: 8, fontSize: 12.5, color: '#c15f3c' }}>{voice.error}</div>
   )
 
   if (empty) {
@@ -442,6 +491,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
         </div>
 
         {composer}
+        {voiceError}
         {error && <div style={{ marginTop: 12, fontSize: 12.5, color: '#c15f3c' }}>{error}</div>}
       </div>
     )
@@ -462,7 +512,8 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
           New chat
         </button>}
       </div>
-      <div style={{ padding: `8px ${gutter}px 20px`, display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Grows to fill the page, so the composer sits at the bottom even when the thread is short. */}
+      <div style={{ flex: '1 0 auto', padding: `8px ${gutter}px 20px`, display: 'flex', flexDirection: 'column', gap: 20 }}>
         {messages.map((m, i) => m.role === 'user' ? (
           <div key={i} style={{ alignSelf: 'flex-end', maxWidth: '80%', padding: '10px 15px', borderRadius: 14, background: 'var(--surface)', border: '1px solid var(--bd)', fontSize: 14, lineHeight: 1.55, whiteSpace: 'pre-wrap', color: 'var(--ink)' }}>
             {m.content}
@@ -483,7 +534,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
         {error && <div style={{ fontSize: 12.5, color: '#c15f3c' }}>{error}</div>}
       </div>
 
-      <div style={{ position: 'sticky', bottom: 0, zIndex: 1, display: 'flex', justifyContent: 'center', padding: `8px ${gutter}px`, paddingBottom: isMobile ? 'max(8px, env(safe-area-inset-bottom))' : 8, background: 'var(--bg)' }}>{composer}</div>
+      <div style={{ position: 'sticky', bottom: 0, zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: `8px ${gutter}px`, paddingBottom: isMobile ? 'max(8px, env(safe-area-inset-bottom))' : 8, background: 'var(--bg)' }}>{composer}{voiceError}</div>
     </div>
   )
 }

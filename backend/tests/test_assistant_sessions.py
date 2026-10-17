@@ -251,3 +251,57 @@ class TestSystemPrompt:
     async def test_an_empty_prompt_is_refused(self, client, auth):
         resp = await client.put("/assistant/prompt", json={"content": "  "}, headers=auth)
         assert resp.status_code == 422
+
+
+class TestTranscribe:
+    @pytest.fixture
+    def openai(self, monkeypatch):
+        """Stand in for OpenAI: record what was sent, answer with fixed text."""
+        import httpx
+        import routers.assistant as assistant
+        calls = []
+        real = httpx.AsyncClient
+
+        def handler(request: httpx.Request):
+            calls.append(request)
+            return httpx.Response(200, json={"text": " Move the train 30 minutes earlier. "})
+
+        monkeypatch.setattr(assistant.httpx, "AsyncClient",
+                            lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        return calls
+
+    async def test_audio_is_transcribed(self, client, auth, openai):
+        resp = await client.post("/assistant/transcribe", content=b"\x1a" * 5000,
+                                 headers={**auth, "Content-Type": "audio/webm;codecs=opus"})
+        assert resp.status_code == 200
+        assert resp.json() == {"text": "Move the train 30 minutes earlier."}
+        sent = openai[0]
+        assert sent.url.path.endswith("/audio/transcriptions")
+        body = sent.read()
+        assert b'filename="recording.webm"' in body and b"gpt-4o-mini-transcribe" in body
+
+    async def test_needs_a_token(self, client, openai):
+        resp = await client.post("/assistant/transcribe", content=b"x" * 5000, headers={"Content-Type": "audio/webm"})
+        assert resp.status_code == 401
+        assert openai == []
+
+    async def test_only_audio_is_accepted(self, client, auth, openai):
+        resp = await client.post("/assistant/transcribe", content=b"x" * 5000,
+                                 headers={**auth, "Content-Type": "text/plain"})
+        assert resp.status_code == 415
+
+    async def test_a_tap_is_not_sent(self, client, auth, openai):
+        resp = await client.post("/assistant/transcribe", content=b"x" * 10, headers={**auth, "Content-Type": "audio/mp4"})
+        assert resp.json() == {"text": ""} and openai == []
+
+    async def test_long_recordings_are_refused(self, client, auth, openai):
+        import routers.assistant as assistant
+        resp = await client.post("/assistant/transcribe", content=b"x" * (assistant.MAX_AUDIO_BYTES + 1),
+                                 headers={**auth, "Content-Type": "audio/webm"})
+        assert resp.status_code == 413 and openai == []
+
+    async def test_without_a_key_it_says_so(self, client, auth, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        resp = await client.post("/assistant/transcribe", content=b"x" * 5000, headers={**auth, "Content-Type": "audio/webm"})
+        assert resp.status_code == 503

@@ -616,6 +616,57 @@ for _kind in memory.KINDS:
     _document_routes(_kind)
 
 
+# ── Voice ────────────────────────────────────────────────────────────────────
+# The browser records, this forwards the audio to OpenAI's speech-to-text and
+# returns the text. Nothing is stored. The audio comes as the raw request body
+# (Content-Type audio/webm, audio/mp4 …) rather than a form upload, which keeps
+# a multipart parser out of the API.
+
+# A dated snapshot on purpose: the plain "gpt-4o-mini-transcribe" alias is
+# scheduled for shutdown on 2027-02-26, and this snapshot has no date set.
+# gpt-transcribe is the newer family if this one is ever retired.
+TRANSCRIBE_MODEL = os.getenv("TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe-2025-12-15")
+MAX_AUDIO_BYTES = 10 * 1024 * 1024   # ~10 min of browser audio; OpenAI's own limit is 25 MB
+_AUDIO_EXT = {"webm": "webm", "mp4": "mp4", "mpeg": "mp3", "mp3": "mp3", "ogg": "ogg",
+              "wav": "wav", "x-wav": "wav", "m4a": "m4a", "x-m4a": "m4a", "aac": "m4a"}
+
+
+@router.post("/transcribe")
+async def transcribe(request: Request, user: dict = Depends(get_current_user)):
+    key = os.getenv("OPENAI_API_KEY")
+    if not key:
+        raise HTTPException(503, "Voice input needs OPENAI_API_KEY on the server.")
+    ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if not ctype.startswith("audio/"):
+        raise HTTPException(415, "Send the recording as audio.")
+    ext = _AUDIO_EXT.get(ctype.split("/", 1)[1])
+    if not ext:
+        raise HTTPException(415, f"Unsupported audio type {ctype}.")
+
+    audio = bytearray()
+    async for chunk in request.stream():
+        audio += chunk
+        if len(audio) > MAX_AUDIO_BYTES:
+            raise HTTPException(413, "That recording is too long.")
+    if len(audio) < 1000:
+        return {"text": ""}  # a tap, not speech
+
+    base = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
+            resp = await client.post(
+                f"{base}/audio/transcriptions",
+                headers={"Authorization": f"Bearer {key}"},
+                data={"model": TRANSCRIBE_MODEL, "response_format": "json"},
+                files={"file": (f"recording.{ext}", bytes(audio), ctype)},
+            )
+    except httpx.HTTPError:
+        raise HTTPException(502, "Couldn't reach the speech-to-text service.")
+    if resp.status_code >= 400:
+        raise HTTPException(502, f"Speech-to-text failed ({resp.status_code}): {resp.text[:200]}")
+    return {"text": (resp.json().get("text") or "").strip()}
+
+
 @router.get("/health")
 async def health(user: dict = Depends(get_current_user)):
     try:
