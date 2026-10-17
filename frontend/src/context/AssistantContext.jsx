@@ -207,6 +207,7 @@ export function AssistantProvider({ children }) {
   // Messages sent while Atlas was answering, oldest first. Each goes when the
   // turn before it has finished, so replies stay in order. Kept on this device.
   const [queued, setQueued] = useState([])
+  const [hold, setHold] = useState(false)   // brief pause after a "still answering" refusal
   const [error, setError] = useState(null)
   const abortRef = useRef(null)
   const runRef = useRef(null)
@@ -467,10 +468,22 @@ export function AssistantProvider({ children }) {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ message: prompt, session_id: sessionRef.current }),
       })
+      if (res.status === 409) {
+        // A reply is still running that this device isn't following yet
+        // (started on another device, or just after a reload). Queue this
+        // message instead of dropping it, attach to that reply, and send when
+        // it ends. The hold stops a tight retry loop if the server is a
+        // moment behind.
+        setMessages(prev => prev.slice(0, -2))
+        setQueued(q => [{ id: `${Date.now()}-retry`, text: prompt }, ...q])
+        setHold(true)
+        setTimeout(() => setHold(false), 2000)
+        setBusyBoth(false)
+        sync()
+        return
+      }
       if (!res.ok) {
-        throw new Error(res.status === 403 ? 'Not authorised to use the assistant.'
-          : res.status === 409 ? 'Atlas is still answering your last message.'
-          : `Assistant error (${res.status})`)
+        throw new Error(res.status === 403 ? 'Not authorised to use the assistant.' : `Assistant error (${res.status})`)
       }
       const { run_id, session_id, new_session } = await res.json()
       sentHere.current.add(run_id)
@@ -491,11 +504,11 @@ export function AssistantProvider({ children }) {
 
   // Send what was queued, one at a time, as each turn finishes.
   useEffect(() => {
-    if (busy || queued.length === 0) return
+    if (busy || hold || queued.length === 0) return
     const [next, ...rest] = queued
     setQueued(rest)
     send(next.text)
-  }, [busy, queued, send])
+  }, [busy, hold, queued, send])
   const unqueue = useCallback(id => setQueued(q => q.filter(x => x.id !== id)), [])
 
   // ── Voice shortcut ──

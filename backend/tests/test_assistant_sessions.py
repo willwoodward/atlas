@@ -94,6 +94,17 @@ class TestSessions:
         assert nxt["new_session"] is True and nxt["session_id"] != run["session_id"]
         assert sent[-1]["messages"] == [{"role": "user", "content": "Another thing"}]
 
+    async def test_a_device_that_has_not_synced_joins_the_live_session(self, client, auth, sent):
+        first = await _send(client, auth, "From the phone")
+        await _finish(first["run_id"], "Hi phone")
+        laptop = await _send(client, auth, "From the laptop")       # no session_id yet
+        assert laptop["session_id"] == first["session_id"] and laptop["new_session"] is False
+
+    async def test_a_device_that_has_not_synced_is_told_a_reply_is_running(self, client, auth, sent):
+        await _send(client, auth, "From the phone")                  # still running
+        resp = await client.post("/assistant/runs", json={"message": "From the laptop"}, headers=auth)
+        assert resp.status_code == 409
+
     async def test_a_busy_session_does_not_go_stale(self, client, auth, sent):
         """A long research run outlasting the window must not orphan its thread."""
         run = await _send(client, auth, "Long research")
@@ -221,8 +232,9 @@ class TestSystemPrompt:
         first = await _send(client, auth, "Hi")
         await _finish(first["run_id"], "Hello")
         await client.put("/assistant/prompt", json={"content": "You are terse, {name}."}, headers=auth)
-        await _send(client, auth, "More", first["session_id"])
+        more = await _send(client, auth, "More", first["session_id"])
         assert sent[-1]["system_prompt"] != "You are terse, {name}."
+        await _finish(more["run_id"], "Sure")
         await _age_session(first["session_id"], 31)
         await _send(client, auth, "Later")
         assert sent[-1]["system_prompt"] == "You are terse, {name}."

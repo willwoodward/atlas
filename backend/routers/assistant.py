@@ -253,7 +253,10 @@ async def start_run(req: RunRequest, request: Request, user: dict = Depends(get_
         session_id, new_session = None, False
         if req.message is not None:
             prompt = req.message
-            live = await _live_session(db, req.session_id)
+            # No session named means this device hasn't synced yet, not "start
+            # afresh" ("New chat" closes the old one first). Join the live one,
+            # so two devices never end up in parallel conversations.
+            live = await _live_session(db, req.session_id or await _current_session_id(db))
             if live:
                 session_id = live["id"]
                 async with db.execute(
