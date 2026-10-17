@@ -170,7 +170,7 @@ async def _session_view(db, session_id: str) -> dict:
             active = {"id": r["id"], "status": r["status"]}
     expires = _parse_time(session["updated_at"]) + timedelta(minutes=SESSION_IDLE_MINUTES)
     return {
-        "session": {**session, "closed": bool(session["closed"]), "expires_at": expires.isoformat()},
+        "session": {**session, "closed": bool(session["closed"]), "kept": bool(session.get("kept")), "expires_at": expires.isoformat()},
         "messages": messages,
         "active_run": active,
     }
@@ -541,16 +541,29 @@ async def current_session(user: dict = Depends(get_current_user)):
 
 
 @router.get("/sessions")
-async def list_sessions(limit: int = 20, user: dict = Depends(get_current_user)):
-    """Past conversations, newest first — the session log."""
+async def list_sessions(q: str = "", limit: int = 50, user: dict = Depends(get_current_user)):
+    """Past chats: the ones you kept, newest first. `q` searches titles and
+    what was said. (Chats you didn't keep are deleted once they're over —
+    see conversations.py.)"""
+    from inbox import preview_of
     db = await _connect()
     try:
+        where, params = "s.kind = 'chat' AND s.kept = 1", []
+        if q.strip():
+            like = f"%{q.strip()}%"
+            where += (" AND (s.title LIKE ? OR EXISTS (SELECT 1 FROM agent_runs r2 WHERE r2.session_id = s.id "
+                      "AND (r2.user_message LIKE ? OR r2.reply LIKE ?)))")
+            params += [like, like, like]
         async with db.execute(
-            "SELECT s.id, s.created_at, s.updated_at, s.title, s.closed, COUNT(r.id) AS turns "
-            "FROM agent_sessions s LEFT JOIN agent_runs r ON r.session_id = s.id "
-            "WHERE s.kind = 'chat' GROUP BY s.id ORDER BY s.updated_at DESC LIMIT ?", (min(max(limit, 1), 200),),
+            "SELECT s.id, s.created_at, s.updated_at, s.title, s.closed, s.kept, COUNT(r.id) AS turns, "
+            "(SELECT reply FROM agent_runs r3 WHERE r3.session_id = s.id ORDER BY created_at DESC LIMIT 1) AS last_reply "
+            f"FROM agent_sessions s LEFT JOIN agent_runs r ON r.session_id = s.id WHERE {where} "
+            "GROUP BY s.id ORDER BY s.updated_at DESC LIMIT ?", (*params, min(max(limit, 1), 200)),
         ) as c:
-            rows = [{**dict(r), "closed": bool(r["closed"])} for r in await c.fetchall()]
+            rows = [{**dict(r), "closed": bool(r["closed"]), "kept": bool(r["kept"]),
+                     "preview": preview_of(r["last_reply"] or "")[:140]} for r in await c.fetchall()]
+        for r in rows:
+            r.pop("last_reply", None)
         return {"sessions": rows}
     finally:
         await db.close()
@@ -570,13 +583,92 @@ async def get_session(session_id: str, user: dict = Depends(get_current_user)):
 
 @router.post("/sessions/{session_id}/close")
 async def close_session(session_id: str, user: dict = Depends(get_current_user)):
-    """End a conversation ("New chat"). It stays in the log; every device moves on."""
+    """End a conversation ("New chat"). Every device moves on; unless it was
+    kept, it's deleted."""
+    import conversations
     db = await _connect()
     try:
         cur = await db.execute("UPDATE agent_sessions SET closed=1 WHERE id=?", (session_id,))
         await db.commit()
         if cur.rowcount == 0:
             raise HTTPException(404, "No such session")
+        await conversations.purge(db)
+        return {"ok": True}
+    finally:
+        await db.close()
+
+
+class KeepIn(BaseModel):
+    kept: bool | None = None
+    title: str | None = Field(None, max_length=120)
+
+
+@router.patch("/sessions/{session_id}")
+async def update_session(session_id: str, body: KeepIn, user: dict = Depends(get_current_user)):
+    """Keep a chat (or stop keeping it), or rename it."""
+    db = await _connect()
+    try:
+        async with db.execute("SELECT kind FROM agent_sessions WHERE id=?", (session_id,)) as c:
+            row = await c.fetchone()
+        if not row or row["kind"] != "chat":
+            raise HTTPException(404, "No such chat")
+        if body.kept is not None:
+            await db.execute("UPDATE agent_sessions SET kept=? WHERE id=?", (int(body.kept), session_id))
+        if body.title is not None and body.title.strip():
+            await db.execute("UPDATE agent_sessions SET title=? WHERE id=?", (" ".join(body.title.split())[:120], session_id))
+        await db.commit()
+        async with db.execute("SELECT id, title, kept FROM agent_sessions WHERE id=?", (session_id,)) as c:
+            r = await c.fetchone()
+        return {"id": r["id"], "title": r["title"], "kept": bool(r["kept"])}
+    finally:
+        await db.close()
+
+
+@router.post("/sessions/{session_id}/resume")
+async def resume_session(session_id: str, user: dict = Depends(get_current_user)):
+    """Carry on a kept chat: it becomes the current conversation on every
+    device (the one that was current ends, and goes unless kept). It picks
+    up the assistant's memory and prompt as they are now."""
+    import conversations
+    db = await _connect()
+    try:
+        async with db.execute("SELECT kind, kept FROM agent_sessions WHERE id=?", (session_id,)) as c:
+            row = await c.fetchone()
+        if not row or row["kind"] != "chat":
+            raise HTTPException(404, "No such chat")
+        if not row["kept"]:
+            raise HTTPException(409, "Only kept chats can be reopened.")
+        current = await _current_session_id(db)
+        if current and current != session_id:
+            async with db.execute("SELECT 1 FROM agent_runs WHERE session_id=? AND status IN ('running','awaiting_input')", (current,)) as c:
+                if await c.fetchone():
+                    raise HTTPException(409, "Atlas is still answering in the current chat.")
+            await db.execute("UPDATE agent_sessions SET closed=1 WHERE id=?", (current,))
+        mem_v = (await memory.current(db, "memory"))["version"] or 0
+        prompt_v = (await memory.current(db, "prompt"))["version"] or 0
+        await db.execute("UPDATE agent_sessions SET closed=0, updated_at=?, memory_version=?, prompt_version=? WHERE id=?",
+                         (_now(), mem_v, prompt_v, session_id))
+        await db.commit()
+        await conversations.purge(db)
+        return await _session_view(db, session_id)
+    finally:
+        await db.close()
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_chat(session_id: str, user: dict = Depends(get_current_user)):
+    import conversations
+    db = await _connect()
+    try:
+        async with db.execute("SELECT kind FROM agent_sessions WHERE id=?", (session_id,)) as c:
+            row = await c.fetchone()
+        if not row or row["kind"] != "chat":
+            raise HTTPException(404, "No such chat")
+        async with db.execute("SELECT 1 FROM agent_runs WHERE session_id=? AND status IN ('running','awaiting_input')", (session_id,)) as c:
+            if await c.fetchone():
+                raise HTTPException(409, "Atlas is still answering in that chat.")
+        await conversations.delete_session(db, session_id)
+        await db.commit()
         return {"ok": True}
     finally:
         await db.close()

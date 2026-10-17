@@ -118,17 +118,14 @@ class TestSessions:
                                  headers=auth)
         assert resp.status_code == 409
 
-    async def test_new_chat_closes_the_session_but_keeps_it_in_the_log(self, client, auth, sent):
+    async def test_new_chat_deletes_a_chat_that_wasnt_kept(self, client, auth, sent):
         run = await _send(client, auth, "Hello")
         await _finish(run["run_id"], "Hi!")
         resp = await client.post(f"/assistant/sessions/{run['session_id']}/close", headers=auth)
         assert resp.status_code == 200
-
         assert (await client.get("/assistant/sessions/current", headers=auth)).json()["session"] is None
-        log = (await client.get("/assistant/sessions", headers=auth)).json()["sessions"]
-        assert [(s["id"], s["closed"], s["turns"]) for s in log] == [(run["session_id"], True, 1)]
-        old = (await client.get(f"/assistant/sessions/{run['session_id']}", headers=auth)).json()
-        assert old["messages"][1]["content"] == "Hi!"
+        assert (await client.get(f"/assistant/sessions/{run['session_id']}", headers=auth)).status_code == 404
+        assert (await client.get(f"/assistant/runs/{run['run_id']}/history", headers=auth)).status_code == 404
 
     async def test_a_turn_without_a_reply_still_counts_as_asked(self, client, auth, sent):
         first = await _send(client, auth, "Do the thing")
@@ -491,3 +488,77 @@ class TestLiveSession:
 
     async def test_needs_a_token(self, client, openai):
         assert (await client.post("/assistant/live/session", json={"sdp": "v=0 offer sdp"})).status_code == 401
+
+
+class TestTemporaryChats:
+    async def test_an_idle_chat_is_deleted_after_the_timeout(self, client, auth, sent):
+        import conversations
+        run = await _send(client, auth, "Hello")
+        await _finish(run["run_id"], "Hi!")
+        await _age_session(run["session_id"], 31)
+        db = await __import__("routers.assistant", fromlist=["_connect"])._connect()
+        try:
+            assert (await conversations.purge(db))["sessions"] == 1
+        finally:
+            await db.close()
+        assert (await client.get(f"/assistant/sessions/{run['session_id']}", headers=auth)).status_code == 404
+
+    async def test_a_chat_still_answering_is_never_deleted(self, client, auth, sent):
+        import conversations
+        run = await _send(client, auth, "Long research")
+        await _age_session(run["session_id"], 120)
+        db = await __import__("routers.assistant", fromlist=["_connect"])._connect()
+        try:
+            assert (await conversations.purge(db))["sessions"] == 0
+        finally:
+            await db.close()
+
+    async def test_a_kept_chat_survives_and_can_be_found_renamed_and_reopened(self, client, auth, sent):
+        import conversations
+        run = await _send(client, auth, "Plan the Italy trip")
+        await _finish(run["run_id"], "Rome first, then Florence.")
+        kept = await client.patch(f"/assistant/sessions/{run['session_id']}", json={"kept": True, "title": "Italy trip"}, headers=auth)
+        assert kept.json() == {"id": run["session_id"], "title": "Italy trip", "kept": True}
+        await client.post(f"/assistant/sessions/{run['session_id']}/close", headers=auth)
+        await _age_session(run["session_id"], 600)
+        db = await __import__("routers.assistant", fromlist=["_connect"])._connect()
+        try:
+            await conversations.purge(db)
+        finally:
+            await db.close()
+        listed = (await client.get("/assistant/sessions", headers=auth)).json()["sessions"]
+        assert [(s["title"], s["turns"], s["preview"]) for s in listed] == [("Italy trip", 1, "Rome first, then Florence.")]
+        assert len((await client.get("/assistant/sessions?q=florence", headers=auth)).json()["sessions"]) == 1
+        assert (await client.get("/assistant/sessions?q=paris", headers=auth)).json()["sessions"] == []
+
+        # A temporary chat in progress ends when the kept one is reopened.
+        other = await _send(client, auth, "Something else")
+        await _finish(other["run_id"], "OK")
+        view = (await client.post(f"/assistant/sessions/{run['session_id']}/resume", headers=auth)).json()
+        assert view["session"]["id"] == run["session_id"] and view["session"]["kept"] is True
+        assert (await client.get("/assistant/sessions/current", headers=auth)).json()["session"]["id"] == run["session_id"]
+        assert (await client.get(f"/assistant/sessions/{other['session_id']}", headers=auth)).status_code == 404
+        # And it carries on with its history.
+        nxt = await _send(client, auth, "And after Florence?")
+        assert nxt["session_id"] == run["session_id"]
+        assert [m["content"] for m in sent[-1]["messages"]] == ["Plan the Italy trip", "Rome first, then Florence.", "And after Florence?"]
+
+    async def test_only_kept_chats_reopen_and_deleting_is_for_good(self, client, auth, sent):
+        run = await _send(client, auth, "Hi")
+        await _finish(run["run_id"], "Hello")
+        assert (await client.post(f"/assistant/sessions/{run['session_id']}/resume", headers=auth)).status_code == 409
+        await client.patch(f"/assistant/sessions/{run['session_id']}", json={"kept": True}, headers=auth)
+        assert (await client.delete(f"/assistant/sessions/{run['session_id']}", headers=auth)).json() == {"ok": True}
+        assert (await client.get("/assistant/sessions", headers=auth)).json()["sessions"] == []
+
+    async def test_inbox_threads_are_not_touched(self, client, auth, sent):
+        import conversations, inbox
+        db = await inbox.connect()
+        try:
+            await db.execute("INSERT INTO agent_sessions (id, created_at, updated_at, title, kind, closed) VALUES ('r1','2020-01-01','2020-01-01','Routine','routine',1)")
+            await db.commit()
+            await conversations.purge(db)
+            async with db.execute("SELECT COUNT(*) FROM agent_sessions WHERE id='r1'") as c:
+                assert (await c.fetchone())[0] == 1
+        finally:
+            await db.close()

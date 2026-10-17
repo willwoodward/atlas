@@ -9,7 +9,7 @@ import { renderMarkdown } from '../lib/markdown.js'
 import { ToolTrace } from '../components/AssistantChat.jsx'
 import { ToolCards, ActionUndoChip } from '../components/ChatCards.jsx'
 import RoutinesSheet from '../components/RoutinesSheet.jsx'
-import { Button, IconButton, Input, Textarea, Switch, PageHeader, eyebrow } from '../components/ui.jsx'
+import { Button, IconButton, BinButton, Input, Textarea, Switch, PageHeader, eyebrow } from '../components/ui.jsx'
 
 // The inbox: what Atlas did in the background. Each item is a thread from a
 // routine's run (backend/inbox.py): its message, any changes it suggested —
@@ -57,11 +57,12 @@ function Dot({ on, color = 'var(--accent)' }) {
   return <span style={{ display: 'block', width: 8, height: 8, borderRadius: '50%', flex: 'none', background: on ? color : 'transparent' }} />
 }
 
-function ItemRow({ item, selected, onClick }) {
+function ItemRow({ item, selected, onClick, onDelete }) {
   const unread = !item.read
   return (
+    <div className="inbox-row" style={{ position: 'relative' }}>
     <button onClick={onClick} data-inbox-item={item.id}
-      style={{ display: 'flex', gap: 10, width: '100%', textAlign: 'left', padding: '12px 14px', border: 'none', borderRadius: 'var(--radius)',
+      style={{ display: 'flex', gap: 10, width: '100%', textAlign: 'left', padding: '12px 14px', paddingRight: 44, border: 'none', borderRadius: 'var(--radius)',
                background: selected ? 'var(--surface-3)' : 'transparent', cursor: 'pointer', fontFamily: 'inherit', alignItems: 'flex-start' }}>
       <span style={{ display: 'block', paddingTop: 6, flex: 'none' }}><Dot on={unread} /></span>
       <span style={{ flex: 1, minWidth: 0 }}>
@@ -81,6 +82,11 @@ function ItemRow({ item, selected, onClick }) {
         )}
       </span>
     </button>
+    {item.status !== 'running' && (
+      <BinButton size={28} aria-label={`Delete “${item.title}”`} title="Delete" className="inbox-row-bin"
+        onClick={onDelete} style={{ position: 'absolute', right: 8, bottom: 10 }} />
+    )}
+    </div>
   )
 }
 
@@ -178,7 +184,7 @@ function Proposals({ list, onDecide, onApproveAll }) {
 
 // ── One item ─────────────────────────────────────────────────────────────────
 
-function Detail({ id, onBack, onChanged, isMobile, onRunAgain }) {
+function Detail({ id, onBack, onChanged, isMobile, onRunAgain, onDelete }) {
   const { token } = useAuth()
   const { refresh } = useRefresh()
   const [item, setItem] = useState(null)
@@ -298,6 +304,7 @@ function Detail({ id, onBack, onChanged, isMobile, onRunAgain }) {
           {item.routine_id && <Button size="sm" variant="ghost" onClick={() => onRunAgain(item.routine_id)} disabled={busy}>Run again</Button>}
           <Button size="sm" variant="ghost" onClick={() => flag({ read: false })}>Mark unread</Button>
           <Button size="sm" variant="ghost" onClick={() => flag({ archived: !item.archived })}>{item.archived ? 'Unarchive' : 'Archive'}</Button>
+          <BinButton size={30} aria-label="Delete this thread" title="Delete this thread" disabled={busy} onClick={() => onDelete(item)} />
         </div>
       </div>
 
@@ -391,6 +398,15 @@ export default function InboxPage() {
   })
 
   const changed = () => { load(); reloadCounts() }
+  // Delete a thread for good (approved changes stay).
+  const remove = async it => {
+    if (!window.confirm(`Delete “${it.title}”? This removes the thread and any suggestions still waiting. It can't be undone.`)) return
+    try {
+      await inboxFetch(token, `/${it.id}`, { method: 'DELETE' })
+      if (selected === it.id) setSelected(null)
+      changed()
+    } catch (e) { setErr(e.message) }
+  }
   const runAgain = async routineId => {
     try {
       const out = await inboxFetch(token, `/routines/${routineId}/run`, { method: 'POST', body: {} })
@@ -425,7 +441,7 @@ export default function InboxPage() {
             {view === 'all' && !routineCount && <div style={{ marginTop: 12 }}><Button variant="primary" size="sm" onClick={() => setRoutinesOpen(true)}>Set up a routine</Button></div>}
           </div>
         )}
-        {items?.map(it => <ItemRow key={it.id} item={it} selected={!isMobile && it.id === selected} onClick={() => setSelected(it.id)} />)}
+        {items?.map(it => <ItemRow key={it.id} item={it} selected={!isMobile && it.id === selected} onClick={() => setSelected(it.id)} onDelete={() => remove(it)} />)}
       </div>
     </div>
   )
@@ -440,7 +456,7 @@ export default function InboxPage() {
     return (
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {selected
-          ? <Detail id={selected} isMobile onBack={() => setSelected(null)} onChanged={changed} onRunAgain={runAgain} />
+          ? <Detail id={selected} isMobile onBack={() => setSelected(null)} onChanged={changed} onRunAgain={runAgain} onDelete={remove} />
           : (
             <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '16px 16px 0' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 10 }}>{routinesButton}</div>
@@ -459,7 +475,7 @@ export default function InboxPage() {
         {list}
         <div style={{ minWidth: 0, minHeight: 0, borderLeft: '1px solid var(--bd-sm)', paddingLeft: 24 }}>
           {selected
-            ? <Detail key={selected} id={selected} onBack={() => setSelected(null)} onChanged={changed} onRunAgain={runAgain} />
+            ? <Detail key={selected} id={selected} onBack={() => setSelected(null)} onChanged={changed} onRunAgain={runAgain} onDelete={remove} />
             : <div style={{ padding: 24, fontSize: 13, color: 'var(--faint)' }}>—</div>}
         </div>
       </div>

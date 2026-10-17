@@ -230,6 +230,28 @@ async def patch_item(item_id: str, body: FlagsIn, user: dict = Depends(get_curre
         await db.close()
 
 
+@router.delete("/{item_id}")
+async def delete_item(item_id: str, user: dict = Depends(get_current_user)):
+    """Delete a thread for good: the item, its conversation and its
+    suggestions. Changes already approved stay (and stay undoable)."""
+    import conversations
+    db = await inbox.connect()
+    try:
+        async with db.execute("SELECT session_id FROM inbox_items WHERE id=?", (item_id,)) as c:
+            row = await c.fetchone()
+        if not row:
+            raise HTTPException(404, "No such item")
+        if await inbox._busy(db, row["session_id"]):
+            raise HTTPException(409, "Atlas is still working on this one.")
+        await db.execute("DELETE FROM inbox_proposals WHERE session_id=?", (row["session_id"],))
+        await conversations.delete_session(db, row["session_id"])
+        await db.execute("DELETE FROM inbox_items WHERE id=?", (item_id,))
+        await db.commit()
+        return {"ok": True, "counts": await inbox.counts(db)}
+    finally:
+        await db.close()
+
+
 @router.post("/{item_id}/approve-all")
 async def approve_all(item_id: str, user: dict = Depends(get_current_user)):
     db = await inbox.connect()

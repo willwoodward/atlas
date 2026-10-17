@@ -32,6 +32,7 @@ const MUTATING_TOOLS = new Set([
  * What the chat needs from a tool's JSON result:
  *   undoId — the change was logged and can be undone
  *   card   — something to draw (a breakdown, a day, a list)
+ *   cards  — several, in order (e.g. today's summary: the day and the to-dos)
  *   show   — what to open to see it
  * Undefined fields when the result has none (or isn't JSON).
  */
@@ -39,7 +40,7 @@ export function readToolResult(output) {
   if (!output || output[0] !== '{') return {}
   try {
     const r = JSON.parse(output)
-    return { undoId: r.undo_id || undefined, card: r.card || undefined, show: r.show || undefined }
+    return { undoId: r.undo_id || undefined, card: r.card || undefined, cards: Array.isArray(r.cards) ? r.cards : undefined, show: r.show || undefined }
   } catch {
     return {}   // cut off by the size cap, or not JSON
   }
@@ -206,6 +207,8 @@ export function AssistantProvider({ children }) {
   const [messages, setMessages] = useState(initialMessages)
   const [sessionId, setSessionId] = useState(initialSession)
   const [expiresAt, setExpiresAt] = useState(null)
+  // Chats are temporary unless kept (backend/conversations.py).
+  const [kept, setKept] = useState(false)
   const [busy, setBusy] = useState(false)
   // Messages sent while Atlas was answering, oldest first. Each goes when the
   // turn before it has finished, so replies stay in order. Kept on this device.
@@ -248,7 +251,7 @@ export function AssistantProvider({ children }) {
         ...m,
         tools: (m.tools || []).map(t => typeof t === 'string'
           ? t : { name: t.name, status: t.status, toolUseId: t.toolUseId, memory: t.memory,
-                  undoId: t.undoId, card: t.card, show: t.show }),
+                  undoId: t.undoId, card: t.card, cards: t.cards, show: t.show }),
         research: m.research?.map(({ objective, status, retried }) => ({ objective, status, retried })),
         question: m.question,
         coding: m.coding && { repo: m.coding.repo, branch: m.coding.branch,
@@ -376,6 +379,7 @@ export function AssistantProvider({ children }) {
     if (busyRef.current) return // a send started while we were asking
     setSessionId(body.session?.id ?? null)
     setExpiresAt(body.session?.expires_at ?? null)
+    setKept(!!body.session?.kept)
     if (!body.session) setError(null)
     setMessages(prev => mergeThread(prev, body.messages || []))
     const active = body.active_run
@@ -451,6 +455,7 @@ export function AssistantProvider({ children }) {
     setQueued([])
     setSessionId(null)
     setExpiresAt(null)
+    setKept(false)
     setError(null)
     if (sid) {
       fetch(`${API}/assistant/sessions/${sid}/close`, {
@@ -566,6 +571,43 @@ export function AssistantProvider({ children }) {
   }, [busy, hold, queued, send])
   const unqueue = useCallback(id => setQueued(q => q.filter(x => x.id !== id)), [])
 
+  // ── Keeping chats ──
+  const api = useCallback(async (path, opts = {}) => {
+    const res = await fetch(`${API}/assistant${path}`, {
+      ...opts, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(opts.headers || {}) },
+    })
+    if (!res.ok) {
+      let detail = ''
+      try { detail = (await res.json()).detail } catch { /* not JSON */ }
+      throw new Error(typeof detail === 'string' && detail ? detail : `Error (${res.status})`)
+    }
+    return res.json()
+  }, [token])
+
+  /** Keep the current chat (or stop keeping it — then it's deleted once it's over). */
+  const keep = useCallback(async (on, title) => {
+    const sid = sessionRef.current
+    if (!sid) return
+    setKept(on)
+    try {
+      const r = await api(`/sessions/${sid}`, { method: 'PATCH', body: JSON.stringify({ kept: on, ...(title ? { title } : {}) }) })
+      setKept(r.kept)
+    } catch (e) { setKept(!on); setError(e.message) }
+  }, [api])
+
+  /** Carry on a kept chat: it becomes the current one on every device. */
+  const resume = useCallback(async (id) => {
+    if (busyRef.current) throw new Error('Atlas is still answering here.')
+    const view = await api(`/sessions/${id}/resume`, { method: 'POST' })
+    setSessionId(view.session.id)
+    sessionRef.current = view.session.id
+    setExpiresAt(view.session.expires_at)
+    setKept(true)
+    setQueued([])
+    setError(null)
+    setMessages(mergeThread([], view.messages || []))
+  }, [api])
+
   // ── Voice shortcut ──
   // Each chat on screen registers a toggle; the shortcut goes to the most
   // recent one. With no chat on screen it goes to the corner mic (VoiceDock),
@@ -599,7 +641,8 @@ export function AssistantProvider({ children }) {
   }), [])
 
   return (
-    <Ctx.Provider value={{ messages, busy, error, send, stop, clear, answer, registerVoiceTarget, registerVoiceDock, chatsOnScreen, queued, unqueue }}>
+    <Ctx.Provider value={{ messages, busy, error, send, stop, clear, answer, registerVoiceTarget, registerVoiceDock, chatsOnScreen, queued, unqueue,
+                          sessionId, kept, keep, resume, assistantApi: api }}>
       {children}
     </Ctx.Provider>
   )

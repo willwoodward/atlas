@@ -387,3 +387,38 @@ class TestDeepLinks:
             assert listed["items"] == []
         finally:
             await db.close()
+
+
+class TestDelete:
+    async def test_deleting_a_thread_removes_everything_but_approved_changes(self, client, auth, agent):
+        agent.tools = [("add_todo", {"text": "A", "bucket": "today"}), ("add_todo", {"text": "B", "bucket": "today"})]
+        r = await _routine(client, auth)
+        item = (await client.post(f"/inbox/routines/{r['id']}/run", headers=auth)).json()
+        await _settle()
+        p = (await client.get(f"/inbox/{item['id']}", headers=auth)).json()["proposals"][0]
+        await client.post(f"/inbox/proposals/{p['id']}/approve", headers=auth)
+        out = await client.delete(f"/inbox/{item['id']}", headers=auth)
+        assert out.status_code == 200 and out.json()["counts"]["unread"] == 0
+        assert (await client.get(f"/inbox/{item['id']}", headers=auth)).status_code == 404
+        assert (await client.get("/inbox", headers=auth)).json()["items"] == []
+        db = await inbox.connect()
+        try:
+            for table, col in (("inbox_proposals", "session_id"), ("agent_runs", "session_id"), ("agent_sessions", "id")):
+                async with db.execute(f"SELECT COUNT(*) FROM {table} WHERE {col}=?", (item["session_id"],)) as c:
+                    assert (await c.fetchone())[0] == 0, table
+        finally:
+            await db.close()
+        assert await _todos() == ["A"]   # the approved change stays
+
+    async def test_a_running_thread_cant_be_deleted(self, client, auth, monkeypatch):
+        import routers.assistant as assistant
+
+        async def never(run_id, body, auth):
+            await asyncio.sleep(3600)
+        monkeypatch.setattr(assistant, "_drive_run", never)
+        r = await _routine(client, auth)
+        item = (await client.post(f"/inbox/routines/{r['id']}/run", headers=auth)).json()
+        assert (await client.delete(f"/inbox/{item['id']}", headers=auth)).status_code == 409
+        for t in assistant._tasks.values():
+            t.cancel()
+        assistant._tasks.clear()

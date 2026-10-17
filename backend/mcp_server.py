@@ -655,6 +655,10 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
             row = await c.fetchone()
         outcomes = row["text"] if row else ""
 
+        # Drawn in the chat / inbox: the day as a timeline, the open to-dos as
+        # a checklist — so a morning summary needn't retype either.
+        day = await agent_tools.dispatch("show_day", {"date": today}, db, gcal_events=_gcal_events)
+        todo_card = await agent_cards.dispatch("show_todos", {"bucket": "open"}, db)
         return {
             "date": today,
             "week_outcomes": outcomes,
@@ -664,6 +668,8 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
             },
             "habits": habits,
             "calendar_events": events,
+            "cards": [{**day["card"], "show": day["show"]}, {**todo_card["card"], "show": todo_card["show"]}],
+            "note": "The user sees today's timeline and to-do checklist as cards: don't list them again in text.",
         }
 
     if name == "list_github_notes":

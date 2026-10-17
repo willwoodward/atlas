@@ -161,3 +161,26 @@ export function PageHeader({ title, subtitle, isMobile, stackOnMobile = false, c
     </div>
   )
 }
+
+// ── Delete ───────────────────────────────────────────────────────────────────
+
+/**
+ * A bin button: the lid lifts as you hover (styles in index.css, .bin-button).
+ * Give it an aria-label saying what it deletes. `size` is the button; the
+ * icon scales with it.
+ */
+export const BinButton = forwardRef(function BinButton({ size = 32, title = 'Delete', className = '', style, ...props }, ref) {
+  const icon = Math.round(size * 0.47)
+  return (
+    <IconButton ref={ref} size={size} title={title} {...props} className={`bin-button ${className}`.trim()} style={style}>
+      <svg width={icon} height={icon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <g className="bin-lid">
+          <path d="M4 6.5h16" />
+          <path d="M9.5 6.5V4.5h5v2" />
+        </g>
+        <path d="M6 6.5l1 13a1.5 1.5 0 0 0 1.5 1.4h7a1.5 1.5 0 0 0 1.5-1.4l1-13" />
+        <path d="M10 10.5v6.5M14 10.5v6.5" />
+      </svg>
+    </IconButton>
+  )
+})

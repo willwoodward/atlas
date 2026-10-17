@@ -6,6 +6,7 @@ import { useAssistant } from '../context/AssistantContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { assistantPrompts } from '../data.js'
 import { SettingsButton, MemoryEditChip } from './AssistantMemory.jsx'
+import { KeepButton, PastChatsButton, KeepNote } from './PastChats.jsx'
 import { ToolCards, ActionUndoChip } from './ChatCards.jsx'
 import { voiceSupported } from '../hooks/useVoiceInput.js'
 import { useVoiceConversation } from '../hooks/useVoiceConversation.js'
@@ -476,7 +477,10 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
   if (empty) {
     return (
       <div style={{ position: 'relative', flex: 1, minHeight: 0, height: '100%', width: '100%', maxWidth: COLUMN, margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: `24px ${Math.max(gutter, orbSize < 160 ? 20 : 0)}px`, paddingBottom: isMobile ? 'max(24px, env(safe-area-inset-bottom))' : 24 }}>
-        <SettingsButton style={{ position: 'absolute', top: 6, right: gutter }} />
+        <div style={{ position: 'absolute', top: 6, right: gutter, display: 'flex', gap: 8 }}>
+          <PastChatsButton />
+          <SettingsButton />
+        </div>
         {!panel && <AtlasOrb orbSize={orbSize} ring1={ring1} ring2={ring2} />}
 
         <h1 style={{ margin: '14px 0 6px', fontFamily: 'var(--font-serif)', fontSize: panel ? 24 : 30, fontWeight: 500, color: 'var(--ink)' }}>
@@ -499,6 +503,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
         {composer}
         {voiceError}
         {error && <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--accent)' }}>{error}</div>}
+        <KeepNote />
       </div>
     )
   }
@@ -511,6 +516,8 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
           out. Desktop and mobile get it from the header "+ New chat"; the tablet
           deck has no header, so it keeps this one. */}
       <div style={{ flex: 'none', display: 'flex', justifyContent: 'flex-end', gap: 8, padding: `6px ${gutter}px 0` }}>
+        <KeepButton />
+        <PastChatsButton />
         <SettingsButton />
         {showNewChat && <button onClick={clear}
           style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 8, border: '1px solid var(--bd)', background: 'transparent', color: 'var(--muted)', fontSize: 12, fontFamily: 'inherit', cursor: 'pointer' }}>

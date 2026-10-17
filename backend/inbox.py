@@ -602,6 +602,11 @@ async def scheduler() -> None:
         except Exception:
             log.exception("Routine scheduler tick failed")
         await snapshots.maybe_take()
+        try:
+            import conversations
+            await conversations.purge_now()
+        except Exception:
+            log.exception("Couldn't clear finished chats")
         await asyncio.sleep(TICK_SECONDS)
 
 

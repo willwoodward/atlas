@@ -270,7 +270,7 @@ function TimeAxis({ lo, hi, height }) {
   return (
     <div style={{ position: 'relative', width: 30, flex: 'none', height }}>
       {marks.map(h => (
-        <span key={h} style={{ position: 'absolute', top: ((h - lo) / (hi - lo)) * height - 6, right: 4, fontSize: 10, color: 'var(--faint)', fontVariantNumeric: 'tabular-nums' }}>{h}:00</span>
+        <span key={h} style={{ position: 'absolute', top: Math.max(0, ((h - lo) / (hi - lo)) * height - 6), right: 4, fontSize: 10, color: 'var(--faint)', fontVariantNumeric: 'tabular-nums' }}>{h}:00</span>
       ))}
     </div>
   )
@@ -565,11 +565,12 @@ const CARDS = {
 
 /** The cards a turn's tools produced, in the order they ran. */
 export function ToolCards({ tools = [], onChoose }) {
-  const withCards = tools.filter(t => typeof t === 'object' && t.card && CARDS[t.card.type])
-  if (!withCards.length) return null
-  return withCards.map(t => {
-    const Card = CARDS[t.card.type]
-    return <div key={t.toolUseId} data-card-type={t.card.type}><Card card={t.card} show={t.show} onChoose={onChoose} /></div>
+  const all = tools.filter(t => typeof t === 'object').flatMap(t =>
+    [t.card, ...(t.cards || [])].filter(c => c && CARDS[c.type]).map((card, i) => ({ key: `${t.toolUseId}-${i}`, card, show: t.cards ? card.show : t.show })))
+  if (!all.length) return null
+  return all.map(({ key, card, show }) => {
+    const Card = CARDS[card.type]
+    return <div key={key} data-card-type={card.type}><Card card={card} show={show} onChoose={onChoose} /></div>
   })
 }
 

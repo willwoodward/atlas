@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { reduceMessage } from '../AssistantContext.jsx'
+import { reduceMessage, readToolResult } from '../AssistantContext.jsx'
 
 /**
  * reduceMessage is the single implementation shared by the live SSE stream and
@@ -263,5 +263,13 @@ describe('live and replay agree', () => {
     expect(replayed.content).toBe(live.content)
     expect(replayed.tools).toEqual(live.tools)
     expect(replayed.coding).toEqual(live.coding)
+  })
+})
+
+describe('readToolResult', () => {
+  it('picks up several cards from one tool', () => {
+    const out = readToolResult(JSON.stringify({ cards: [{ type: 'day' }, { type: 'todos' }], undo_id: 'u1' }))
+    expect(out.cards.map(c => c.type)).toEqual(['day', 'todos'])
+    expect(out.undoId).toBe('u1')
   })
 })

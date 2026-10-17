@@ -212,3 +212,18 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 .card-row:hover { background: var(--surface-2); }
 .card-slot { transition: filter .12s; }
 .card-slot:not(:disabled):hover { filter: brightness(.94); }
+
+/* BinButton (ui.jsx): the lid lifts and tips open on hover. */
+.bin-button { transition: color .15s, background .15s; }
+/* !important: IconButton sets its colours inline. */
+.bin-button:not(:disabled):hover, .bin-button:focus-visible { color: var(--accent) !important; background: var(--accent-soft) !important; }
+.bin-button .bin-lid { transform-box: fill-box; transform-origin: 100% 100%; transition: transform .22s cubic-bezier(.3, 1.5, .5, 1); }
+.bin-button:not(:disabled):hover .bin-lid, .bin-button:focus-visible .bin-lid { transform: translateY(-2px) rotate(-16deg); }
+@media (prefers-reduced-motion: reduce) {
+  .bin-button .bin-lid { transition: none; }
+}
+/* In the inbox list the bin shows on hover (always on touch screens). */
+@media (hover: hover) {
+  .inbox-row .inbox-row-bin { opacity: 0; transition: opacity .15s, color .15s, background .15s; }
+  .inbox-row:hover .inbox-row-bin, .inbox-row .inbox-row-bin:focus-visible { opacity: 1; }
+}

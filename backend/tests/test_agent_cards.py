@@ -195,3 +195,10 @@ class TestSnapshots:
         card = (await call(db, "net_worth_trend", months=2))["card"]
         assert [p["value"] for p in card["points"]] == [777, 1000]
         assert card["points"][0]["recorded"] and "1 month recorded" in card["note"]
+
+
+async def test_todays_summary_draws_the_day_and_the_todos(db):
+    await call(db, "add_todo", text="Renew passport", bucket="today")
+    r = await call(db, "get_today_summary")
+    assert [c["type"] for c in r["cards"]] == ["day", "todos"]
+    assert r["cards"][1]["rows"][0]["text"] == "Renew passport" and r["cards"][0]["show"]["kind"] == "calendar"

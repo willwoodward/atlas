@@ -442,6 +442,8 @@ async def init_db():
             "ALTER TABLE agent_sessions ADD COLUMN memory_version INTEGER",
             "ALTER TABLE agent_sessions ADD COLUMN prompt_version INTEGER",
             # chat: the assistant chat | routine: an inbox thread
+            # Chats are temporary unless kept (conversations.py).
+            "ALTER TABLE agent_sessions ADD COLUMN kept INTEGER NOT NULL DEFAULT 0",
             # A routine's test run: suggestions only, no notification.
             "ALTER TABLE inbox_items ADD COLUMN test INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE agent_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'",

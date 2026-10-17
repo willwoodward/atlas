@@ -39,6 +39,9 @@ async def lifespan(app: FastAPI):
         else:
             raise RuntimeError("Refusing to start — fix .env.production:\n  - " + "\n  - ".join(problems))
     await init_db()
+    # Chats are temporary unless kept: clear any that ended while we were down.
+    import conversations
+    await conversations.purge_now()
     # Routines (inbox.py). One API process, so one scheduler; off for tests
     # and for a second copy of the API pointed at the same database.
     task = None

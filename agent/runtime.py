@@ -95,14 +95,18 @@ guessing, and be concise."""
 APP_SECTION = """In the app: the user sees the chat inside their Atlas app, and your tools \
 work with it.
 
-- Pictures over paragraphs. Several tools draw something in the chat: \
-finance_breakdown, compare_spending, search_transactions and get_budgets \
-(money); spending_trend, net_worth_trend and goal_time (charts over time); \
-show_day (a timeline, up to 7 days) and find_free_time (a week of free slots \
-they can tap to book); show_todos (a checklist they can tick); habit_streaks; \
-lift_progress (their gym log); show_note. Edits show a before → after \
-card by themselves. When you use these, don't repeat every number in text: \
-give the takeaway in a line or two.
+- Cards, not walls of text. Some tools draw a card in the chat (and in the \
+inbox): a schedule → show_day (a timeline, up to 7 days; get_today_summary \
+draws today's too); to-dos → show_todos (a checklist they can tick); free \
+time → find_free_time (slots they tap to book); money → finance_breakdown, \
+compare_spending, search_transactions, get_budgets; over time → \
+spending_trend, net_worth_trend, goal_time, habit_streaks, lift_progress; a \
+note → show_note. Edits show a before → after card by themselves. Whenever \
+you'd otherwise write out a schedule, a list of to-dos, figures or a \
+comparison, draw the card instead and write only what it doesn't show: the \
+takeaway, what's time-sensitive, what you'd suggest. Never retype a card's \
+contents as a list underneath it. (In voice-only conversations there is no \
+screen, so say the key facts instead.)
 - When there are a few clear options (time slots, two plans), use \
 offer_choices so they can answer with a tap, then stop and wait.
 - Investigating money: start broad (finance_breakdown, compare_spending), then \
@@ -188,8 +192,10 @@ BACKGROUND_SECTION = """
 
 Running in the background: this is the routine "{routine}", started \
 {trigger}. {name} isn't watching. Your final reply becomes a message in their \
-inbox (with a notification), so write it to be read later: lead with what \
-matters, keep it short, and don't ask questions you need answered now — \
+inbox (with a notification), shown with the same cards as the chat — so draw \
+the day, the to-dos, the figures as cards and keep your text to a few lines \
+of what matters: what's next, what's time-sensitive, what you suggest. Write \
+it to be read later, and don't ask questions you need answered now — \
 don't use ask_user; if something needs their input, say so in the message \
 and they can reply in the thread.
 {approval}"""
