@@ -1,7 +1,8 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import { localDateStr } from '../lib/week.js'
+import { localDateStr, parseLocalDate, addDays } from '../lib/week.js'
 import { buildAuthUrl, fetchEvents, toCalendarEvents, insertGcalEvent, deleteGcalEvent } from '../integrations/googleCalendar.js'
 import { useAuth } from './AuthContext.jsx'
+import { useRefresh } from './RefreshContext.jsx'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -134,6 +135,35 @@ export function IntegrationsProvider({ children }) {
       if (ok.length) setGcalWeeks(prev => ({ ...Object.fromEntries(ok), ...prev }))
     } catch { /* not connected any more — the history just shows local events */ }
   }, [gcalConnected, getAccessToken])
+
+  // The assistant can change Google Calendar through its own tools. When it
+  // does, the app signals a refresh; reload the weeks we have cached so the
+  // calendar on screen shows the change without a page reload. Newest weeks
+  // first, capped so a long session doesn't refetch months of history.
+  const { tick } = useRefresh()
+  const firstTick = useRef(true)
+  useEffect(() => {
+    if (firstTick.current) { firstTick.current = false; return }
+    if (!gcalConnected) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const accessToken = await getAccessToken()
+        const keys = Object.keys(weeksRef.current).sort().reverse().slice(0, 8)
+        const loaded = await Promise.all(keys.map(async key => {
+          const start = parseLocalDate(key)
+          const end = addDays(start, 6); end.setHours(23, 59, 59, 999)
+          try { return [key, toCalendarEvents((await fetchEvents(accessToken, start, end)).items || [])] } catch { return null }
+        }))
+        const ok = loaded.filter(Boolean)
+        if (!cancelled && ok.length) {
+          setGcalWeeks(prev => ({ ...prev, ...Object.fromEntries(ok) }))
+          setGcalMutatedAt(Date.now())
+        }
+      } catch { /* token gone — the next normal load will surface it */ }
+    })()
+    return () => { cancelled = true }
+  }, [tick]) // eslint-disable-line
 
   // Every consumer filters by date, so the union of cached weeks works as-is.
   // A sleep event's wake-up hint can land in the next week's cache too — dedupe.

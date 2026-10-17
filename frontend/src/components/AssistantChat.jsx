@@ -7,7 +7,8 @@ import { useIsMobile } from '../hooks/useIsMobile.js'
 import { assistantPrompts } from '../data.js'
 import { SettingsButton, MemoryEditChip } from './AssistantMemory.jsx'
 import { useVoiceInput, voiceSupported } from '../hooks/useVoiceInput.js'
-import { useVoiceSettings, getVoiceSettings, CONVERSATION_SILENCE } from '../lib/voiceSettings.js'
+import { useVoiceSettings, getVoiceSettings, CONVERSATION_SILENCE, CONVERSATION_WAIT } from '../lib/voiceSettings.js'
+import { checkSignOff } from '../lib/voiceSignoff.js'
 import { useKeybinds } from '../context/KeybindsContext.jsx'
 import { displayCombo } from '../lib/keybinds.js'
 
@@ -366,7 +367,7 @@ const COLUMN = 720
 
 export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240, showNewChat = true, panel = false }) {
   // Thread state lives in AssistantContext so it survives navigating away and back.
-  const { messages, busy, error, send, stop, clear, answer, registerVoiceTarget } = useAssistant()
+  const { messages, busy, error, send, stop, clear, answer, registerVoiceTarget, queued, unqueue } = useAssistant()
   const { autoSend } = useVoiceSettings()
   const { bindings } = useKeybinds() || {}
   // The mobile shell renders the assistant with no padding (it was built for the
@@ -409,23 +410,26 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
   // misheard word can be fixed first. Auto-send waits if Atlas is mid-answer.
   const [live, setLive] = useState('')
   const joinText = (a, b) => (a.trim() && b ? a.trimEnd() + ' ' : a) + b
-  // Conversation mode ("Keep listening"): after each voice message is sent
-  // and Atlas has answered, listening starts again by itself. It always sends
-  // on a pause. It ends on Cancel / Esc / the shortcut / "End", or when
-  // nothing is heard, an error comes back, or the chat goes away.
+  // Conversation mode ("Keep listening"): each pause sends what you said and
+  // listening starts again straight away, so you can line up the next thing
+  // while Atlas is still answering — it's queued and sent when that turn ends.
+  // It waits up to CONVERSATION_WAIT for you to start talking (thinking time),
+  // and ends when you sign off ("that's all, thanks"), on Cancel / Esc / the
+  // shortcut / "End", after that long in silence, or when the chat goes away.
   const [conversing, setConversing] = useState(false)
-  const awaitingReply = useRef(false)
-  const sendsItself = autoSend || conversing
+  const listenAgain = useRef(false)
+  const conversationOpts = () => ({ silenceSeconds: getVoiceSettings().silenceSeconds || CONVERSATION_SILENCE, nothingSeconds: CONVERSATION_WAIT })
 
   const voice = useVoiceInput(text => {
     setLive('')
-    if (sendsItself && text && !busy) {
-      submit(joinText(input, text))
-      if (conversing) awaitingReply.current = true
+    if (conversing) {
+      const { end, rest } = checkSignOff(joinText(input, text))
+      if (rest) submit(rest)            // sends now, or queues behind the current turn
+      if (end) { setConversing(false); return }
+      listenAgain.current = true
       return
     }
-    // A cough or a blank: in conversation mode just listen again.
-    if (conversing && !text) { awaitingReply.current = true; return }
+    if (autoSend && text) { submit(joinText(input, text)); return }
     setInput(prev => joinText(prev, text))
     requestAnimationFrame(() => { autosize(); const el = taRef.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length) } })
   }, text => { setLive(text); requestAnimationFrame(autosize) }, {
@@ -433,21 +437,19 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
   })
 
   const beginVoice = () => {
-    const { keepListening, silenceSeconds } = getVoiceSettings()
+    const { keepListening } = getVoiceSettings()
     setConversing(keepListening)
-    awaitingReply.current = false
-    voice.start(keepListening ? { silenceSeconds: silenceSeconds || CONVERSATION_SILENCE } : {})
+    listenAgain.current = false
+    voice.start(keepListening ? conversationOpts() : {})
   }
-  const endVoice = () => { setConversing(false); awaitingReply.current = false; voice.cancel() }
+  const endVoice = () => { setConversing(false); listenAgain.current = false; voice.cancel() }
 
-  // Atlas has finished answering: listen for the next thing.
+  // The last message is away: listen for the next one.
   useEffect(() => {
-    if (!conversing || busy || voice.state !== 'idle' || !awaitingReply.current) return
-    awaitingReply.current = false
-    if (error) { setConversing(false); return }
-    const { silenceSeconds } = getVoiceSettings()
-    voice.start({ silenceSeconds: silenceSeconds || CONVERSATION_SILENCE })
-  }, [conversing, busy, voice.state, error]) // eslint-disable-line
+    if (!conversing || voice.state !== 'idle' || !listenAgain.current) return
+    listenAgain.current = false
+    voice.start(conversationOpts())
+  }, [conversing, voice.state]) // eslint-disable-line
 
   const canVoice = voiceSupported()
   // The voice shortcut: start, or end — in conversation mode it ends the
@@ -501,7 +503,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
         <button onClick={endVoice} aria-label="Cancel recording" title="Cancel (Esc)"
           style={{ alignSelf: 'center', background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12.5, fontFamily: 'inherit', cursor: 'pointer', padding: 4, flex: 'none' }}>Cancel</button>
       )}
-      {canVoice && !busy && (
+      {canVoice && (
         <button onClick={() => (listening ? voice.stop() : beginVoice())} disabled={voice.state === 'transcribing'}
           aria-label={listening ? 'Stop and transcribe' : 'Speak'}
           title={(listening ? 'Stop and transcribe' : 'Speak') + (bindings?.voice ? ` (${displayCombo(bindings.voice)})` : '')}
@@ -512,11 +514,14 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
         </button>
       )}
       {!listening && <button
-        onClick={() => (busy ? stop() : submit(input))}
+        // While Atlas is answering: with something typed it queues it, otherwise it stops the answer.
+        onClick={() => (input.trim() ? submit(input) : busy ? stop() : null)}
         disabled={!busy && !input.trim()}
+        aria-label={input.trim() ? (busy ? 'Queue message' : 'Send') : busy ? 'Stop' : 'Send'}
+        title={input.trim() && busy ? 'Send when Atlas finishes' : undefined}
         style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 10, border: 'none', background: busy || input.trim() ? 'var(--accent)' : 'var(--surface-3)', color: busy || input.trim() ? '#fff' : 'var(--faint)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: busy || input.trim() ? 'pointer' : 'default', transition: 'all .12s' }}
       >
-        {busy
+        {busy && !input.trim()
           ? <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2" /></svg>
           : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4l16 8-16 8 3-8z" /></svg>}
       </button>}
@@ -527,7 +532,10 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
   const voiceBanner = conversing && (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', maxWidth: 560, marginBottom: 6, fontSize: 12.5, color: 'var(--mid)' }}>
       <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flex: 'none' }} />
-      <span style={{ flex: 1 }}>{listening ? 'Voice mode · listening' : busy ? 'Voice mode · Atlas is answering' : 'Voice mode'}</span>
+      <span style={{ flex: 1 }}>
+        {['Voice mode', listening ? 'listening' : voice.state === 'transcribing' ? 'transcribing' : null, busy ? 'Atlas is answering' : null,
+          queued.length ? `${queued.length} queued` : null].filter(Boolean).join(' · ')}
+      </span>
       <button onClick={endVoice} style={{ fontSize: 12, padding: '2px 9px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', fontFamily: 'inherit', cursor: 'pointer' }}>End</button>
     </div>
   )
@@ -597,6 +605,19 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
               : m.error ? <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>{m.error}</div>
               : busy && i === messages.length - 1 && (m.tools?.length ?? 0) === 0 && !m.research?.length && !m.question && !m.coding &&
                   <span style={{ fontSize: 13.5, color: 'var(--muted)' }}>Thinking…</span>}
+          </div>
+        ))}
+        {/* Sent while Atlas was answering: they go in order as each turn ends. */}
+        {queued.map(q => (
+          <div key={q.id} style={{ alignSelf: 'flex-end', maxWidth: '80%', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+            <div style={{ padding: '10px 15px', borderRadius: 14, background: 'var(--surface)', border: '1px dashed var(--bd-xl)', fontSize: 14, lineHeight: 1.55, whiteSpace: 'pre-wrap', color: 'var(--mid)' }}>
+              {q.text}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: 'var(--faint)' }}>
+              Queued · sends when Atlas finishes
+              <button onClick={() => unqueue(q.id)} aria-label="Remove from queue"
+                style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11.5, fontFamily: 'inherit', padding: 0, textDecoration: 'underline' }}>Remove</button>
+            </div>
           </div>
         ))}
         {error && <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>{error}</div>}

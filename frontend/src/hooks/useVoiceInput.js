@@ -56,7 +56,7 @@ function livePreview(onPartial) {
  * tracked as it goes (quick to drop, slow to rise, so talking doesn't raise
  * it). `heard()` lets other signals — words from the live preview — count too.
  */
-function silenceWatch(stream, seconds, onSilence, onNothing) {
+function silenceWatch(stream, seconds, onSilence, onNothing, nothingSeconds = Math.max(8, seconds + 5)) {
   const AC = window.AudioContext || window.webkitAudioContext
   let ctx, analyser
   try {
@@ -80,7 +80,7 @@ function silenceWatch(stream, seconds, onSilence, onNothing) {
     const now = Date.now()
     if (rms > Math.max(0.012, floor * 3) && now - began > 250) { heard = true; lastVoice = now }
     if (heard && now - lastVoice > seconds * 1000) { done = true; onSilence() }
-    else if (!heard && now - began > Math.max(8, seconds + 5) * 1000) { done = true; onNothing() }
+    else if (!heard && now - began > nothingSeconds * 1000) { done = true; onNothing() }
   }, 100)
   return {
     heard() { heard = true; lastVoice = Date.now() },
@@ -152,7 +152,8 @@ export function useVoiceInput(onText, onPartial, { onNothingHeard } = {}) {
     }
   }, [token])
 
-  // `opts.silenceSeconds` overrides the setting for this recording.
+  // `opts.silenceSeconds` overrides the setting for this recording;
+  // `opts.nothingSeconds` is how long to wait for any speech at all.
   const start = useCallback(async (opts = {}) => {
     if (rec.current || state !== 'idle') return
     setError(null)
@@ -190,7 +191,8 @@ export function useVoiceInput(onText, onPartial, { onNothingHeard } = {}) {
           if (recorder.state === 'recording') recorder.stop()
           setError("Didn't hear anything, so it stopped listening.")
           onNothingRef.current?.()
-        })
+        },
+        opts.nothingSeconds)
     }
     setSeconds(0)
     setState('recording')

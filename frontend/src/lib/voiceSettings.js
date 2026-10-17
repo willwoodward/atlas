@@ -11,6 +11,9 @@ const KEY = 'atlas:voice-settings'
 export const VOICE_DEFAULTS = { silenceSeconds: 3, autoSend: true, keepListening: false }
 // A pause this long ends a turn in conversation mode when "stop when I pause" is off.
 export const CONVERSATION_SILENCE = 3
+// In conversation mode, how long to wait for you to start speaking before
+// giving up — long enough to think.
+export const CONVERSATION_WAIT = 120
 
 let current = (() => {
   try { return { ...VOICE_DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}') } } catch { return { ...VOICE_DEFAULTS } }

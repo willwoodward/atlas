@@ -185,6 +185,9 @@ export function AssistantProvider({ children }) {
   const [sessionId, setSessionId] = useState(initialSession)
   const [expiresAt, setExpiresAt] = useState(null)
   const [busy, setBusy] = useState(false)
+  // Messages sent while Atlas was answering, oldest first. Each goes when the
+  // turn before it has finished, so replies stay in order. Kept on this device.
+  const [queued, setQueued] = useState([])
   const [error, setError] = useState(null)
   const abortRef = useRef(null)
   const runRef = useRef(null)
@@ -232,6 +235,7 @@ export function AssistantProvider({ children }) {
     setBusyBoth(true)
 
     let touchedData = false
+    const writes = new Set()   // toolUseIds of tools that change data
 
     try {
       const res = await fetch(`${API}/assistant/runs/${runId}/events?after=${after}`, {
@@ -260,7 +264,9 @@ export function AssistantProvider({ children }) {
 
           if (ev.type === 'done') break outer
           if (ev.type === 'error') { setError(ev.message); continue }
-          if (ev.type === 'tool' && MUTATING_TOOLS.has(ev.name)) touchedData = true
+          if (ev.type === 'tool' && MUTATING_TOOLS.has(ev.name)) { touchedData = true; writes.add(ev.toolUseId) }
+          // Show each change as soon as it lands, not only when the reply ends.
+          if (ev.type === 'tool_result' && writes.has(ev.toolUseId) && ev.status !== 'error') refresh()
           patchLast(m => m.runId === runId || !m.runId ? reduceMessage(m, ev) : m)
         }
       }
@@ -365,6 +371,7 @@ export function AssistantProvider({ children }) {
     abortRef.current?.abort()
     const sid = sessionRef.current
     setMessages([])
+    setQueued([])
     setSessionId(null)
     setExpiresAt(null)
     setError(null)
@@ -376,6 +383,8 @@ export function AssistantProvider({ children }) {
   }, [token])
 
   const stop = useCallback(async () => {
+    // Stopping means stop: don't carry straight on with what was queued.
+    setQueued([])
     const runId = runRef.current
     abortRef.current?.abort()
     if (runId) {
@@ -409,7 +418,12 @@ export function AssistantProvider({ children }) {
 
   const send = useCallback(async (text) => {
     const prompt = (text || '').trim()
-    if (!prompt || busyRef.current) return
+    if (!prompt) return
+    // Atlas is mid-answer: hold this one and send it when the turn finishes.
+    if (busyRef.current) {
+      setQueued(q => [...q, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, text: prompt }])
+      return
+    }
 
     // Only the new message goes up; the server holds the rest of the session.
     setMessages(prev => [...prev, { role: 'user', content: prompt }, { role: 'assistant', content: '', tools: [] }])
@@ -443,6 +457,15 @@ export function AssistantProvider({ children }) {
     sync()
   }, [token, follow, sync, setBusyBoth])
 
+  // Send what was queued, one at a time, as each turn finishes.
+  useEffect(() => {
+    if (busy || queued.length === 0) return
+    const [next, ...rest] = queued
+    setQueued(rest)
+    send(next.text)
+  }, [busy, queued, send])
+  const unqueue = useCallback(id => setQueued(q => q.filter(x => x.id !== id)), [])
+
   // ── Voice shortcut ──
   // Each chat on screen registers a toggle; the shortcut goes to the most
   // recent one. With no chat on screen, the layout is asked to show one (the
@@ -464,7 +487,7 @@ export function AssistantProvider({ children }) {
   }), [])
 
   return (
-    <Ctx.Provider value={{ messages, busy, error, send, stop, clear, answer, registerVoiceTarget }}>
+    <Ctx.Provider value={{ messages, busy, error, send, stop, clear, answer, registerVoiceTarget, queued, unqueue }}>
       {children}
     </Ctx.Provider>
   )
