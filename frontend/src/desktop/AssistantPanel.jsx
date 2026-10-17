@@ -12,9 +12,28 @@ const loadWidth = () => {
   try { return Math.min(MAX, Math.max(MIN, Number(localStorage.getItem(WIDTH_KEY)) || 420)) } catch { return 420 }
 }
 
-export default function AssistantPanel({ onClose, onExpand }) {
+const DURATION = 240
+const EASE = 'cubic-bezier(.32,.72,0,1)'
+const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
+// `open` false plays the exit, then calls onExited so the layout can unmount it.
+export default function AssistantPanel({ open = true, onExited, onClose, onExpand }) {
   const [width, setWidth] = useState(loadWidth)
+  const [dragging, setDragging] = useState(false)
+  const [shown, setShown] = useState(false)
   const drag = useRef(null)
+
+  // Enter on the frame after mounting (so there's a start state to animate
+  // from); exit when `open` goes false.
+  useEffect(() => {
+    if (open) {
+      const id = requestAnimationFrame(() => requestAnimationFrame(() => setShown(true)))
+      return () => cancelAnimationFrame(id)
+    }
+    setShown(false)
+    const t = setTimeout(() => onExited?.(), reducedMotion() ? 0 : DURATION)
+    return () => clearTimeout(t)
+  }, [open]) // eslint-disable-line
 
   useEffect(() => {
     try { localStorage.setItem(WIDTH_KEY, String(width)) } catch { /* not kept */ }
@@ -24,6 +43,7 @@ export default function AssistantPanel({ onClose, onExpand }) {
     e.preventDefault()
     e.currentTarget.setPointerCapture(e.pointerId)
     drag.current = { x: e.clientX, w: width }
+    setDragging(true)
   }
   const onPointerMove = e => {
     if (!drag.current) return
@@ -31,19 +51,25 @@ export default function AssistantPanel({ onClose, onExpand }) {
     const max = Math.min(MAX, window.innerWidth - 236 - 480)
     setWidth(Math.min(Math.max(MIN, drag.current.w + (drag.current.x - e.clientX)), Math.max(MIN, max)))
   }
-  const onPointerUp = () => { drag.current = null }
+  const onPointerUp = () => { drag.current = null; setDragging(false) }
 
   const iconBtn = { background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 5, borderRadius: 7, display: 'flex' }
 
   return (
-    <aside aria-label="Assistant" style={{ position: 'relative', width, flex: 'none', height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)', borderLeft: '1px solid var(--bd)' }}>
+    // The outer box grows from 0 so the page narrows smoothly to make room;
+    // the panel inside keeps its full width and slides in from the right.
+    <div style={{ width: shown ? width : 0, flex: 'none', height: '100%', overflow: 'hidden', position: 'relative',
+                  transition: dragging || reducedMotion() ? 'none' : `width ${DURATION}ms ${EASE}` }}>
+    <aside aria-label="Assistant" style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width, display: 'flex', flexDirection: 'column', background: 'var(--bg)', borderLeft: '1px solid var(--bd)',
+                  transform: shown ? 'none' : 'translateX(28px)', opacity: shown ? 1 : 0,
+                  transition: dragging || reducedMotion() ? 'none' : `transform ${DURATION}ms ${EASE}, opacity ${DURATION * 0.8}ms ease` }}>
       <div role="separator" aria-orientation="vertical" aria-label="Resize assistant panel" title="Drag to resize"
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
         onDoubleClick={() => setWidth(420)}
-        style={{ position: 'absolute', left: -4, top: 0, bottom: 0, width: 8, cursor: 'col-resize', zIndex: 3, touchAction: 'none' }} />
+        style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 8, cursor: 'col-resize', zIndex: 3, touchAction: 'none' }} />
 
       <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 4, padding: '14px 12px 10px 16px', borderBottom: '1px solid var(--bd-sm)' }}>
-        <span style={{ flex: 1, fontFamily: "'Newsreader', serif", fontSize: 18, fontWeight: 600, color: 'var(--ink)' }}>Assistant</span>
+        <span style={{ flex: 1, fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 600, color: 'var(--ink)' }}>Assistant</span>
         <button onClick={onExpand} aria-label="Open full page" title="Open full page" style={iconBtn}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
         </button>
@@ -56,5 +82,6 @@ export default function AssistantPanel({ onClose, onExpand }) {
         <AssistantChat panel showNewChat />
       </div>
     </aside>
+    </div>
   )
 }

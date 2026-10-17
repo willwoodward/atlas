@@ -1,3 +1,5 @@
+import { PageHeader, card, eyebrow } from '../components/ui.jsx'
+import { useFocusRequest, flash } from '../lib/focus.js'
 import { useState, useRef } from 'react'
 import { useFinances } from '../context/FinancesContext.jsx'
 import GoalRing from '../components/GoalRing.jsx'
@@ -78,7 +80,7 @@ function Modal({ title, onClose, children }) {
 }
 
 function PrimaryBtn({ children, ...props }) {
-  return <button {...props} style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: '#c15f3c', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', ...props.style }}>{children}</button>
+  return <button {...props} style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', ...props.style }}>{children}</button>
 }
 function GhostBtn({ children, ...props }) {
   return <button {...props} style={{ padding: '10px 20px', borderRadius: 10, border: '1px solid var(--bd-xl)', background: 'transparent', color: 'var(--mid)', fontSize: 14, cursor: 'pointer', fontFamily: 'inherit', ...props.style }}>{children}</button>
@@ -156,7 +158,7 @@ function PotPanel({ pot, onClose }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
           <GoalRing pct={pot.pct} color={pot.color} size={72} />
           <div>
-            <div style={{ fontFamily: "'Newsreader', serif", fontSize: 28, fontWeight: 500, color: pot.color }}>{pfmt(pot.saved)}</div>
+            <div style={{ fontFamily: 'var(--font-serif)', fontSize: 28, fontWeight: 500, color: pot.color }}>{pfmt(pot.saved)}</div>
             {pot.targetAmount > 0 && <div style={{ fontSize: 13, color: 'var(--muted)' }}>of {pfmt(pot.targetAmount)} target</div>}
             {pot.notes && <div style={{ marginTop: 6, fontSize: 13, color: 'var(--mid)', fontStyle: 'italic' }}>{pot.notes}</div>}
           </div>
@@ -164,7 +166,7 @@ function PotPanel({ pot, onClose }) {
 
         {/* Sub-goals */}
         <div>
-          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 10 }}>Sub-goals {totalSubTarget > 0 && <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>· {pfmt(totalSubTarget)} total</span>}</div>
+          <div style={{ ...eyebrow, fontSize: 12, marginBottom: 10 }}>Sub-goals {totalSubTarget > 0 && <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>· {pfmt(totalSubTarget)} total</span>}</div>
           {(pot.subGoals || []).map(sg => (
             <div key={sg.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '1px solid var(--bd-sm)' }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: pot.color, flexShrink: 0 }} />
@@ -182,7 +184,7 @@ function PotPanel({ pot, onClose }) {
 
         {/* Log deposit */}
         <div>
-          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 10 }}>Log deposit</div>
+          <div style={{ ...eyebrow, fontSize: 12, marginBottom: 10 }}>Log deposit</div>
           <form onSubmit={handleDeposit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <input type="number" min="0.01" step="0.01" value={depAmt} onChange={e => setDepAmt(e.target.value)} placeholder={`Amount (${sym})`} required style={{ ...inp, flex: '1 1 130px' }} />
@@ -201,7 +203,7 @@ function PotPanel({ pot, onClose }) {
                 <div key={dep.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: '1px solid var(--bd-xs)' }}>
                   <span style={{ flex: 1, fontSize: 13, color: 'var(--mid)' }}>{dep.note || '—'}</span>
                   <span style={{ fontSize: 11, color: 'var(--faint)' }}>{dep.date}</span>
-                  <span style={{ fontFamily: "'Newsreader', serif", fontSize: 14, fontWeight: 600, color: '#6f8168' }}>+{pfmt(dep.amount)}</span>
+                  <span style={{ fontFamily: 'var(--font-serif)', fontSize: 14, fontWeight: 600, color: 'var(--sage)' }}>+{pfmt(dep.amount)}</span>
                   <button onClick={() => removeDeposit(pot.id, dep.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 15, lineHeight: 1, padding: '0 2px' }}>×</button>
                 </div>
               ))}
@@ -210,7 +212,7 @@ function PotPanel({ pot, onClose }) {
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 4, borderTop: '1px solid var(--bd-sm)' }}>
-          <button onClick={() => { if (window.confirm(`Delete "${pot.name}"?`)) { removePot(pot.id); onClose() } }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#c15f3c', fontSize: 13 }}>Delete pot</button>
+          <button onClick={() => { if (window.confirm(`Delete "${pot.name}"?`)) { removePot(pot.id); onClose() } }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 13 }}>Delete pot</button>
         </div>
       </div>
     </Modal>
@@ -241,7 +243,7 @@ function AddTransactionModal({ onClose }) {
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'flex', gap: 8 }}>
           {['expense','income'].map(t => (
-            <button key={t} type="button" onClick={() => setType(t)} style={{ flex: 1, padding: '8px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, background: type === t ? (t === 'income' ? '#6f8168' : '#c15f3c') : 'var(--surface-3)', color: type === t ? '#fff' : 'var(--mid)', transition: 'all .12s' }}>
+            <button key={t} type="button" onClick={() => setType(t)} style={{ flex: 1, padding: '8px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, background: type === t ? (t === 'income' ? 'var(--sage)' : 'var(--accent)') : 'var(--surface-3)', color: type === t ? '#fff' : 'var(--mid)', transition: 'all .12s' }}>
               {t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
           ))}
@@ -361,8 +363,8 @@ function CategoryModal({ txn, onClose }) {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: -4 }}>
             {known.slice(0, 12).map(c => (
               <button key={c} type="button" onClick={() => setCategory(c)}
-                style={{ padding: '4px 10px', borderRadius: 99, border: `1px solid ${category === c ? '#c15f3c' : 'var(--bd-xl)'}`, background: category === c ? 'rgba(193,95,60,.1)' : 'transparent',
-                  color: category === c ? '#c15f3c' : 'var(--mid)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>{c}</button>
+                style={{ padding: '4px 10px', borderRadius: 99, border: `1px solid ${category === c ? 'var(--accent)' : 'var(--bd-xl)'}`, background: category === c ? 'rgba(193,95,60,.1)' : 'transparent',
+                  color: category === c ? 'var(--accent)' : 'var(--mid)', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>{c}</button>
             ))}
           </div>
         )}
@@ -429,7 +431,7 @@ function EditAccountModal({ account, onClose }) {
           </div>
         </div>
         {currency !== account.currency && txnCount > 0 && (
-          <div style={{ fontSize: 12, color: '#b08a3e', lineHeight: 1.5 }}>
+          <div style={{ fontSize: 12, color: 'var(--gold)', lineHeight: 1.5 }}>
             The {txnCount} transaction{txnCount !== 1 ? 's' : ''} already in this account keep the currency they were recorded in.
           </div>
         )}
@@ -441,7 +443,7 @@ function EditAccountModal({ account, onClose }) {
         )}
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4 }}>
           <button type="button" onClick={() => { if (window.confirm(`Remove "${account.name}"?`)) { removeAccount(account.id); onClose() } }}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#c15f3c', fontSize: 13, fontFamily: 'inherit', padding: 0, marginRight: 'auto' }}>
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 13, fontFamily: 'inherit', padding: 0, marginRight: 'auto' }}>
             Remove account
           </button>
           <GhostBtn type="button" onClick={onClose}>Cancel</GhostBtn>
@@ -516,7 +518,7 @@ function ImportModal({ onClose }) {
         <div style={{ fontSize: 14, color: 'var(--mid)', lineHeight: 1.6 }}>
           Added <strong style={{ color: 'var(--ink)' }}>{done.inserted}</strong> transaction{done.inserted !== 1 ? 's' : ''}.
           {done.auto_categorised > 0 && <> Auto-categorised <strong style={{ color: 'var(--ink)' }}>{done.auto_categorised}</strong> (marked ✦ — click one to correct it).</>}
-          {done.auto_error && <div style={{ marginTop: 8, color: '#c15f3c' }}>Couldn't auto-categorise: {done.auto_error}. You can retry from the category charts.</div>}
+          {done.auto_error && <div style={{ marginTop: 8, color: 'var(--accent)' }}>Couldn't auto-categorise: {done.auto_error}. You can retry from the category charts.</div>}
           {done.skipped > 0 && <> Skipped {done.skipped} already imported.</>}
           {done.balance_updated && (
             <div style={{ marginTop: 8 }}>
@@ -573,12 +575,12 @@ function ImportModal({ onClose }) {
             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {fileName || 'Choose a CSV export…'}
             </span>
-            <span style={{ fontSize: 12, fontWeight: 600, color: '#c15f3c' }}>Browse</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>Browse</span>
           </label>
         </Field>
 
         {error && (
-          <div style={{ fontSize: 13, color: '#c15f3c', background: 'var(--surface-2)', borderRadius: 9, padding: '10px 12px' }}>{error}</div>
+          <div style={{ fontSize: 13, color: 'var(--accent)', background: 'var(--surface-2)', borderRadius: 9, padding: '10px 12px' }}>{error}</div>
         )}
 
         {!preview && (
@@ -593,7 +595,7 @@ function ImportModal({ onClose }) {
         {preview && (
           <>
             <div style={{ display: 'flex', gap: 18, fontSize: 13, color: 'var(--mid)', paddingTop: 2 }}>
-              <span><strong style={{ color: '#6f8168', fontSize: 15 }}>{preview.new_count}</strong> new</span>
+              <span><strong style={{ color: 'var(--sage)', fontSize: 15 }}>{preview.new_count}</strong> new</span>
               <span><strong style={{ color: 'var(--muted)', fontSize: 15 }}>{preview.duplicate_count}</strong> already imported</span>
             </div>
 
@@ -616,14 +618,14 @@ function ImportModal({ onClose }) {
             <div style={{ maxHeight: 260, overflowY: 'auto', borderTop: '1px solid var(--bd-sm)' }}>
               {preview.rows.map(r => (
                 <div key={r.external_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--bd-xs)', opacity: r.duplicate ? .4 : 1 }}>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', flex: 'none', background: r.type === 'income' ? '#6f8168' : '#c15f3c' }} />
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', flex: 'none', background: r.type === 'income' ? 'var(--sage)' : 'var(--accent)' }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.merchant}</div>
                     <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                       {r.date}{r.category ? ` · ${r.category}` : ''}{r.duplicate ? ' · already imported' : ''}
                     </div>
                   </div>
-                  <div style={{ fontFamily: "'Newsreader', serif", fontSize: 14, fontWeight: 600, flex: 'none' }}>
+                  <div style={{ fontFamily: 'var(--font-serif)', fontSize: 14, fontWeight: 600, flex: 'none' }}>
                     {r.type === 'income' ? '+' : '−'}{formatMoney(r.amount, r.currency)}
                     {r.converted_amount != null && <div style={{ fontFamily: "'Hanken Grotesk', sans-serif", fontSize: 11, fontWeight: 500, color: 'var(--muted)', textAlign: 'right' }}>→ {formatMoney(r.converted_amount, preview.account_currency)}</div>}
                   </div>
@@ -667,6 +669,15 @@ export default function FinancesPage() {
   const [txnFilter, setTxnFilter]           = useState(null)
   const txnCardRef = useRef(null)
 
+  // From search: clear any filter, turn to the page the transaction is on, show it.
+  useFocusRequest(['transaction'], t => {
+    const i = transactions.findIndex(x => x.id === t.id)
+    if (i < 0) return
+    setTxnFilter(null)
+    setTxnPage(Math.floor(i / TXN_PAGE))
+    flash(`[data-search-id="txn:${t.id}"]`)
+  })
+
   const { removeTransaction } = useFinances()
   // Clamped, so deleting the last row on the final page, or a smaller ledger
   // after a refresh, never leaves an empty page showing.
@@ -704,21 +715,17 @@ export default function FinancesPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 24 }}>
-        <div>
-          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>Finances</h1>
-          <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>Net worth, cashflow, and savings pots.</p>
-        </div>
+      <PageHeader title="Finances" subtitle="Net worth, cashflow, and savings pots." isMobile={isMobile}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
           <CurrencySwitch />
           <GhostBtn onClick={() => setShowAddAcc(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Account</GhostBtn>
           <GhostBtn onClick={() => setShowAddTxn(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Transaction</GhostBtn>
           <PrimaryBtn onClick={() => setShowAddPot(true)} style={{ fontSize: 13, padding: '8px 14px' }}>+ Pot</PrimaryBtn>
         </div>
-      </div>
+      </PageHeader>
 
       {missingRates.length > 0 && (
-        <div style={{ fontSize: 13, color: '#c15f3c', background: 'rgba(193,95,60,.08)', borderRadius: 10, padding: '10px 14px', marginBottom: 16 }}>
+        <div style={{ fontSize: 13, color: 'var(--accent)', background: 'rgba(193,95,60,.08)', borderRadius: 10, padding: '10px 14px', marginBottom: 16 }}>
           No exchange rate available yet for {missingRates.join(', ')} — those amounts are left out of the {displayCurrency} totals.
         </div>
       )}
@@ -726,20 +733,20 @@ export default function FinancesPage() {
       {/* Summary strip */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : '1.3fr 1fr 1fr 1fr', gap: isMobile ? 10 : 14, marginBottom: 24 }}>
         <div style={{ background: 'var(--ink)', borderRadius: 16, padding: '20px 22px', color: 'var(--surface-2)' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>Net worth</div>
-          <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 22 : 32, fontWeight: 500 }}>{accounts.length > 0 ? fmt(netWorth) : '—'}</div>
+          <div style={{ ...eyebrow }}>Net worth</div>
+          <div style={{ marginTop: 6, fontFamily: 'var(--font-serif)', fontSize: isMobile ? 22 : 32, fontWeight: 500 }}>{accounts.length > 0 ? fmt(netWorth) : '—'}</div>
         </div>
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 22px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>Income · last 30 days</div>
-          <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 20 : 26, fontWeight: 500 }}>{income > 0 ? fmt(income) : '—'}</div>
+        <div style={{ ...card, padding: '20px 22px' }}>
+          <div style={{ ...eyebrow }}>Income · last 30 days</div>
+          <div style={{ marginTop: 6, fontFamily: 'var(--font-serif)', fontSize: isMobile ? 20 : 26, fontWeight: 500 }}>{income > 0 ? fmt(income) : '—'}</div>
         </div>
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 22px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>Spending · last 30 days</div>
-          <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 20 : 26, fontWeight: 500, color: spending > 0 ? '#c15f3c' : 'var(--ink)' }}>{spending > 0 ? fmt(spending) : '—'}</div>
+        <div style={{ ...card, padding: '20px 22px' }}>
+          <div style={{ ...eyebrow }}>Spending · last 30 days</div>
+          <div style={{ marginTop: 6, fontFamily: 'var(--font-serif)', fontSize: isMobile ? 20 : 26, fontWeight: 500, color: spending > 0 ? 'var(--accent)' : 'var(--ink)' }}>{spending > 0 ? fmt(spending) : '—'}</div>
         </div>
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 22px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>In pots</div>
-          <div style={{ marginTop: 6, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 20 : 26, fontWeight: 500, color: totalSaved > 0 ? '#6f8168' : 'var(--ink)' }}>{totalSaved > 0 ? fmt(totalSaved) : '—'}</div>
+        <div style={{ ...card, padding: '20px 22px' }}>
+          <div style={{ ...eyebrow }}>In pots</div>
+          <div style={{ marginTop: 6, fontFamily: 'var(--font-serif)', fontSize: isMobile ? 20 : 26, fontWeight: 500, color: totalSaved > 0 ? 'var(--sage)' : 'var(--ink)' }}>{totalSaved > 0 ? fmt(totalSaved) : '—'}</div>
         </div>
       </div>
 
@@ -754,10 +761,10 @@ export default function FinancesPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Savings pots */}
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 24px' }}>
+          <div style={{ ...card }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 19, fontWeight: 600 }}>Savings pots</h2>
-              <button onClick={() => setShowAddPot(true)} style={{ fontSize: 12, fontWeight: 600, color: '#c15f3c', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>+ New pot</button>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 19, fontWeight: 600 }}>Savings pots</h2>
+              <button onClick={() => setShowAddPot(true)} style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>+ New pot</button>
             </div>
 
             {pots.length === 0 && (
@@ -778,7 +785,7 @@ export default function FinancesPage() {
                       <circle cx="26" cy="26" r="21" fill="none" stroke={pot.color} strokeWidth="5.5" strokeLinecap="round"
                         strokeDasharray={`${(2 * Math.PI * 21 * pot.pct / 100).toFixed(1)} ${(2 * Math.PI * 21).toFixed(1)}`} />
                     </svg>
-                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Newsreader', serif", fontSize: 12, fontWeight: 600 }}>{pot.pct}%</div>
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-serif)', fontSize: 12, fontWeight: 600 }}>{pot.pct}%</div>
                   </div>
 
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -792,7 +799,7 @@ export default function FinancesPage() {
                   </div>
 
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontFamily: "'Newsreader', serif", fontSize: 16, fontWeight: 600, color: pot.color }}>{fmt(pot.savedDisplay)}</div>
+                    <div style={{ fontFamily: 'var(--font-serif)', fontSize: 16, fontWeight: 600, color: pot.color }}>{fmt(pot.savedDisplay)}</div>
                     {pot.targetAmount > 0 && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>of {fmt(pot.targetDisplay)}</div>}
                   </div>
                 </div>
@@ -801,10 +808,10 @@ export default function FinancesPage() {
           </div>
 
           {/* Accounts */}
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 24px' }}>
+          <div style={{ ...card }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 19, fontWeight: 600 }}>Accounts</h2>
-              <button onClick={() => setShowAddAcc(true)} style={{ fontSize: 12, fontWeight: 600, color: '#c15f3c', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>+ Add</button>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 19, fontWeight: 600 }}>Accounts</h2>
+              <button onClick={() => setShowAddAcc(true)} style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>+ Add</button>
             </div>
             {accounts.length === 0 && <div style={{ padding: '16px 0', fontSize: 13, color: 'var(--faint)', textAlign: 'center' }}>No accounts yet</div>}
             {accounts.map(a => (
@@ -821,16 +828,16 @@ export default function FinancesPage() {
                   </div>
                 </div>
                 <Money amount={a.balance} currency={a.currency} converted={a.balanceDisplay} sign={a.type === 'credit' ? '−' : ''}
-                  style={{ fontFamily: "'Newsreader', serif", fontSize: 15, fontWeight: 600, color: a.type === 'credit' ? '#c15f3c' : 'var(--ink)' }} />
+                  style={{ fontFamily: 'var(--font-serif)', fontSize: 15, fontWeight: 600, color: a.type === 'credit' ? 'var(--accent)' : 'var(--ink)' }} />
               </div>
             ))}
           </div>
         </div>
 
         {/* RIGHT col: Transactions + compensation */}
-        <div ref={txnCardRef} style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '20px 24px', scrollMarginTop: 90 }}>
+        <div ref={txnCardRef} style={{ ...card, scrollMarginTop: 90 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-            <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 19, fontWeight: 600 }}>Transactions</h2>
+            <h2 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 19, fontWeight: 600 }}>Transactions</h2>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             {transactions.length > 0 && (
               <select aria-label="Filter by category"
@@ -843,7 +850,7 @@ export default function FinancesPage() {
               </select>
             )}
             <button onClick={() => setShowImport(true)} style={{ fontSize: 12, fontWeight: 600, color: 'var(--mid)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>Import</button>
-            <button onClick={() => setShowAddTxn(true)} style={{ fontSize: 12, fontWeight: 600, color: '#c15f3c', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>+ Add</button>
+            <button onClick={() => setShowAddTxn(true)} style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>+ Add</button>
             </div>
           </div>
           {txnFilter && (
@@ -867,25 +874,25 @@ export default function FinancesPage() {
           {transactions.length === 0 && <div style={{ padding: '24px 0', fontSize: 13, color: 'var(--faint)', textAlign: 'center' }}>No transactions yet</div>}
           {transactions.length > 0 && shown.length === 0 && <div style={{ padding: '24px 0', fontSize: 13, color: 'var(--faint)', textAlign: 'center' }}>All done — nothing left here.</div>}
           {shown.slice(page * TXN_PAGE, (page + 1) * TXN_PAGE).map(t => (
-            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderTop: '1px solid var(--bd-xs)' }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.type === 'income' ? '#6f8168' : '#c15f3c', flex: 'none' }} />
+            <div key={t.id} data-search-id={`txn:${t.id}`} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderTop: '1px solid var(--bd-xs)' }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.type === 'income' ? 'var(--sage)' : 'var(--accent)', flex: 'none' }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 500 }}>{t.merchant}</div>
                 <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
                   <button onClick={() => setCatTxn(t)} title="Set category"
                     style={{ border: 'none', background: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5,
-                      color: t.category ? 'var(--mid)' : '#c15f3c', fontWeight: t.category ? 500 : 600, textDecoration: 'underline', textDecorationColor: 'var(--bd-xl)', textUnderlineOffset: 2 }}>
+                      color: t.category ? 'var(--mid)' : 'var(--accent)', fontWeight: t.category ? 500 : 600, textDecoration: 'underline', textDecorationColor: 'var(--bd-xl)', textUnderlineOffset: 2 }}>
                     {t.category || '+ Category'}
                   </button>
                   {t.category_source === 'ai' && (
-                    <span title="Categorised automatically — click the category to correct it" style={{ marginLeft: 3, color: '#b08a3e', cursor: 'help' }}>✦</span>
+                    <span title="Categorised automatically — click the category to correct it" style={{ marginLeft: 3, color: 'var(--gold)', cursor: 'help' }}>✦</span>
                   )}
                   {' · '}{t.date}
                   {t.orig_currency && <> · was {formatMoney(t.orig_amount, t.orig_currency)}</>}
                 </div>
               </div>
               <Money amount={t.amount} currency={t.currency || 'GBP'} converted={txnValue(t)} sign={t.type === 'income' ? '+' : '−'}
-                style={{ fontFamily: "'Newsreader', serif", fontSize: 14.5, fontWeight: 600, color: t.type === 'income' ? '#6f8168' : 'var(--ink)' }} />
+                style={{ fontFamily: 'var(--font-serif)', fontSize: 14.5, fontWeight: 600, color: t.type === 'income' ? 'var(--sage)' : 'var(--ink)' }} />
               <button onClick={() => removeTransaction(t.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--faint)', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>×</button>
             </div>
           ))}

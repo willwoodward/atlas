@@ -129,7 +129,7 @@ export default function Sheet({
           )}
           {(title || headerExtra) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: isMobile ? '10px 18px 12px' : '24px 28px 14px' }}>
-              <div style={{ flex: 1, minWidth: 0, margin: 0, fontFamily: "'Newsreader', serif", fontSize: 22, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.25 }}>{title}</div>
+              <div style={{ flex: 1, minWidth: 0, margin: 0, fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.25 }}>{title}</div>
               {headerExtra}
               <button onClick={close} aria-label="Close"
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 20, lineHeight: 1, padding: 4, flex: 'none' }}>×</button>

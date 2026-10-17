@@ -346,7 +346,7 @@ export default function CompensationPanel() {
         </div>
 
         {needsInput && (
-          <div style={{ fontSize: 12.5, color: '#c15f3c', background: 'var(--surface-2)', borderRadius: 10, padding: '10px 12px', marginBottom: 14, lineHeight: 1.5 }}>
+          <div style={{ fontSize: 12.5, color: 'var(--accent)', background: 'var(--surface-2)', borderRadius: 10, padding: '10px 12px', marginBottom: 14, lineHeight: 1.5 }}>
             {missingRates.length > 0 && <>No GBP rate set for {missingRates.join(', ')}. </>}
             {missingPrices.length > 0 && <>No share price set for {missingPrices.join(', ')}. </>}
             Those amounts are being counted at face value, so the totals below are wrong until you set them.
@@ -403,7 +403,7 @@ export default function CompensationPanel() {
           ].map(([label, value, color]) => (
             <div key={label}>
               <div style={eyebrow}>{label}</div>
-              <div style={{ marginTop: 4, fontFamily: "'Newsreader', serif", fontSize: 22, fontWeight: 500, color }}>
+              <div style={{ marginTop: 4, fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 500, color }}>
                 {value ? fmt(value) : '—'}
               </div>
             </div>
@@ -442,7 +442,7 @@ export default function CompensationPanel() {
                 </div>
               </div>
               <div style={{ textAlign: 'right', flex: 'none' }}>
-                <div style={{ fontFamily: "'Newsreader', serif", fontSize: 15, fontWeight: 600 }}>
+                <div style={{ fontFamily: 'var(--font-serif)', fontSize: 15, fontWeight: 600 }}>
                   {new Intl.NumberFormat('en-GB', { style: 'currency', currency: c.currency, maximumFractionDigits: 0 }).format(c.amount)}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>{cadence}</div>
@@ -492,7 +492,7 @@ export default function CompensationPanel() {
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <div style={{ fontFamily: "'Newsreader', serif", fontSize: 15, fontWeight: 600, color: '#4f7f45' }}>{g.unvested_units}</div>
+                <div style={{ fontFamily: 'var(--font-serif)', fontSize: 15, fontWeight: 600, color: '#4f7f45' }}>{g.unvested_units}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>unvested</div>
               </div>
               <button onClick={() => window.confirm(`Delete grant "${g.label}"?`) && removeGrant(g.id)}

@@ -45,7 +45,7 @@ function BudgetRow({ b, onRemove, onEdit, isMobile }) {
           {b.category}
           {named && <span style={{ fontSize: 11.5, fontWeight: 400, color: 'var(--muted)' }}> · {covers.join(', ')}</span>}
         </button>
-        <span style={{ fontFamily: "'Newsreader', serif", fontSize: 14.5, fontWeight: 600, color: paceColor(b) }}>
+        <span style={{ fontFamily: 'var(--font-serif)', fontSize: 14.5, fontWeight: 600, color: paceColor(b) }}>
           {fmt(b.spent)}
         </span>
         <span style={{ fontSize: 12, color: 'var(--muted)', flex: 'none' }}>of {fmt(b.amount)}</span>
@@ -141,7 +141,7 @@ function BudgetsCard({ isMobile }) {
                   return (
                     <button key={c} type="button" onClick={() => toggle(c)} aria-pressed={on}
                       style={{ padding: '4px 10px', borderRadius: 99, fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
-                        border: `1px solid ${on ? '#c15f3c' : 'var(--bd-xl)'}`, background: on ? 'rgba(193,95,60,.1)' : 'transparent', color: on ? '#c15f3c' : 'var(--mid)' }}>
+                        border: `1px solid ${on ? 'var(--accent)' : 'var(--bd-xl)'}`, background: on ? 'rgba(193,95,60,.1)' : 'transparent', color: on ? 'var(--accent)' : 'var(--mid)' }}>
                       {on ? '✓ ' : ''}{c}
                     </button>
                   )
@@ -219,7 +219,7 @@ function RecurringCard({ isMobile }) {
             </div>
           </div>
           <div style={{ textAlign: 'right', flex: 'none' }}>
-            <div style={{ fontFamily: "'Newsreader', serif", fontSize: 14.5, fontWeight: 600 }}>
+            <div style={{ fontFamily: 'var(--font-serif)', fontSize: 14.5, fontWeight: 600 }}>
               {r.varies ? '~' : ''}{fmt2(r.amount)}
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>{fmt(r.annualised)}/yr</div>

@@ -1,3 +1,4 @@
+import { Button, card } from './ui.jsx'
 import { useEffect, useState } from 'react'
 import { useKeybinds } from '../context/KeybindsContext.jsx'
 import { SHORTCUTS, comboFromEvent, displayCombo, validCombo } from '../lib/keybinds.js'
@@ -31,7 +32,7 @@ export default function KeybindsSettings() {
   }, [editing, bindings, setBinding, setCapturing])
 
   return (
-    <div style={{ border: '1px solid var(--bd)', borderRadius: 12, background: 'var(--surface)', overflow: 'hidden' }}>
+    <div style={{ ...card, padding: 0, borderRadius: 12, overflow: 'hidden' }}>
       {SHORTCUTS.map((s, i) => {
         const combo = bindings[s.id]
         const isEditing = editing === s.id
@@ -42,23 +43,22 @@ export default function KeybindsSettings() {
               {s.hint && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{s.hint}</div>}
             </div>
             {combo !== s.default && !isEditing && (
-              <button onClick={() => { resetBinding(s.id); setWarning(null) }}
-                style={{ fontSize: 12, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit' }}>
+              <Button variant="link" onClick={() => { resetBinding(s.id); setWarning(null) }} style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 400 }}>
                 Reset
-              </button>
+              </Button>
             )}
             <button onClick={() => { setEditing(isEditing ? null : s.id); setWarning(null) }}
               aria-label={`Change shortcut for ${s.label}`}
               style={{ minWidth: 92, fontSize: 13, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
-                       border: `1px solid ${isEditing ? '#c15f3c' : 'var(--bd-xl)'}`, background: 'var(--surface-2)',
-                       color: isEditing ? '#c15f3c' : combo ? 'var(--ink)' : 'var(--faint)', fontVariantNumeric: 'tabular-nums' }}>
+                       border: `1px solid ${isEditing ? 'var(--accent)' : 'var(--bd-xl)'}`, background: 'var(--surface-2)',
+                       color: isEditing ? 'var(--accent)' : combo ? 'var(--ink)' : 'var(--faint)', fontVariantNumeric: 'tabular-nums' }}>
               {isEditing ? 'Press keys…' : combo ? displayCombo(combo) : 'None'}
             </button>
           </div>
         )
       })}
       {(warning || editing) && (
-        <div style={{ padding: '10px 16px', borderTop: '1px solid var(--bd-sm)', fontSize: 12.5, color: warning ? '#c15f3c' : 'var(--muted)', background: 'var(--surface-2)' }}>
+        <div style={{ padding: '10px 16px', borderTop: '1px solid var(--bd-sm)', fontSize: 12.5, color: warning ? 'var(--accent)' : 'var(--muted)', background: 'var(--surface-2)' }}>
           {warning || 'Press the new combination, or Esc to cancel.'}
         </div>
       )}

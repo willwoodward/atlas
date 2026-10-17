@@ -1,3 +1,4 @@
+import { eyebrow } from './ui.jsx'
 import { useState, useRef, useEffect } from 'react'
 import { renderMarkdown } from '../lib/markdown.js'
 import AtlasOrb from './AtlasOrb.jsx'
@@ -73,9 +74,9 @@ function ToolTrace({ tools = [] }) {
           <div key={i}>
             <div
               onClick={() => hasDetail && setOpen(p => ({ ...p, [i]: !p[i] }))}
-              style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: failed ? '#c15f3c' : 'var(--muted)', cursor: hasDetail ? 'pointer' : 'default' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: failed ? 'var(--accent)' : 'var(--muted)', cursor: hasDetail ? 'pointer' : 'default' }}
             >
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: failed ? '#c15f3c' : '#c15f3c', flexShrink: 0, opacity: failed ? 1 : .6 }} />
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: failed ? 'var(--accent)' : 'var(--accent)', flexShrink: 0, opacity: failed ? 1 : .6 }} />
               {toolLabel(tool.name)}
               {failed && <span style={{ fontSize: 11 }}>· failed</span>}
               {tool.memory && <MemoryEditChip edit={tool.memory} />}
@@ -102,7 +103,7 @@ function ToolTrace({ tools = [] }) {
 function CodeBlock({ label, body, tone }) {
   return (
     <div>
-      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 3 }}>{label}</div>
+      <div style={{ ...eyebrow, fontSize: 10, marginBottom: 3 }}>{label}</div>
       <pre style={{ margin: 0, padding: '8px 10px', borderRadius: 7, background: 'var(--surface)', border: '1px solid var(--bd-sm)', fontSize: 11.5, lineHeight: 1.5, color: tone || 'var(--mid)', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 260, overflowY: 'auto' }}>{body}</pre>
     </div>
   )
@@ -191,7 +192,7 @@ function QuestionPanel({ question, runId, onAnswer }) {
           {sending ? '…' : 'Send'}
         </button>
       </form>
-      {failed && <div style={{ fontSize: 11.5, color: '#c15f3c', marginTop: 5 }}>{failed}</div>}
+      {failed && <div style={{ fontSize: 11.5, color: 'var(--accent)', marginTop: 5 }}>{failed}</div>}
     </div>
   )
 }
@@ -226,7 +227,7 @@ function CodingPanel({ coding }) {
         style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 11px', border: 'none',
                  background: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'var(--ink)' }}
       >
-        <span style={{ fontSize: 12, color: failed ? '#c15f3c' : 'var(--muted)' }}>
+        <span style={{ fontSize: 12, color: failed ? 'var(--accent)' : 'var(--muted)' }}>
           {running ? '○' : failed ? '!' : '●'}
         </span>
         <span style={{ fontSize: 13, fontWeight: 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -249,7 +250,7 @@ function CodingPanel({ coding }) {
       {open && (
         <div style={{ padding: '0 11px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
           {commits.map((c, i) => (
-            <div key={i} style={{ fontSize: 12, color: c.failed ? '#c15f3c' : 'var(--mid)', display: 'flex', gap: 6 }}>
+            <div key={i} style={{ fontSize: 12, color: c.failed ? 'var(--accent)' : 'var(--mid)', display: 'flex', gap: 6 }}>
               <code style={{ fontSize: 11, color: 'var(--faint)' }}>{c.failed ? '—' : c.sha}</code>
               <span style={{ flex: 1 }}>{c.message}{c.failed && c.error ? ` · ${c.error}` : ''}</span>
               {c.files ? <span style={{ color: 'var(--faint)', fontSize: 11 }}>{c.files}f</span> : null}
@@ -258,7 +259,7 @@ function CodingPanel({ coding }) {
           {activity?.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: commits.length ? 4 : 0 }}>
               {activity.map((a, i) => (
-                <div key={i} style={{ fontSize: 11.5, color: a.status === 'error' ? '#c15f3c' : 'var(--muted)',
+                <div key={i} style={{ fontSize: 11.5, color: a.status === 'error' ? 'var(--accent)' : 'var(--muted)',
                                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {a.tool}{a.detail ? ` · ${a.detail}` : ''}
                 </div>
@@ -295,7 +296,7 @@ function ResearchPanel({ research }) {
   return (
     <div style={{ margin: '4px 0 12px', padding: '11px 13px', borderRadius: 11, background: 'var(--surface-2)', border: '1px solid var(--bd)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 9 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>
+        <span style={{ ...eyebrow }}>
           Research team
         </span>
         <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>{done} / {research.length} reported</span>
@@ -316,7 +317,7 @@ function ResearchPanel({ research }) {
                 onClick={() => expandable && setOpen(p => ({ ...p, [i]: !p[i] }))}
                 style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, lineHeight: 1.45, color: running ? 'var(--mid)' : 'var(--muted)', cursor: expandable ? 'pointer' : 'default' }}
               >
-                <span style={{ flexShrink: 0, marginTop: 1, width: 13, textAlign: 'center', color: failed ? '#c15f3c' : running ? '#c15f3c' : '#6f8168' }}>
+                <span style={{ flexShrink: 0, marginTop: 1, width: 13, textAlign: 'center', color: failed ? 'var(--accent)' : running ? 'var(--accent)' : 'var(--sage)' }}>
                   {running
                     ? <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'currentColor', animation: 'atlas-pulse 1.2s ease-in-out infinite' }} />
                     : failed ? '!' : '✓'}
@@ -341,13 +342,13 @@ function ResearchPanel({ research }) {
                 <div style={{ margin: '7px 0 4px 21px', padding: '9px 11px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--bd-sm)' }}>
                   {running
                     ? steps.map((a, k) => (
-                        <div key={k} style={{ fontSize: 11.5, lineHeight: 1.5, color: a.status === 'error' ? '#c15f3c' : 'var(--muted)', wordBreak: 'break-word' }}>
+                        <div key={k} style={{ fontSize: 11.5, lineHeight: 1.5, color: a.status === 'error' ? 'var(--accent)' : 'var(--muted)', wordBreak: 'break-word' }}>
                           <span style={{ color: 'var(--faint)' }}>{toolLabel(a.tool)}</span>
                           {a.detail ? ` · ${a.detail}` : ''}
                         </div>
                       ))
                     : failed
-                      ? <div style={{ fontSize: 12, color: '#c15f3c', fontFamily: 'ui-monospace, monospace', wordBreak: 'break-word' }}>{body}</div>
+                      ? <div style={{ fontSize: 12, color: 'var(--accent)', fontFamily: 'ui-monospace, monospace', wordBreak: 'break-word' }}>{body}</div>
                       : <div className="md-prose" style={{ fontSize: 12.5, lineHeight: 1.55 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />}
                 </div>
               )}
@@ -480,7 +481,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
       style={{ cursor: 'text', display: 'flex', alignItems: 'flex-end', gap: 12, width: '100%', maxWidth: 560, padding: '12px 16px', borderRadius: 14, background: 'var(--surface)', border: '1px solid var(--bd-lg)', boxShadow: '0 4px 18px var(--bd-xs)' }}>
       {voice.state !== 'idle' && (
         <div aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 36, flex: 'none', fontSize: 13, color: 'var(--mid)' }}>
-          <span style={{ width: 9, height: 9, borderRadius: '50%', background: listening ? '#c15f3c' : 'var(--faint)', animation: 'atlas-pulse 1.2s ease-in-out infinite', flex: 'none' }} />
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: listening ? 'var(--accent)' : 'var(--faint)', animation: 'atlas-pulse 1.2s ease-in-out infinite', flex: 'none' }} />
           <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ink)' }}>{listening ? clock(voice.seconds) : 'Finishing…'}</span>
           <style>{'@keyframes atlas-pulse{0%,100%{opacity:.25}50%{opacity:1}}'}</style>
         </div>
@@ -504,7 +505,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
         <button onClick={() => (listening ? voice.stop() : beginVoice())} disabled={voice.state === 'transcribing'}
           aria-label={listening ? 'Stop and transcribe' : 'Speak'}
           title={(listening ? 'Stop and transcribe' : 'Speak') + (bindings?.voice ? ` (${displayCombo(bindings.voice)})` : '')}
-          style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 10, border: listening ? 'none' : '1px solid var(--bd)', background: listening ? '#c15f3c' : 'transparent', color: listening ? '#fff' : 'var(--muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: voice.state === 'transcribing' ? 'default' : 'pointer', transition: 'all .12s' }}>
+          style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 10, border: listening ? 'none' : '1px solid var(--bd)', background: listening ? 'var(--accent)' : 'transparent', color: listening ? '#fff' : 'var(--muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: voice.state === 'transcribing' ? 'default' : 'pointer', transition: 'all .12s' }}>
           {listening
             ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5L20 7" /></svg>
             : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>}
@@ -513,7 +514,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
       {!listening && <button
         onClick={() => (busy ? stop() : submit(input))}
         disabled={!busy && !input.trim()}
-        style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 10, border: 'none', background: busy || input.trim() ? '#c15f3c' : 'var(--surface-3)', color: busy || input.trim() ? '#fff' : 'var(--faint)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: busy || input.trim() ? 'pointer' : 'default', transition: 'all .12s' }}
+        style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 10, border: 'none', background: busy || input.trim() ? 'var(--accent)' : 'var(--surface-3)', color: busy || input.trim() ? '#fff' : 'var(--faint)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: busy || input.trim() ? 'pointer' : 'default', transition: 'all .12s' }}
       >
         {busy
           ? <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2" /></svg>
@@ -525,13 +526,13 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
   // while Atlas is answering and the mic is off) and offers a way out.
   const voiceBanner = conversing && (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', maxWidth: 560, marginBottom: 6, fontSize: 12.5, color: 'var(--mid)' }}>
-      <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#c15f3c', flex: 'none' }} />
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flex: 'none' }} />
       <span style={{ flex: 1 }}>{listening ? 'Voice mode · listening' : busy ? 'Voice mode · Atlas is answering' : 'Voice mode'}</span>
       <button onClick={endVoice} style={{ fontSize: 12, padding: '2px 9px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', fontFamily: 'inherit', cursor: 'pointer' }}>End</button>
     </div>
   )
   const voiceError = voice.error && (
-    <div style={{ marginTop: 8, fontSize: 12.5, color: '#c15f3c' }}>{voice.error}</div>
+    <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--accent)' }}>{voice.error}</div>
   )
 
   if (empty) {
@@ -540,7 +541,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
         <SettingsButton style={{ position: 'absolute', top: 6, right: gutter }} />
         {!panel && <AtlasOrb orbSize={orbSize} ring1={ring1} ring2={ring2} />}
 
-        <h1 style={{ margin: '14px 0 6px', fontFamily: "'Newsreader', serif", fontSize: panel ? 24 : 30, fontWeight: 500, color: 'var(--ink)' }}>
+        <h1 style={{ margin: '14px 0 6px', fontFamily: 'var(--font-serif)', fontSize: panel ? 24 : 30, fontWeight: 500, color: 'var(--ink)' }}>
           How can I help you plan today?
         </h1>
         <p style={{ margin: '0 0 26px', fontSize: panel ? 13.5 : 14.5, color: 'var(--mid)', maxWidth: 440, lineHeight: 1.55 }}>
@@ -559,7 +560,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
         {voiceBanner}
         {composer}
         {voiceError}
-        {error && <div style={{ marginTop: 12, fontSize: 12.5, color: '#c15f3c' }}>{error}</div>}
+        {error && <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--accent)' }}>{error}</div>}
       </div>
     )
   }
@@ -593,12 +594,12 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
             <QuestionPanel question={m.question} runId={m.runId} onAnswer={answer} />
             {m.content
               ? <div className="md-prose" style={{ fontSize: 14.5, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} />
-              : m.error ? <div style={{ fontSize: 12.5, color: '#c15f3c' }}>{m.error}</div>
+              : m.error ? <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>{m.error}</div>
               : busy && i === messages.length - 1 && (m.tools?.length ?? 0) === 0 && !m.research?.length && !m.question && !m.coding &&
                   <span style={{ fontSize: 13.5, color: 'var(--muted)' }}>Thinking…</span>}
           </div>
         ))}
-        {error && <div style={{ fontSize: 12.5, color: '#c15f3c' }}>{error}</div>}
+        {error && <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>{error}</div>}
       </div>
 
       <div style={{ position: 'sticky', bottom: 0, zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: `8px ${gutter}px`, paddingBottom: isMobile ? 'max(8px, env(safe-area-inset-bottom))' : 8, background: 'var(--bg)' }}>{voiceBanner}{composer}{voiceError}</div>

@@ -1,3 +1,4 @@
+import { eyebrow } from '../components/ui.jsx'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import CheckMark from '../components/CheckMark.jsx'
 import DaySchedule from '../components/DaySchedule.jsx'
@@ -36,7 +37,7 @@ function HabitsWidget() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, paddingBottom: 11, borderBottom: '1px solid var(--bd-xl)' }}>
-        <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 21, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 9 }}>
+        <h2 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 21, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 9 }}>
           <span style={{ width: 9, height: 9, borderRadius: '50%', background: period.color, display: 'inline-block', flexShrink: 0 }} />
           {period.label} Habits
         </h2>
@@ -144,7 +145,7 @@ function HabitsHistory({ habits, last30 }) {
   const max = Math.max(1, ...days.map(d => d.total))
   return (
     <div>
-      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 12 }}>Habits · last 7 days</div>
+      <div style={{ ...eyebrow, marginBottom: 12 }}>Habits · last 7 days</div>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 110 }}>
         {days.map((d, i) => {
           const full = d.total > 0 && d.done === d.total
@@ -153,7 +154,7 @@ function HabitsHistory({ habits, last30 }) {
             <div key={d.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, height: '100%', justifyContent: 'flex-end' }}>
               <span style={{ fontSize: 11, color: 'var(--muted)' }}>{d.total ? `${d.done}/${d.total}` : '—'}</span>
               <div style={{ width: '100%', maxWidth: 36, height: `${(d.total / max) * 70}%`, minHeight: 4, background: 'var(--surface-3)', borderRadius: 6, display: 'flex', alignItems: 'flex-end', overflow: 'hidden' }}>
-                <div style={{ width: '100%', height: d.total ? `${(d.done / d.total) * 100}%` : 0, background: full ? '#6f8168' : '#9a9488', opacity: isToday && !full ? 0.7 : 1, transition: 'height .3s' }} />
+                <div style={{ width: '100%', height: d.total ? `${(d.done / d.total) * 100}%` : 0, background: full ? 'var(--sage)' : 'var(--stone)', opacity: isToday && !full ? 0.7 : 1, transition: 'height .3s' }} />
               </div>
               <span style={{ fontSize: 11, fontWeight: isToday ? 700 : 500, color: isToday ? 'var(--ink)' : 'var(--faint)' }}>
                 {new Date(d.date + 'T12:00').toLocaleDateString('en-GB', { weekday: 'short' }).slice(0, 2)}
@@ -179,7 +180,7 @@ function GoalTimeBreakdown({ data }) {
   const max = Math.max(1, ...rows.map(r => r.planned))
   return (
     <div>
-      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 12 }}>Goal time · this week</div>
+      <div style={{ ...eyebrow, marginBottom: 12 }}>Goal time · this week</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
         {rows.map(({ goal, spent, planned }) => (
           <div key={goal.id}>
@@ -227,7 +228,7 @@ function GoalTimeHistory({ weeks, loading, isMobile }) {
   return (
     <div style={{ marginTop: 26 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12, gap: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}>
+        <div style={{ ...eyebrow }}>
           Last {weeks.length} weeks
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)' }}>
@@ -288,7 +289,7 @@ function GoalTimeHistory({ weeks, loading, isMobile }) {
               <div style={{ fontSize: 11.5, color: 'var(--muted)', marginBottom: 5 }}>
                 {tip.current ? 'This week' : `Week of ${shortDate(tip.week)}`}
               </div>
-              <div style={{ fontFamily: "'Newsreader', serif", fontSize: 18, fontWeight: 500, color: 'var(--ink)', marginBottom: 4 }}>
+              <div style={{ fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 500, color: 'var(--ink)', marginBottom: 4 }}>
                 {fmtHours(tip.spent)}{tip.planned > tip.spent ? <span style={{ fontSize: 12.5, color: 'var(--muted)', fontFamily: 'inherit' }}> of {fmtHours(tip.planned)} planned</span> : null}
               </div>
               {tip.perGoal.filter(p => p.planned > 0).map(p => (
@@ -419,7 +420,7 @@ export default function HomePage() {
   return (
     <div>
       <div style={{ marginBottom: 26 }}>
-        <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 28 : 38, fontWeight: 500, letterSpacing: '-.01em' }}>{greeting}{name}.</h1>
+        <h1 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: isMobile ? 28 : 38, fontWeight: 500, letterSpacing: '-.01em' }}>{greeting}{name}.</h1>
         <p style={{ margin: '8px 0 0', fontSize: isMobile ? 13.5 : 15, color: 'var(--mid)' }}>Your day is ready when you are.</p>
       </div>
 
@@ -437,7 +438,7 @@ export default function HomePage() {
                   style={{ flex: 'none', transform: openStat === s.key ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }}><path d="M6 9l6 6 6-6"/></svg>
               )}
             </div>
-            <div style={{ marginTop: 7, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 20 : 28, fontWeight: 500 }}>{s.value}</div>
+            <div style={{ marginTop: 7, fontFamily: 'var(--font-serif)', fontSize: isMobile ? 20 : 28, fontWeight: 500 }}>{s.value}</div>
             <div style={{ marginTop: 2, fontSize: isMobile ? 11 : 12, color: s.tone, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.sub}</div>
           </div>
         ))}
@@ -456,14 +457,14 @@ export default function HomePage() {
         {/* Schedule from Google Calendar */}
         <div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, paddingBottom: 11, borderBottom: '1px solid var(--bd-xl)' }}>
-            <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 21, fontWeight: 600 }}>Today's schedule</h2>
+            <h2 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 21, fontWeight: 600 }}>Today's schedule</h2>
             <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{todayEvents.length > 0 ? `${todayEvents.length} events` : gcal.connected ? 'No events' : '—'}</span>
           </div>
 
           {!gcal.connected && (
             <div style={{ padding: '20px 0', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10 }}>
               <div style={{ fontSize: 13.5, color: 'var(--muted)' }}>Connect Google Calendar to see your schedule here.</div>
-              <button onClick={connectGoogle} style={{ fontSize: 13, fontWeight: 600, color: '#5f7591', background: 'rgba(95,117,145,.1)', border: '1px solid rgba(95,117,145,.25)', padding: '7px 14px', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit' }}>
+              <button onClick={connectGoogle} style={{ fontSize: 13, fontWeight: 600, color: 'var(--blue)', background: 'rgba(95,117,145,.1)', border: '1px solid rgba(95,117,145,.25)', padding: '7px 14px', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit' }}>
                 Connect Google Calendar
               </button>
             </div>
@@ -493,14 +494,14 @@ export default function HomePage() {
           <HabitsWidget />
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, paddingBottom: 11, borderBottom: '1px solid var(--bd-xl)' }}>
-              <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 21, fontWeight: 600 }}>To-do</h2>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 21, fontWeight: 600 }}>To-do</h2>
               <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{todosLeft > 0 ? `${todosLeft} left` : '—'}</span>
             </div>
             <TodosWidget todos={todos} onToggle={toggleTodo} />
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, paddingBottom: 11, borderBottom: '1px solid var(--bd-xl)' }}>
-              <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 21, fontWeight: 600 }}>Goals</h2>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 21, fontWeight: 600 }}>Goals</h2>
               <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>{goals.length > 0 ? `${goals.length} active` : '—'}</span>
             </div>
             <GoalsWidget goals={goals} />

@@ -3,7 +3,7 @@ import { notes } from '../data.js'
 export default function TabletNotesPage() {
   return (
     <div style={{ padding: '14px 44px 30px' }}>
-      <h1 style={{ margin: '0 0 20px', fontFamily: "'Newsreader', serif", fontSize: 32, fontWeight: 500 }}>Notes &amp; memories</h1>
+      <h1 style={{ margin: '0 0 20px', fontFamily: 'var(--font-serif)', fontSize: 32, fontWeight: 500 }}>Notes &amp; memories</h1>
 
       {notes.length === 0 ? (
         <div style={{ padding: '60px 0', textAlign: 'center', fontSize: 14, color: '#b2ab9d' }}>No notes yet</div>
@@ -15,7 +15,7 @@ export default function TabletNotesPage() {
                 <span style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: n.color }}>{n.tag}</span>
                 <span style={{ fontSize: 11, color: '#b2ab9d' }}>{n.date}</span>
               </div>
-              <h3 style={{ margin: '0 0 6px', fontFamily: "'Newsreader', serif", fontSize: 17, fontWeight: 600 }}>{n.title}</h3>
+              <h3 style={{ margin: '0 0 6px', fontFamily: 'var(--font-serif)', fontSize: 17, fontWeight: 600 }}>{n.title}</h3>
               <p style={{ margin: 0, fontSize: 13, lineHeight: 1.55, color: '#6b665a' }}>{n.body}</p>
             </div>
           ))}

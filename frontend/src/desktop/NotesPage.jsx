@@ -1,3 +1,5 @@
+import { eyebrow } from '../components/ui.jsx'
+import { useFocusRequest } from '../lib/focus.js'
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { renderMarkdown } from '../lib/markdown.js'
 import Sheet from '../components/Sheet.jsx'
@@ -71,7 +73,7 @@ function FileTree({ nodes, selectedPath, onSelect, depth = 0, draftPaths = new S
             padding: `5px 10px 5px ${10 + depth * 14}px`,
             cursor: 'pointer', borderRadius: 7, marginBottom: 1,
             background: selectedPath === node.path ? 'rgba(95,117,145,.12)' : 'transparent',
-            color: selectedPath === node.path ? '#5f7591' : node.draftOnly ? 'var(--mid)' : 'var(--mid)',
+            color: selectedPath === node.path ? 'var(--blue)' : node.draftOnly ? 'var(--mid)' : 'var(--mid)',
             fontSize: 13, display: 'flex', alignItems: 'center', gap: 7,
             transition: 'background .1s',
             fontStyle: node.draftOnly ? 'italic' : 'normal',
@@ -86,17 +88,17 @@ function FileTree({ nodes, selectedPath, onSelect, depth = 0, draftPaths = new S
             {node.name.replace(/\.md$/, '')}
           </span>
           {node.draftOnly && (
-            <span style={{ fontSize: 9, fontWeight: 700, color: '#b08a3e', background: 'rgba(176,138,62,.15)', padding: '1px 4px', borderRadius: 3, flexShrink: 0 }}>new</span>
+            <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--gold)', background: 'rgba(176,138,62,.15)', padding: '1px 4px', borderRadius: 3, flexShrink: 0 }}>new</span>
           )}
           {!node.draftOnly && draftPaths.has(node.path) && (
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#b08a3e', flexShrink: 0 }} />
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--gold)', flexShrink: 0 }} />
           )}
         </div>
       ) : (
         <div key={node.path}>
           <div
             onClick={() => setOpen(p => ({ ...p, [node.path]: !p[node.path] }))}
-            style={{ padding: `5px 10px 5px ${10 + depth * 14}px`, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)' }}
+            style={{ padding: `5px 10px 5px ${10 + depth * 14}px`, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, ...eyebrow }}
           >
             <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
               style={{ transform: open[node.path] ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }}>
@@ -148,7 +150,7 @@ function OutlineSheet({ body, contentRef, onClose }) {
                   display: 'block', width: '100%', textAlign: 'left',
                   padding: `8px 8px 8px ${8 + (h.level - 1) * 14}px`,
                   background: 'none', border: 'none', cursor: 'pointer',
-                  fontFamily: h.level <= 2 ? "'Newsreader', serif" : 'inherit',
+                  fontFamily: h.level <= 2 ? 'var(--font-serif)' : 'inherit',
                   fontSize: h.level === 1 ? 16 : h.level === 2 ? 14 : 13,
                   fontWeight: h.level <= 2 ? 600 : 500,
                   color: h.level <= 2 ? 'var(--ink)' : 'var(--mid)',
@@ -257,6 +259,16 @@ export default function NotesPage() {
     setFileMeta(null)
     setPubStatus(null)
   }
+
+  // From search: open the note it found.
+  useFocusRequest(['note', 'github'], t => {
+    if (t.kind === 'note') {
+      const note = notes.find(n => n.id === t.id)
+      if (note) selectQuick(note)
+    } else {
+      selectGithub(allTreeFiles.find(f => f.path === t.path) || { path: t.path })
+    }
+  })
 
   const selectGithub = async (file) => {
     setSelected({ type: 'github', path: file.path })
@@ -470,7 +482,7 @@ export default function NotesPage() {
         <div style={{ padding: '20px 10px 8px' }}>
           {/* New quick notes come from the header "+ New note". */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px', marginBottom: 6, minHeight: 20 }}>
-            <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>Quick notes</span>
+            <span style={{ ...eyebrow, fontSize: 10.5 }}>Quick notes</span>
           </div>
           {notes.length === 0 && (
             <div style={{ padding: '4px 6px', fontSize: 12, color: 'var(--faint)' }}>No notes yet.</div>
@@ -480,7 +492,7 @@ export default function NotesPage() {
               style={{ padding: '7px 8px', borderRadius: 8, cursor: 'pointer', marginBottom: 1,
                 background: selected?.id === n.id ? 'rgba(95,117,145,.1)' : 'transparent',
                 transition: 'background .1s' }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: selected?.id === n.id ? '#5f7591' : 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={{ fontSize: 13, fontWeight: 500, color: selected?.id === n.id ? 'var(--blue)' : 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {noteTitle(n.body)}
               </div>
               {notePreview(n.body) && (
@@ -495,10 +507,10 @@ export default function NotesPage() {
         {/* GitHub notes */}
         <div style={{ padding: '14px 10px 16px', borderTop: '1px solid var(--bd-xs)', marginTop: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px', marginBottom: 6 }}>
-            <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ ...eyebrow, fontSize: 10.5, display: 'flex', alignItems: 'center', gap: 6 }}>
               {github.repo || 'GitHub'}
               {draftCount > 0 && (
-                <span style={{ fontSize: 10, fontWeight: 700, color: '#b08a3e', background: 'rgba(176,138,62,.14)', padding: '1px 6px', borderRadius: 4 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold)', background: 'rgba(176,138,62,.14)', padding: '1px 6px', borderRadius: 4 }}>
                   {draftCount} unsaved
                 </span>
               )}
@@ -543,7 +555,7 @@ export default function NotesPage() {
             <div style={{ padding: '2px 4px', fontSize: 12, color: 'var(--faint)' }}>Loading…</div>
           )}
           {github.treeError && (
-            <div style={{ padding: '2px 4px', fontSize: 12, color: '#c15f3c' }}>{github.treeError}</div>
+            <div style={{ padding: '2px 4px', fontSize: 12, color: 'var(--accent)' }}>{github.treeError}</div>
           )}
           {github.connected && !github.treeLoading && !github.treeError && tree.length === 0 && (
             <div style={{ padding: '2px 4px', fontSize: 12, color: 'var(--faint)' }}>No markdown files found.</div>
@@ -559,7 +571,7 @@ export default function NotesPage() {
                 disabled={creating}
                 style={{ width: '100%', fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--bd-xl)', background: 'var(--surface-2)', color: 'var(--ink)', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', opacity: creating ? 0.6 : 1 }}
               />
-              {createError && <div style={{ fontSize: 11, color: '#c15f3c', marginTop: 3 }}>{createError}</div>}
+              {createError && <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 3 }}>{createError}</div>}
             </form>
           )}
           {tree.length > 0 && (
@@ -599,22 +611,22 @@ export default function NotesPage() {
                 )}
                 {isGithub && <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{selected.path}</span>}
                 {isGithub && isDraftOnly && (
-                  <span style={{ fontSize: 11, fontWeight: 600, color: '#b08a3e', background: 'rgba(176,138,62,.12)', padding: '2px 7px', borderRadius: 5 }}>draft</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--gold)', background: 'rgba(176,138,62,.12)', padding: '2px 7px', borderRadius: 5 }}>draft</span>
                 )}
                 {isGithub && !isDraftOnly && hasDraft && !editing && (
-                  <span style={{ fontSize: 11, fontWeight: 600, color: '#b08a3e', background: 'rgba(176,138,62,.12)', padding: '2px 7px', borderRadius: 5 }}>unsaved</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--gold)', background: 'rgba(176,138,62,.12)', padding: '2px 7px', borderRadius: 5 }}>unsaved</span>
                 )}
                 {isQuick && currentNote && (
                   <span>{new Date(currentNote.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                 )}
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
-                {pubStatus === 'ok'    && <span style={{ fontSize: 12, color: '#6f8168' }}>Published ✓</span>}
-                {pubStatus === 'saved' && <span style={{ fontSize: 12, color: '#b08a3e' }}>Saved locally</span>}
-                {pubStatus === 'err'   && <span style={{ fontSize: 12, color: '#c15f3c' }}>Failed to publish</span>}
+                {pubStatus === 'ok'    && <span style={{ fontSize: 12, color: 'var(--sage)' }}>Published ✓</span>}
+                {pubStatus === 'saved' && <span style={{ fontSize: 12, color: 'var(--gold)' }}>Saved locally</span>}
+                {pubStatus === 'err'   && <span style={{ fontSize: 12, color: 'var(--accent)' }}>Failed to publish</span>}
                 {isQuick && (
                   <button onClick={handleDelete}
-                    style={{ fontSize: 12, color: '#c15f3c', background: 'none', border: 'none', cursor: 'pointer', padding: '5px 10px', borderRadius: 7, fontFamily: 'inherit' }}>
+                    style={{ fontSize: 12, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: '5px 10px', borderRadius: 7, fontFamily: 'inherit' }}>
                     Delete
                   </button>
                 )}
@@ -628,7 +640,7 @@ export default function NotesPage() {
                           Discard
                         </button>
                         <button onClick={handlePublish} disabled={publishing}
-                          style={{ fontSize: 13, fontWeight: 600, color: '#fff', background: '#5f7591', border: 'none', cursor: publishing ? 'default' : 'pointer', padding: '6px 16px', borderRadius: 8, fontFamily: 'inherit', opacity: publishing ? 0.7 : 1 }}>
+                          style={{ fontSize: 13, fontWeight: 600, color: '#fff', background: 'var(--blue)', border: 'none', cursor: publishing ? 'default' : 'pointer', padding: '6px 16px', borderRadius: 8, fontFamily: 'inherit', opacity: publishing ? 0.7 : 1 }}>
                           {publishing ? 'Publishing…' : 'Publish'}
                         </button>
                       </>
@@ -649,11 +661,11 @@ export default function NotesPage() {
                       Cancel
                     </button>
                     <button onClick={handleSave}
-                      style={{ fontSize: 13, fontWeight: 600, color: '#b08a3e', background: 'rgba(176,138,62,.1)', border: '1px solid rgba(176,138,62,.25)', cursor: 'pointer', padding: '6px 14px', borderRadius: 8, fontFamily: 'inherit' }}>
+                      style={{ fontSize: 13, fontWeight: 600, color: 'var(--gold)', background: 'rgba(176,138,62,.1)', border: '1px solid rgba(176,138,62,.25)', cursor: 'pointer', padding: '6px 14px', borderRadius: 8, fontFamily: 'inherit' }}>
                       Save
                     </button>
                     <button onClick={handlePublish} disabled={publishing}
-                      style={{ fontSize: 13, fontWeight: 600, color: '#fff', background: '#5f7591', border: 'none', cursor: publishing ? 'default' : 'pointer', padding: '6px 16px', borderRadius: 8, fontFamily: 'inherit', opacity: publishing ? 0.7 : 1 }}>
+                      style={{ fontSize: 13, fontWeight: 600, color: '#fff', background: 'var(--blue)', border: 'none', cursor: publishing ? 'default' : 'pointer', padding: '6px 16px', borderRadius: 8, fontFamily: 'inherit', opacity: publishing ? 0.7 : 1 }}>
                       {publishing ? 'Publishing…' : 'Publish'}
                     </button>
                   </>

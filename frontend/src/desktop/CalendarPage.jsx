@@ -1,3 +1,5 @@
+import { PageHeader, card, eyebrow } from '../components/ui.jsx'
+import { useFocusRequest } from '../lib/focus.js'
 import { useEffect, useState, useRef } from 'react'
 import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import { useLocalCalendar } from '../context/LocalCalendarContext.jsx'
@@ -83,14 +85,14 @@ export function EventDetailModal({ event, onClose, onDelete }) {
           {event.notes && <p style={{ margin: '0 0 16px', fontSize: 13.5, color: 'var(--mid)', lineHeight: 1.55, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 9 }}>{event.notes}</p>}
           {canDelete && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <button onClick={handleDelete} disabled={deleting} style={{ fontSize: 13, color: confirming ? '#fff' : '#c15f3c', background: confirming ? '#c15f3c' : 'rgba(193,95,60,.09)', border: 'none', borderRadius: 9, padding: '8px 14px', cursor: deleting ? 'default' : 'pointer', fontFamily: 'inherit', fontWeight: 500, opacity: deleting ? .6 : 1 }}>
+              <button onClick={handleDelete} disabled={deleting} style={{ fontSize: 13, color: confirming ? '#fff' : 'var(--accent)', background: confirming ? 'var(--accent)' : 'rgba(193,95,60,.09)', border: 'none', borderRadius: 9, padding: '8px 14px', cursor: deleting ? 'default' : 'pointer', fontFamily: 'inherit', fontWeight: 500, opacity: deleting ? .6 : 1 }}>
                 {deleting ? 'Deleting…' : confirming ? 'Confirm delete' : 'Delete event'}
               </button>
               {confirming && !deleting && (
                 <button onClick={() => setConfirming(false)} style={{ fontSize: 13, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
               )}
               {!event.isLocal && !confirming && <span style={{ fontSize: 11.5, color: 'var(--faint)' }}>Removes it from Google Calendar</span>}
-              {error && <span style={{ fontSize: 12, color: '#c15f3c' }}>⚠ {error}</span>}
+              {error && <span style={{ fontSize: 12, color: 'var(--accent)' }}>⚠ {error}</span>}
             </div>
           )}
     </Sheet>
@@ -149,7 +151,7 @@ function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00'
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
             <button onClick={onClose} style={{ flex: 1, padding: '10px', borderRadius: 10, border: '1px solid var(--bd)', background: 'transparent', color: 'var(--mid)', fontSize: 13.5, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
-            <button onClick={handleAdd} style={{ flex: 1, padding: '10px', borderRadius: 10, border: 'none', background: '#c15f3c', color: '#fff', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(193,95,60,.32)' }}>Add event</button>
+            <button onClick={handleAdd} style={{ flex: 1, padding: '10px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', boxShadow: 'var(--shadow-accent)' }}>Add event</button>
           </div>
     </Sheet>
   )
@@ -192,6 +194,15 @@ export default function CalendarPage() {
   const activeOffset = isMobile ? dayWeekOffset : weekOffset
   const { weekStart, weekEnd, todayStr } = getWeekRange(activeOffset)
   const stepDay = (n) => setSelDay(d => localDateStr(addDays(parseLocalDate(d), n)))
+
+  // From search: go to the event's day/week and open it.
+  useFocusRequest(['event'], t => {
+    const weeks = Math.round((mondayOf(parseLocalDate(t.date)) - mondayOf(new Date())) / (7 * 86_400_000))
+    setWeekOffset(weeks)
+    setSelDay(t.date)
+    const ev = allEvents.find(e => e.id === t.id && e.date === t.date)
+    if (ev) setSelectedEvent(ev)
+  })
 
   useEffect(() => {
     if (gcal.connected) refetchEvents(weekStart, weekEnd)
@@ -278,19 +289,15 @@ export default function CalendarPage() {
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
 
       {/* Page header */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, marginBottom: 22, flex: 'none', padding: isMobile ? '20px 20px 0' : 0 }}>
-        <div>
-          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500, color: 'var(--ink)' }}>Calendar</h1>
-          <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>{isMobile ? dayLabel : weekLabel}</p>
-        </div>
+      <PageHeader title="Calendar" subtitle={isMobile ? dayLabel : weekLabel} isMobile={isMobile} style={{ flex: 'none', padding: isMobile ? '20px 20px 0' : 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {!gcal.connected && !isMobile && (
-            <button onClick={connectGoogle} style={{ fontSize: 13, color: '#5f7591', background: 'rgba(95,117,145,.1)', border: '1px solid rgba(95,117,145,.25)', padding: '7px 14px', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
+            <button onClick={connectGoogle} style={{ fontSize: 13, color: 'var(--blue)', background: 'rgba(95,117,145,.1)', border: '1px solid rgba(95,117,145,.25)', padding: '7px 14px', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
               Connect Google Calendar
             </button>
           )}
           {gcal.loading && !isMobile && <span style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</span>}
-          {gcal.error && <span style={{ fontSize: 13, color: '#c15f3c' }}>⚠ {gcal.error}</span>}
+          {gcal.error && <span style={{ fontSize: 13, color: 'var(--accent)' }}>⚠ {gcal.error}</span>}
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <button onClick={() => isMobile ? stepDay(-1) : setWeekOffset(o => o - 1)} style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', cursor: 'pointer' }}>
@@ -312,14 +319,14 @@ export default function CalendarPage() {
             </div>
           )}
         </div>
-      </div>
+      </PageHeader>
 
       {/* Mobile: one day as a time column — swipe for the previous / next day */}
       {isMobile && (
         <div onTouchStart={onSwipeStart} onTouchEnd={onSwipeEnd}
           style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '0 12px 0 4px' }}>
           {!gcal.connected && (
-            <button onClick={connectGoogle} style={{ alignSelf: 'flex-start', margin: '0 0 10px 12px', fontSize: 13, color: '#5f7591', background: 'rgba(95,117,145,.1)', border: '1px solid rgba(95,117,145,.25)', padding: '7px 14px', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
+            <button onClick={connectGoogle} style={{ alignSelf: 'flex-start', margin: '0 0 10px 12px', fontSize: 13, color: 'var(--blue)', background: 'rgba(95,117,145,.1)', border: '1px solid rgba(95,117,145,.25)', padding: '7px 14px', borderRadius: 9, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
               Connect Google Calendar
             </button>
           )}
@@ -336,7 +343,7 @@ export default function CalendarPage() {
       )}
 
       {/* Desktop: Calendar card */}
-      {!isMobile && <div style={{ flex: 1, minHeight: 0, background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      {!isMobile && <div style={{ flex: 1, minHeight: 0, ...card, padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <div ref={weekScrollRef} className="no-scrollbar" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
 
           {/* Day headers — sticky */}
@@ -346,8 +353,8 @@ export default function CalendarPage() {
               const allDayEvs = d.events.filter(ev => ev.isAllDay)
               return (
                 <div key={d.dow} style={{ padding: allDayEvs.length > 0 ? '8px 6px 5px' : '13px 8px', textAlign: 'center', borderLeft: '1px solid var(--bd-xs)' }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>{d.dow}</div>
-                  <div style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', fontFamily: "'Newsreader', serif", fontSize: 16, fontWeight: 600, color: d.today ? '#fff' : 'var(--ink)', background: d.today ? '#c15f3c' : 'transparent' }}>{d.num}</div>
+                  <div style={{ ...eyebrow }}>{d.dow}</div>
+                  <div style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', fontFamily: 'var(--font-serif)', fontSize: 16, fontWeight: 600, color: d.today ? '#fff' : 'var(--ink)', background: d.today ? 'var(--accent)' : 'transparent' }}>{d.num}</div>
                   {allDayEvs.map(ev => (
                     <div key={ev.id} onClick={() => setSelectedEvent(ev)}
                       style={{ marginTop: 3, padding: '2px 5px', borderRadius: 4, fontSize: 10.5, fontWeight: 500, background: ev.tint, color: ev.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer', textAlign: 'left' }}>
@@ -414,15 +421,15 @@ export default function CalendarPage() {
 
                 {/* Now line — today's column only, same as the day view */}
                 {d.today && (
-                  <div style={{ position: 'absolute', left: -4, right: 0, top: (nowH - DAY_START) * HOUR_H - 1, height: 2, background: '#c15f3c', zIndex: 3, pointerEvents: 'none' }}>
-                    <div style={{ position: 'absolute', left: 0, top: -3, width: 8, height: 8, borderRadius: '50%', background: '#c15f3c' }} />
+                  <div style={{ position: 'absolute', left: -4, right: 0, top: (nowH - DAY_START) * HOUR_H - 1, height: 2, background: 'var(--accent)', zIndex: 3, pointerEvents: 'none' }}>
+                    <div style={{ position: 'absolute', left: 0, top: -3, width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }} />
                   </div>
                 )}
 
                 {/* Drag ghost */}
                 {ghost && ghost.date === d.dateStr && (
-                  <div style={{ position: 'absolute', left: 4, right: 4, top: ghost.startH * HOUR_H, height: Math.max((ghost.endH - ghost.startH) * HOUR_H, 12), background: 'rgba(95,117,145,.18)', borderLeft: '3px solid #5f7591', borderRadius: 8, padding: '4px 8px', pointerEvents: 'none' }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 600, color: '#5f7591' }}>{fmtH(ghost.startH)} – {fmtH(ghost.endH)}</div>
+                  <div style={{ position: 'absolute', left: 4, right: 4, top: ghost.startH * HOUR_H, height: Math.max((ghost.endH - ghost.startH) * HOUR_H, 12), background: 'rgba(95,117,145,.18)', borderLeft: '3px solid var(--blue)', borderRadius: 8, padding: '4px 8px', pointerEvents: 'none' }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--blue)' }}>{fmtH(ghost.startH)} – {fmtH(ghost.endH)}</div>
                   </div>
                 )}
               </div>

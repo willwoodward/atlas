@@ -1,3 +1,5 @@
+import { PageHeader, card, eyebrow } from '../components/ui.jsx'
+import { useFocusRequest, flash } from '../lib/focus.js'
 import { useState, useRef, useCallback, useEffect } from 'react'
 import CheckMark from '../components/CheckMark.jsx'
 import { useTodos } from '../context/TodosContext.jsx'
@@ -68,8 +70,8 @@ function SubTodoRow({ sub, onToggle, onRemove }) {
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', paddingLeft: 28 }}>
       <button onClick={() => onToggle(sub.id)}
         style={{ width: 15, height: 15, flex: 'none', borderRadius: 4,
-          border: `1.4px solid ${sub.done ? '#9a9488' : '#c9c2b3'}`,
-          background: sub.done ? '#9a9488' : 'transparent',
+          border: `1.4px solid ${sub.done ? 'var(--stone)' : '#c9c2b3'}`,
+          background: sub.done ? 'var(--stone)' : 'transparent',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           cursor: 'pointer', padding: 0, transition: 'all .12s' }}>
         {sub.done && <CheckMark size={8} />}
@@ -242,7 +244,7 @@ function BucketSection({ bucket, todos, goals, onToggle, onRemove, onAdd, onAddS
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, paddingBottom: 11, borderBottom: '1px solid var(--bd-sm)' }}>
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: bucket.color, flexShrink: 0 }} />
-        <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 18, fontWeight: 600, flex: 1 }}>{bucket.label}</h2>
+        <h2 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 600, flex: 1 }}>{bucket.label}</h2>
         <span style={{ fontSize: 12, color: 'var(--muted)' }}>{activeTodos.length === 0 ? '—' : openCount > 0 ? `${openCount} left` : 'all done'}</span>
       </div>
 
@@ -308,10 +310,10 @@ function WeeklyOutcomes() {
       style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 14, padding: '14px 16px 14px 20px', marginBottom: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>
+          <div style={{ ...eyebrow }}>
             {week === current ? "This week's outcomes" : rel ? `${rel}'s outcomes` : 'Outcomes'}
           </div>
-          <div style={{ fontSize: 12, color: week === current ? 'var(--mid)' : '#5f7591', marginTop: 2 }}>{formatWeekRange(week)}</div>
+          <div style={{ fontSize: 12, color: week === current ? 'var(--mid)' : 'var(--blue)', marginTop: 2 }}>{formatWeekRange(week)}</div>
         </div>
         {week !== current && (
           <button onClick={() => { setWeek(current); setShowHistory(false) }} style={{ ...navBtn, width: 'auto', padding: '0 8px', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', border: '1px solid var(--bd)' }}>This week</button>
@@ -334,7 +336,7 @@ function WeeklyOutcomes() {
           {outcomesHistory.map(r => (
             <button key={r.week_str} onClick={() => { setWeek(r.week_str); setShowHistory(false) }}
               style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 0', border: 'none', borderTop: '1px solid var(--bd-xs)', background: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: r.week_str === week ? '#5f7591' : 'var(--mid)' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: r.week_str === week ? 'var(--blue)' : 'var(--mid)' }}>
                 {relativeWeekLabel(r.week_str) ? `${relativeWeekLabel(r.week_str)} · ` : ''}{formatWeekRange(r.week_str)}
               </div>
               <div style={{ fontSize: 13, color: 'var(--ink)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.text.split('\n')[0]}</div>
@@ -354,7 +356,7 @@ function WeeklyOutcomes() {
       )}
 
       {isSunday && week === current && !showHistory && (
-        <button onClick={() => go(1)} style={{ marginTop: 4, fontSize: 12.5, fontWeight: 600, color: '#5f7591', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}>
+        <button onClick={() => go(1)} style={{ marginTop: 4, fontSize: 12.5, fontWeight: 600, color: 'var(--blue)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}>
           Plan next week →
         </button>
       )}
@@ -365,6 +367,7 @@ function WeeklyOutcomes() {
 export default function TodoPage() {
   const isMobile = useIsMobile()
   const { todos, addTodo, addSubTodo, toggleTodo, removeTodo, reorderTodo } = useTodos()
+  useFocusRequest(['todo'], t => flash(`[data-todo-id="${t.id}"]`))
   const { goals } = useGoals()
 
   const [showAllCompleted, setShowAllCompleted] = useState(false)
@@ -539,12 +542,7 @@ export default function TodoPage() {
 
   return (
     <div>
-      <div style={{ marginBottom: 22 }}>
-        <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>To-do</h1>
-        <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>
-          {totalOpen > 0 ? `${totalOpen} open` : 'All clear.'}
-        </p>
-      </div>
+      <PageHeader title="To-do" subtitle={totalOpen > 0 ? `${totalOpen} open` : 'All clear.'} isMobile={isMobile} />
 
       <WeeklyOutcomes />
 
@@ -602,7 +600,7 @@ export default function TodoPage() {
               Completed ({allDone.length})
             </button>
             {showAllCompleted && (
-              <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '12px 20px' }}>
+              <div style={{ ...card, padding: '12px 20px' }}>
                 {allDone.map((t, idx) => (
                   <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 0', borderTop: idx === 0 ? 'none' : '1px solid var(--bd-xs)' }}>
                     <button onClick={() => toggleTodo(t.id)}

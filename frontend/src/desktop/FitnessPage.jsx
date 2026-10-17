@@ -1,3 +1,4 @@
+import { PageHeader } from '../components/ui.jsx'
 import { useState } from 'react'
 import { useFitness } from '../context/FitnessContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
@@ -237,7 +238,7 @@ function Tile({ label, value, sub }) {
   return (
     <div style={{ minWidth: 0 }}>
       <div style={eyebrow}>{label}</div>
-      <div style={{ marginTop: 4, fontFamily: "'Newsreader', serif", fontSize: 21, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</div>
+      <div style={{ marginTop: 4, fontFamily: 'var(--font-serif)', fontSize: 21, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</div>
       {sub && <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</div>}
     </div>
   )
@@ -309,7 +310,7 @@ function StravaCard() {
       {header}
 
       {stravaError && (
-        <div style={{ fontSize: 12.5, color: '#c15f3c', background: 'var(--surface-2)', borderRadius: 10, padding: '10px 12px', marginBottom: 14 }}>{stravaError}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--accent)', background: 'var(--surface-2)', borderRadius: 10, padding: '10px 12px', marginBottom: 14 }}>{stravaError}</div>
       )}
 
       {!strava.configured && <StravaSetup />}
@@ -357,7 +358,7 @@ function StravaCard() {
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', flex: 'none' }}>
-                    <div style={{ fontFamily: "'Newsreader', serif", fontSize: 14.5, fontWeight: 600 }}>{fmtDist(r.sport, r.distance)}</div>
+                    <div style={{ fontFamily: 'var(--font-serif)', fontSize: 14.5, fontWeight: 600 }}>{fmtDist(r.sport, r.distance)}</div>
                     {/* Strava's brand guidelines require a link back to each activity. */}
                     <a href={r.url} target="_blank" rel="noreferrer" style={{ fontSize: 11, fontWeight: 600, color: STRAVA_ORANGE, textDecoration: 'none' }}>View on Strava</a>
                   </div>
@@ -466,7 +467,7 @@ function ExerciseRow({ ex, color }) {
         </div>
       </div>
       <Sparkline history={ex.history} color={color} />
-      <div style={{ fontFamily: "'Newsreader', serif", fontSize: 16, fontWeight: 600, minWidth: 62, textAlign: 'right', flex: 'none' }}>
+      <div style={{ fontFamily: 'var(--font-serif)', fontSize: 16, fontWeight: 600, minWidth: 62, textAlign: 'right', flex: 'none' }}>
         {ex.weight != null ? `${ex.weight} ${ex.unit}` : 'BW'}
       </div>
     </button>
@@ -562,10 +563,7 @@ export default function FitnessPage() {
   const isMobile = useIsMobile()
   return (
     <div>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>Fitness</h1>
-        <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>Weekly swim, run and ride volume, and what you're lifting.</p>
-      </div>
+      <PageHeader title="Fitness" subtitle="Weekly swim, run and ride volume, and what you're lifting." isMobile={isMobile} />
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.45fr) minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
         <StravaCard />
         <GymCard />

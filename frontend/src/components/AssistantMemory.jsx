@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { useVoiceSettings, setVoiceSettings, CONVERSATION_SILENCE } from '../lib/voiceSettings.js'
 import { useKeybinds } from '../context/KeybindsContext.jsx'
 import { displayCombo } from '../lib/keybinds.js'
+import { Button, Switch, field, kbd } from './ui.jsx'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -127,25 +128,14 @@ function VoiceSettings() {
       </SettingRow>
       <SettingRow title="Send automatically"
         detail="Sends what you said as soon as it's transcribed. Turn off to check and edit it in the box first.">
-        <Switch checked={autoSend || keepListening} onChange={v => setVoiceSettings({ autoSend: v })} label="Send automatically" disabled={keepListening} />
+        <Switch checked={autoSend || keepListening} onChange={v => setVoiceSettings({ autoSend: v })} label="Send automatically" disabled={keepListening}
+          title={keepListening ? 'Always on while “Keep listening” is on' : undefined} />
       </SettingRow>
       <SettingRow title="Keep listening"
         detail={`A hands-free conversation: after Atlas replies, it starts listening again. Messages send when you pause${silenceSeconds ? '' : ` (${CONVERSATION_SILENCE} seconds, since stopping on a pause is off)`}. Say nothing, or press Esc, to end it.`}>
         <Switch checked={keepListening} onChange={v => setVoiceSettings({ keepListening: v })} label="Keep listening" />
       </SettingRow>
     </div>
-  )
-}
-
-const kbd = { fontFamily: 'inherit', fontSize: 12, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--bd-xl)', background: 'var(--surface-2)', color: 'var(--ink)' }
-
-function Switch({ checked, onChange, label, disabled }) {
-  return (
-    <button role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)} disabled={disabled}
-      title={disabled ? 'Always on while “Keep listening” is on' : undefined}
-      style={{ width: 40, height: 23, borderRadius: 99, border: 'none', padding: 2, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.55 : 1, background: checked ? '#c15f3c' : 'var(--surface-3)', transition: 'background .15s', display: 'flex' }}>
-      <span style={{ width: 19, height: 19, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.25)', transform: checked ? 'translateX(17px)' : 'none', transition: 'transform .15s' }} />
-    </button>
   )
 }
 
@@ -182,7 +172,6 @@ function DocEditor({ kind }) {
     setSaving(true)
     try { await fn(); setPreview(null); await load(); setSavedNote(true) } catch (e) { setErr(e.message) } finally { setSaving(false) }
   }
-  const btn = { fontSize: 13, padding: '7px 12px', borderRadius: 8, border: '1px solid var(--bd)', background: 'transparent', color: 'var(--mid)', fontFamily: 'inherit', cursor: 'pointer' }
 
   return (
     <>
@@ -191,36 +180,35 @@ function DocEditor({ kind }) {
           {doc.intro} Changes apply from your next conversation.
         </p>
         {versions.length > 0 && (
-          <button onClick={() => { setShowHistory(h => !h); setPreview(null) }}
-            style={{ ...btn, fontSize: 12.5, padding: '5px 10px', flex: 'none', background: showHistory ? 'var(--surface-2)' : 'transparent' }}>
+          <Button variant="ghost" size="sm" onClick={() => { setShowHistory(h => !h); setPreview(null) }}
+            style={{ flex: 'none', background: showHistory ? 'var(--surface-2)' : 'transparent' }}>
             {showHistory ? 'Back' : `History · ${versions.length}`}
-          </button>
+          </Button>
         )}
       </div>
 
       {loaded === null && !err && <div style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</div>}
-      {err && <div style={{ fontSize: 12.5, color: '#c15f3c', marginBottom: 10 }}>{err}</div>}
+      {err && <div style={{ fontSize: 12.5, color: 'var(--accent)', marginBottom: 10 }}>{err}</div>}
 
       {loaded && !showHistory && (
         <>
           <textarea value={draft} onChange={e => { setDraft(e.target.value); setSavedNote(false) }} spellCheck
             aria-label={doc.label} placeholder={doc.placeholder}
-            style={{ flex: 1, minHeight: 260, resize: 'none', padding: '12px 14px', borderRadius: 10, border: '1px solid var(--bd-xl)', background: 'var(--surface-2)', color: 'var(--ink)', fontSize: 13, lineHeight: 1.55, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', outline: 'none' }} />
+            style={{ ...field, flex: 1, minHeight: 260, resize: 'none', padding: '12px 14px', borderRadius: 10, fontSize: 13, lineHeight: 1.55, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-            <span style={{ flex: 1, minWidth: 160, fontSize: 12, color: draft.length > max ? '#c15f3c' : 'var(--faint)' }}>
+            <span style={{ flex: 1, minWidth: 160, fontSize: 12, color: draft.length > max ? 'var(--accent)' : 'var(--faint)' }}>
               {savedNote && !dirty ? 'Saved · applies from your next conversation'
                 : loaded.version ? `${SOURCE_LABEL[loaded.source] || loaded.source} · ${when(loaded.created_at)}`
                 : kind === 'prompt' ? 'Default' : 'Nothing saved yet'}
               {' · '}{draft.length.toLocaleString()} / {max.toLocaleString()}
             </span>
             {kind === 'prompt' && !isDefault && !dirty && (
-              <button onClick={() => act(() => api.restore(0))} disabled={saving} style={btn}>Reset to default</button>
+              <Button variant="ghost" onClick={() => act(() => api.restore(0))} disabled={saving}>Reset to default</Button>
             )}
-            {dirty && <button onClick={() => setDraft(loaded.content)} disabled={saving} style={btn}>Discard</button>}
-            <button onClick={() => act(() => api.save(draft))} disabled={!dirty || saving || draft.length > max}
-              style={{ ...btn, border: 'none', padding: '7px 14px', background: dirty ? '#c15f3c' : 'var(--surface-3)', color: dirty ? '#fff' : 'var(--faint)', cursor: dirty ? 'pointer' : 'default' }}>
+            {dirty && <Button variant="ghost" onClick={() => setDraft(loaded.content)} disabled={saving}>Discard</Button>}
+            <Button variant="primary" onClick={() => act(() => api.save(draft))} disabled={!dirty || saving || draft.length > max}>
               {saving ? 'Saving…' : 'Save'}
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -284,7 +272,7 @@ export function MemoryEditChip({ edit }) {
             style={{ fontSize: 11.5, padding: '1px 8px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--surface)', color: 'var(--mid)', fontFamily: 'inherit', cursor: 'pointer' }}>
             {state === 'working' ? '…' : 'Undo'}
           </button>}
-      {state === 'failed' && <span style={{ color: '#c15f3c' }}>couldn't undo</span>}
+      {state === 'failed' && <span style={{ color: 'var(--accent)' }}>couldn't undo</span>}
     </span>
   )
 }

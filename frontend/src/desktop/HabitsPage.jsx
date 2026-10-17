@@ -1,3 +1,5 @@
+import { PageHeader, card, eyebrow } from '../components/ui.jsx'
+import { useFocusRequest, flash } from '../lib/focus.js'
 import { useState } from 'react'
 import CheckMark from '../components/CheckMark.jsx'
 import { useHabits, HABIT_PERIODS } from '../context/HabitsContext.jsx'
@@ -36,7 +38,7 @@ function AddForm({ onAdd, onCancel }) {
           </button>
         ))}
         <div style={{ flex: 1 }} />
-        <button type="submit" style={{ padding: '7px 14px', borderRadius: 8, border: 'none', background: '#c15f3c', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Add</button>
+        <button type="submit" style={{ padding: '7px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Add</button>
         <button type="button" onClick={onCancel} style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--bd-xl)', background: 'transparent', color: 'var(--mid)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
       </div>
     </form>
@@ -55,6 +57,7 @@ export default function HabitsPage() {
   const isMobile = useIsMobile()
   const { habits, weekDates, last30, today, addHabit, removeHabit, toggleCompletion } = useHabits()
   const [open, setOpen] = useState({})
+  useFocusRequest(['habit'], t => flash(`[data-search-id="habit:${t.id}"]`))
   const [adding, setAdding] = useState(false)
   useQuickAdd('Add habit', () => setAdding(true))
 
@@ -63,17 +66,12 @@ export default function HabitsPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 22 }}>
-        <div>
-          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>Habits</h1>
-          <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>This week · consistency builds the compound.</p>
-        </div>
-      </div>
+      <PageHeader title="Habits" subtitle="This week · consistency builds the compound." isMobile={isMobile} />
 
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: isMobile ? '8px 16px' : '8px 24px', overflowX: 'auto' }}>
+      <div style={{ ...card, padding: 0, padding: isMobile ? '8px 16px' : '8px 24px', overflowX: 'auto' }}>
         <div style={{ minWidth: isMobile ? 620 : 'unset' }}>
         {/* Header */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 208px 90px 70px 26px', gap: 20, padding: '14px 0 12px', borderBottom: '1px solid var(--bd-sm)', fontSize: 11, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 208px 90px 70px 26px', gap: 20, padding: '14px 0 12px', borderBottom: '1px solid var(--bd-sm)', ...eyebrow }}>
           <div>Habit</div>
           <div style={{ display: 'flex', gap: 9 }}>
             {DOW.map((d, i) => (
@@ -103,7 +101,7 @@ export default function HabitsPage() {
           const bi = HABIT_PERIODS.findIndex(p => p.color === b.color)
           return ai - bi
         }).map(h => (
-          <div key={h.id} style={{ borderTop: '1px solid var(--bd-xs)' }}>
+          <div key={h.id} data-search-id={`habit:${h.id}`} style={{ borderTop: '1px solid var(--bd-xs)' }}>
             <div
               onClick={() => setOpen(p => ({ ...p, [h.id]: !p[h.id] }))}
               style={{ display: 'grid', gridTemplateColumns: '1.4fr 208px 90px 70px 26px', gap: 20, alignItems: 'center', padding: '16px 0', cursor: 'pointer' }}
@@ -118,7 +116,7 @@ export default function HabitsPage() {
                   : <span key={i} style={{ width: 22, height: 22, borderRadius: 7, background: 'var(--surface-3)', opacity: 0.35, flexShrink: 0 }} />
                 )}
               </div>
-              <div style={{ textAlign: 'right', fontFamily: "'Newsreader', serif", fontSize: 17, fontWeight: 600, color: h.color }}>
+              <div style={{ textAlign: 'right', fontFamily: 'var(--font-serif)', fontSize: 17, fontWeight: 600, color: h.color }}>
                 {h.streak}<span style={{ fontSize: 11, fontFamily: "'Hanken Grotesk'", color: 'var(--muted)', fontWeight: 500 }}> d</span>
               </div>
               <div style={{ textAlign: 'right', fontSize: 13, fontWeight: 600, color: 'var(--mid)' }}>{h.pct}%</div>
@@ -131,12 +129,12 @@ export default function HabitsPage() {
               <div style={{ padding: '2px 0 22px 21px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 11 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>Last 30 days</span>
+                    <span style={{ ...eyebrow }}>Last 30 days</span>
                     <span style={{ fontSize: 12, color: 'var(--muted)' }}>{h.history.filter(Boolean).length} of 30 days</span>
                   </div>
                   <button
                     onClick={() => window.confirm(`Remove "${h.name}"?`) && removeHabit(h.id)}
-                    style={{ fontSize: 12, color: '#c15f3c', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: 6 }}
+                    style={{ fontSize: 12, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: 6 }}
                   >Remove</button>
                 </div>
                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', maxWidth: 560 }}>

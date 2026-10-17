@@ -6,7 +6,7 @@ export default function TabletHabitsPage() {
 
   return (
     <div style={{ padding: '14px 44px 30px' }}>
-      <h1 style={{ margin: '0 0 4px', fontFamily: "'Newsreader', serif", fontSize: 32, fontWeight: 500 }}>Habits</h1>
+      <h1 style={{ margin: '0 0 4px', fontFamily: 'var(--font-serif)', fontSize: 32, fontWeight: 500 }}>Habits</h1>
       <p style={{ margin: '0 0 18px', fontSize: 14, color: 'var(--mid)' }}>This week · consistency builds the compound.</p>
 
       {habits.length === 0 && (
@@ -19,7 +19,7 @@ export default function TabletHabitsPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 11 }}>
               <span style={{ width: 10, height: 10, borderRadius: '50%', background: h.color }} />
               <span style={{ flex: 1, fontSize: 15.5, fontWeight: 500 }}>{h.name}</span>
-              <span style={{ fontFamily: "'Newsreader', serif", fontSize: 17, fontWeight: 600, color: h.color }}>
+              <span style={{ fontFamily: 'var(--font-serif)', fontSize: 17, fontWeight: 600, color: h.color }}>
                 {h.streak}<span style={{ fontSize: 11, fontFamily: "'Hanken Grotesk'", color: 'var(--muted)', fontWeight: 500 }}> d</span>
               </span>
             </div>

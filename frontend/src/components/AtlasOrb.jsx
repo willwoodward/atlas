@@ -3,7 +3,7 @@ export default function AtlasOrb({ orbSize = 200, ring1 = 300, ring2 = 240 }) {
   const eqHeight = Math.round(ring1 * 0.073)
   return (
     <div style={{ position: 'relative', width: ring1, height: ring1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ position: 'absolute', width: ring1, height: ring1, borderRadius: '50%', border: '1px solid rgba(193,95,60,.35)', animation: 'pulsering 3.4s ease-in-out infinite' }} />
+      <div style={{ position: 'absolute', width: ring1, height: ring1, borderRadius: '50%', border: '1px solid var(--accent-line)', animation: 'pulsering 3.4s ease-in-out infinite' }} />
       <div style={{ position: 'absolute', width: ring2, height: ring2, borderRadius: '50%', border: '1px solid rgba(193,95,60,.5)', animation: 'pulsering 3.4s ease-in-out .4s infinite' }} />
       <div style={{
         position: 'relative', width: orbSize, height: orbSize, borderRadius: '50%', overflow: 'hidden',

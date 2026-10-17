@@ -1,3 +1,5 @@
+import { PageHeader, card, eyebrow } from '../components/ui.jsx'
+import { useFocusRequest, flash } from '../lib/focus.js'
 import { useState, useRef, useEffect } from 'react'
 import { useGoals, GOAL_PALETTE } from '../context/GoalsContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
@@ -48,7 +50,7 @@ function GoalCard({ goal, onRemove, onUpdate, onQuarterFocus }) {
   }
 
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 18, overflow: 'hidden' }}>
+    <div data-search-id={`goal:${goal.id}`} style={{ ...card, padding: 0, overflow: 'hidden' }}>
       {/* Card header */}
       <div style={{ borderLeft: `4px solid ${goal.color}`, padding: '20px 22px 16px 20px' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 18 }}>
@@ -59,12 +61,12 @@ function GoalCard({ goal, onRemove, onUpdate, onQuarterFocus }) {
               onChange={e => setTitleDraft(e.target.value)}
               onBlur={commitTitle}
               onKeyDown={e => { if (e.key === 'Enter') commitTitle(); if (e.key === 'Escape') { setTitleDraft(goal.title); setEditingTitle(false) } }}
-              style={{ flex: 1, fontFamily: "'Newsreader', serif", fontSize: 20, fontWeight: 600, border: 'none', outline: `2px solid ${goal.color}`, borderRadius: 6, padding: '2px 6px', background: 'var(--surface)', color: 'var(--ink)' }}
+              style={{ flex: 1, fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 600, border: 'none', outline: `2px solid ${goal.color}`, borderRadius: 6, padding: '2px 6px', background: 'var(--surface)', color: 'var(--ink)' }}
             />
           ) : (
             <h3
               onClick={() => setEditingTitle(true)}
-              style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 20, fontWeight: 600, cursor: 'text', flex: 1, lineHeight: 1.3 }}
+              style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 600, cursor: 'text', flex: 1, lineHeight: 1.3 }}
             >
               {goal.title}
             </h3>
@@ -113,7 +115,7 @@ function GoalCard({ goal, onRemove, onUpdate, onQuarterFocus }) {
 
       {/* Quarter focus area */}
       <div style={{ padding: '14px 22px 20px 20px', borderTop: '1px solid var(--bd-xs)' }}>
-        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 }}>
+        <div style={{ ...eyebrow, marginBottom: 8 }}>
           {activeQ} · {QUARTER_LABELS[activeQ]}
           {activeQ === CURRENT_Q && (
             <span style={{ marginLeft: 8, color: goal.color, letterSpacing: 0, textTransform: 'none', fontWeight: 500 }}>current</span>
@@ -144,7 +146,7 @@ function GoalTagsInput({ goal, onUpdate }) {
   return (
     <div style={{ padding: '10px 22px 14px 20px', borderTop: '1px solid var(--bd-xs)', display: 'flex', alignItems: 'center', gap: 10 }}>
       <span title="Calendar events containing these words count towards this goal's time on Home. Use * for any text, e.g. dinner w/*"
-        style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', flex: 'none', cursor: 'help' }}>
+        style={{ ...eyebrow, flex: 'none', cursor: 'help' }}>
         Calendar tags
       </span>
       <input
@@ -288,7 +290,7 @@ function QuarterlyReviewDrawer({ onClose }) {
                 {q}
                 <span style={{ display: 'block', fontSize: 10.5, fontWeight: 500, marginTop: 1, opacity: .75 }}>{QUARTER_LABELS[q]}</span>
                 {written && !active && (
-                  <span style={{ position: 'absolute', top: 6, right: 8, width: 5, height: 5, borderRadius: '50%', background: '#c15f3c' }} />
+                  <span style={{ position: 'absolute', top: 6, right: 8, width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)' }} />
                 )}
               </button>
             )
@@ -298,7 +300,7 @@ function QuarterlyReviewDrawer({ onClose }) {
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '18px 24px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           {focuses.length > 0 && (
             <div>
-              <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 8 }}>
+              <div style={{ ...eyebrow, marginBottom: 8 }}>
                 What you set out to do
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -323,7 +325,7 @@ function AddGoalForm({ onAdd, onCancel }) {
   return (
     <form
       onSubmit={e => { e.preventDefault(); if (title.trim()) { onAdd(title.trim(), color); } }}
-      style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 18, padding: '20px 22px', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}
+      style={{ ...card, padding: '20px 22px', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}
     >
       <input
         autoFocus
@@ -349,6 +351,7 @@ export default function GoalsPage() {
   const isMobile = useIsMobile()
   const { goals, addGoal, removeGoal, updateGoal, setQuarterFocus } = useGoals()
   const [adding, setAdding] = useState(false)
+  useFocusRequest(['goal'], t => flash(`[data-search-id="goal:${t.id}"]`))
   const [reviewing, setReviewing] = useState(false)
   useQuickAdd('Add goal', () => setAdding(true))
 
@@ -359,12 +362,7 @@ export default function GoalsPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 26 }}>
-        <div>
-          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>Goals</h1>
-          <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>The bigger arcs — where the days are pointing.</p>
-        </div>
-      </div>
+      <PageHeader title="Goals" subtitle="The bigger arcs — where the days are pointing." isMobile={isMobile} />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {goals.length === 0 && !adding && (
@@ -387,7 +385,7 @@ export default function GoalsPage() {
             cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', color: 'var(--ink)' }}
         >
           <span>
-            <span style={{ display: 'block', fontFamily: "'Newsreader', serif", fontSize: 18, fontWeight: 500 }}>Quarterly review</span>
+            <span style={{ display: 'block', fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 500 }}>Quarterly review</span>
             <span style={{ display: 'block', fontSize: 13, color: 'var(--mid)', marginTop: 2 }}>
               Reflect on {CURRENT_Q} {CURRENT_YEAR}, or look back at earlier quarters.
             </span>

@@ -32,7 +32,7 @@ function Donut({ data, total, hovered, setHovered, onSelect, fmt }) {
           return el
         })}
       </g>
-      <text x="50%" y={SIZE / 2 - 4} textAnchor="middle" pointerEvents="none" style={{ fontFamily: "'Newsreader', serif", fontSize: 17, fontWeight: 600, fill: 'var(--ink)' }}>
+      <text x="50%" y={SIZE / 2 - 4} textAnchor="middle" pointerEvents="none" style={{ fontFamily: 'var(--font-serif)', fontSize: 17, fontWeight: 600, fill: 'var(--ink)' }}>
         {fmt(focus ? focus.total : total, 0)}
       </text>
       <text x="50%" y={SIZE / 2 + 14} textAnchor="middle" pointerEvents="none" style={{ fontSize: 10.5, fill: 'var(--muted)' }}>
@@ -54,11 +54,11 @@ function AutoCategoriseButton() {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
       <button onClick={run} disabled={state === 'busy'}
-        style={{ fontSize: 12, fontWeight: 600, color: '#b08a3e', background: 'none', border: 'none', padding: 0, cursor: state === 'busy' ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+        style={{ fontSize: 12, fontWeight: 600, color: 'var(--gold)', background: 'none', border: 'none', padding: 0, cursor: state === 'busy' ? 'default' : 'pointer', fontFamily: 'inherit' }}>
         {state === 'busy' ? 'Categorising…' : '✦ Auto-categorise'}
       </button>
       {state?.n != null && <span style={{ color: 'var(--muted)' }}>{state.n} done</span>}
-      {state?.error && <span style={{ color: '#c15f3c' }}>{state.error}</span>}
+      {state?.error && <span style={{ color: 'var(--accent)' }}>{state.error}</span>}
     </span>
   )
 }
@@ -107,7 +107,7 @@ function Breakdown({ title, type, transactions, range, selected, onSelect }) {
             {uncategorised && (
               <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: '6px 14px', alignItems: 'center' }}>
                 <button onClick={() => select(uncategorised)}
-                  style={{ fontSize: 12, fontWeight: 600, color: '#c15f3c', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}>
                   Categorise the {fmt(uncategorised.total, 0)} uncategorised →
                 </button>
                 <AutoCategoriseButton />
@@ -131,7 +131,7 @@ export default function CategoryCharts({ selected, onSelect }) {
   return (
     <div style={{ ...card, padding: isMobile ? '18px 16px' : '20px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
-        <h2 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: 19, fontWeight: 600 }}>By category</h2>
+        <h2 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 19, fontWeight: 600 }}>By category</h2>
         {/* Six periods don't fit across a phone: a dropdown there, tabs elsewhere. */}
         {isMobile ? (
           <select value={period} onChange={e => setPeriod(e.target.value)} aria-label="Period"

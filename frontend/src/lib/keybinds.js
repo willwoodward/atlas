@@ -5,6 +5,7 @@
 // Windows/Linux and ⌘ on a Mac, so one binding works on both.
 
 export const SHORTCUTS = [
+  { id: 'search', label: 'Search', hint: 'Notes, to-dos, events, goals, transactions', default: 'Mod+/' },
   { id: 'voice', label: 'Start / stop voice input', hint: 'Opens the assistant if it isn’t on screen', default: 'Mod+K' },
   { id: 'assistantPanel', label: 'Open / close the assistant panel', hint: 'Desktop', default: 'Mod+.' },
 ]

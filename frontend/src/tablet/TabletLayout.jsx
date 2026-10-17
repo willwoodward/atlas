@@ -83,15 +83,15 @@ export default function TabletLayout() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#efeae0', overflow: 'hidden' }}>
 
       {/* Status bar */}
-      <div style={{ flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 30px 4px', fontSize: 12, fontWeight: 600, color: '#9a9488' }}>
+      <div style={{ flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 30px 4px', fontSize: 12, fontWeight: 600, color: 'var(--stone)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
           <span style={{ color: '#c9c2b3' }}>·</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ width: 22, height: 22, borderRadius: 7, background: '#c15f3c', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 22, height: 22, borderRadius: 7, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#efeae0' }} />
             </div>
-            <span style={{ fontFamily: "'Newsreader', serif", fontSize: 15, fontWeight: 600, color: '#2b2820' }}>Atlas</span>
+            <span style={{ fontFamily: 'var(--font-serif)', fontSize: 15, fontWeight: 600, color: '#2b2820' }}>Atlas</span>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -137,7 +137,7 @@ export default function TabletLayout() {
               height: 7, borderRadius: 99, border: 'none', cursor: 'pointer', padding: 0,
               transition: 'width .3s, background .3s',
               width: i === index ? 26 : 7,
-              background: i === index ? '#c15f3c' : 'rgba(43,40,32,.2)',
+              background: i === index ? 'var(--accent)' : 'rgba(43,40,32,.2)',
             }}
           />
         ))}

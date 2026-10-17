@@ -14,7 +14,7 @@ export default function LoginPage() {
 
       <div style={{ textAlign: 'center' }}>
         <h1 style={{
-          margin: '0 0 8px', fontFamily: "'Newsreader', serif",
+          margin: '0 0 8px', fontFamily: 'var(--font-serif)',
           fontSize: 38, fontWeight: 500, color: 'var(--ink)',
         }}>Atlas</h1>
         <p style={{ margin: 0, fontSize: 15, color: 'var(--mid)' }}>
@@ -49,7 +49,7 @@ export default function LoginPage() {
         </button>
 
         {error && (
-          <p style={{ margin: 0, fontSize: 13, color: '#c15f3c', textAlign: 'center', maxWidth: 300 }}>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--accent)', textAlign: 'center', maxWidth: 300 }}>
             {error}
           </p>
         )}

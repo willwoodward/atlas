@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useUser } from '../context/UserContext.jsx'
+import { onShortcut } from '../context/KeybindsContext.jsx'
+import SearchPalette from '../components/SearchPalette.jsx'
 import { useTheme } from '../context/ThemeContext.jsx'
 import { useQuickAddAction } from '../context/QuickAddContext.jsx'
 import HomePage      from '../desktop/HomePage.jsx'
@@ -47,7 +49,7 @@ const icons = {
 
 function Toggle({ checked, onChange }) {
   return (
-    <div onClick={onChange} style={{ width: 36, height: 21, borderRadius: 99, background: checked ? '#c15f3c' : 'var(--surface-3)', position: 'relative', cursor: 'pointer', transition: 'background .2s', flex: 'none' }}>
+    <div onClick={onChange} style={{ width: 36, height: 21, borderRadius: 99, background: checked ? 'var(--accent)' : 'var(--surface-3)', position: 'relative', cursor: 'pointer', transition: 'background .2s', flex: 'none' }}>
       <div style={{ position: 'absolute', top: 2.5, left: checked ? 17 : 2.5, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left .18s', boxShadow: '0 1px 4px rgba(0,0,0,.25)' }} />
     </div>
   )
@@ -60,6 +62,8 @@ export default function MobileLayout() {
   const { isDark, toggleTheme } = useTheme()
 
   const navigate = (id) => { setActive(id); setDrawerOpen(false) }
+  const [searchOpen, setSearchOpen] = useState(false)
+  useEffect(() => onShortcut('search', () => setSearchOpen(o => !o)), [])
   // The voice shortcut, pressed with no chat on screen (e.g. a keyboard on a tablet-size phone).
   useEffect(() => {
     const show = () => navigate('assistant')
@@ -99,11 +103,16 @@ export default function MobileLayout() {
         {/* Current page label — the Atlas brand lives in the drawer */}
         <span style={{ flex: 1, fontSize: 15, fontWeight: 600, color: 'var(--ink)', lineHeight: '32px' }}>{activeLabel}</span>
 
+        <button onClick={() => setSearchOpen(true)} aria-label="Search" title="Search"
+          style={{ width: 32, height: 32, borderRadius: 10, border: 'none', background: 'none', color: 'var(--ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', cursor: 'pointer', padding: 0 }}>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+        </button>
+
         {/* The page's primary action — the same one desktop shows as "+ <label>".
             Icon-only here for room, so the label goes to screen readers. */}
         {quickAdd && (
           <button onClick={quickAdd.run} aria-label={quickAdd.label} title={quickAdd.label}
-            style={{ width: 32, height: 32, borderRadius: 10, border: 'none', background: '#c15f3c', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', cursor: 'pointer', padding: 0, boxShadow: '0 2px 8px rgba(193,95,60,.32)' }}>
+            style={{ width: 32, height: 32, borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', cursor: 'pointer', padding: 0, boxShadow: 'var(--shadow-accent)' }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
         )}
@@ -142,10 +151,10 @@ export default function MobileLayout() {
         {/* Drawer header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 20px 20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <div style={{ width: 28, height: 28, borderRadius: 9, background: '#c15f3c', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ width: 28, height: 28, borderRadius: 9, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--surface-2)' }} />
             </div>
-            <span style={{ fontFamily: "'Newsreader', serif", fontSize: 18, fontWeight: 600, color: 'var(--ink)' }}>Atlas</span>
+            <span style={{ fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 600, color: 'var(--ink)' }}>Atlas</span>
           </div>
           <button onClick={() => setDrawerOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4, display: 'flex' }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -184,6 +193,7 @@ export default function MobileLayout() {
           </button>
         </div>
       </div>
+      {searchOpen && <SearchPalette onClose={() => setSearchOpen(false)} navigate={navigate} />}
     </div>
   )
 }

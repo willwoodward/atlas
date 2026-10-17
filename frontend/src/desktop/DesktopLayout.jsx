@@ -1,3 +1,4 @@
+import { Button, eyebrow, kbd } from '../components/ui.jsx'
 import { useEffect, useState } from 'react'
 import { dateLabel } from '../data.js'
 import { useIntegrations } from '../context/IntegrationsContext.jsx'
@@ -17,6 +18,7 @@ import GoalsPage     from './GoalsPage.jsx'
 import AssistantPage from './AssistantPage.jsx'
 import AccountsPage  from './AccountsPage.jsx'
 import AssistantPanel from './AssistantPanel.jsx'
+import SearchPalette from '../components/SearchPalette.jsx'
 
 const PANEL_KEY = 'atlas:assistant-panel'
 
@@ -76,7 +78,7 @@ function Toggle({ checked, onChange }) {
   return (
     <div
       onClick={onChange}
-      style={{ width: 38, height: 22, borderRadius: 99, background: checked ? '#c15f3c' : 'var(--surface-3)', position: 'relative', cursor: 'pointer', transition: 'background .2s', flex: 'none' }}
+      style={{ width: 38, height: 22, borderRadius: 99, background: checked ? 'var(--accent)' : 'var(--surface-3)', position: 'relative', cursor: 'pointer', transition: 'background .2s', flex: 'none' }}
     >
       <div style={{ position: 'absolute', top: 3, left: checked ? 19 : 3, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left .18s', boxShadow: '0 1px 4px rgba(0,0,0,.25)' }} />
     </div>
@@ -138,7 +140,7 @@ function AccountModal({ onClose, setActive }) {
 
         {/* Connections */}
         <div style={{ padding: '12px 16px' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 10 }}>Connections</div>
+          <div style={{ ...eyebrow, fontSize: 10, marginBottom: 10 }}>Connections</div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
             <span style={{ fontSize: 15 }}>📅</span>
@@ -146,11 +148,11 @@ function AccountModal({ onClose, setActive }) {
             {gcal.connected
               ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#6f8168' }} />
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--sage)' }} />
                   <button onClick={disconnectGoogle} style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>Disconnect</button>
                 </div>
               )
-              : <button onClick={connectGoogle} style={{ fontSize: 11.5, fontWeight: 600, color: '#c15f3c', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>Connect</button>
+              : <button onClick={connectGoogle} style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit' }}>Connect</button>
             }
           </div>
         </div>
@@ -159,7 +161,7 @@ function AccountModal({ onClose, setActive }) {
 
         {/* Settings */}
         <div style={{ padding: '12px 16px' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 10 }}>Appearance</div>
+          <div style={{ ...eyebrow, fontSize: 10, marginBottom: 10 }}>Appearance</div>
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 13, color: 'var(--ink)' }}>Dark mode</span>
@@ -203,7 +205,12 @@ export default function DesktopLayout() {
     return () => window.removeEventListener('atlas:show-assistant', show)
   }, [])
   const { bindings } = useKeybinds()
+  const [searchOpen, setSearchOpen] = useState(false)
+  useEffect(() => onShortcut('search', () => setSearchOpen(o => !o)), [])
   const showPanel = panelOpen && active !== 'assistant'
+  // Kept mounted through its exit animation.
+  const [panelMounted, setPanelMounted] = useState(showPanel)
+  useEffect(() => { if (showPanel) setPanelMounted(true) }, [showPanel])
 
   const pages = {
     home:      <HomePage />,
@@ -226,10 +233,10 @@ export default function DesktopLayout() {
 
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '4px 8px 22px' }}>
-          <div style={{ width: 30, height: 30, borderRadius: 9, background: '#c15f3c', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(193,95,60,.35)' }}>
+          <div style={{ width: 30, height: 30, borderRadius: 9, background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px var(--accent-line)' }}>
             <div style={{ width: 11, height: 11, borderRadius: '50%', background: 'var(--surface-2)' }} />
           </div>
-          <div style={{ fontFamily: "'Newsreader', serif", fontSize: 19, fontWeight: 600, letterSpacing: '.01em', color: 'var(--ink)' }}>Atlas</div>
+          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 19, fontWeight: 600, letterSpacing: '.01em', color: 'var(--ink)' }}>Atlas</div>
         </div>
 
         {/* Main nav */}
@@ -278,12 +285,14 @@ export default function DesktopLayout() {
       <main style={{ flex: 1, height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <header style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 16, padding: '16px 34px', background: 'var(--bg-blur)', backdropFilter: 'blur(10px)', borderBottom: '1px solid var(--bd-sm)' }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)' }}>{dateLabel}</div>
+            <div style={{ ...eyebrow, fontSize: 12 }}>{dateLabel}</div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 14px', borderRadius: 11, background: 'var(--surface-2)', border: '1px solid var(--bd)', minWidth: 240, color: 'var(--muted)' }}>
+          <button onClick={() => setSearchOpen(true)} aria-label="Search"
+            style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 14px', borderRadius: 11, background: 'var(--surface-2)', border: '1px solid var(--bd)', minWidth: 240, color: 'var(--muted)', cursor: 'pointer', fontFamily: 'inherit' }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
             <span style={{ fontSize: 13 }}>Search everything…</span>
-          </div>
+            {bindings.search && <span style={{ ...kbd, marginLeft: 'auto' }}>{displayCombo(bindings.search)}</span>}
+          </button>
           {active !== 'assistant' && (
             <button onClick={() => setPanelOpen(o => !o)} aria-pressed={panelOpen}
               aria-label={panelOpen ? 'Close assistant panel' : 'Open assistant panel'} title={`${panelOpen ? 'Close' : 'Open'} assistant panel${bindings.assistantPanel ? ` (${displayCombo(bindings.assistantPanel)})` : ''}`}
@@ -293,10 +302,10 @@ export default function DesktopLayout() {
           )}
           {/* The page's primary action. Hidden where a page has none (Accounts). */}
           {quickAdd && (
-            <button onClick={quickAdd.run} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 15px', borderRadius: 11, border: 'none', background: '#c15f3c', color: '#fff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, lineHeight: 1, cursor: 'pointer', boxShadow: '0 2px 8px rgba(193,95,60,.32)', whiteSpace: 'nowrap' }}>
+            <Button variant="primary" raised onClick={quickAdd.run} style={{ gap: 8, padding: '9px 15px', borderRadius: 'var(--radius)', lineHeight: 1 }}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               {quickAdd.label}
-            </button>
+            </Button>
           )}
         </header>
         <div style={{ padding: active === 'assistant' ? '0px 34px 0' : '30px 34px 40px', flex: 1, minHeight: 0, overflowY: active === 'calendar' ? 'hidden' : 'auto', display: 'flex', flexDirection: 'column' }}>
@@ -304,7 +313,9 @@ export default function DesktopLayout() {
         </div>
       </main>
 
-      {showPanel && <AssistantPanel onClose={() => setPanelOpen(false)} onExpand={() => { setPanelOpen(false); setActive('assistant') }} />}
+      {searchOpen && <SearchPalette onClose={() => setSearchOpen(false)} navigate={setActive} />}
+      {panelMounted && <AssistantPanel open={showPanel} onExited={() => setPanelMounted(false)}
+        onClose={() => setPanelOpen(false)} onExpand={() => { setPanelOpen(false); setActive('assistant') }} />}
     </div>
   )
 }

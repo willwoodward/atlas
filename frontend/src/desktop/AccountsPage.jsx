@@ -1,3 +1,4 @@
+import { Button, PageHeader, card, eyebrow, groupTitle } from '../components/ui.jsx'
 import KeybindsSettings from '../components/KeybindsSettings.jsx'
 import { useState, useCallback } from 'react'
 import { useIntegrations } from '../context/IntegrationsContext.jsx'
@@ -7,13 +8,13 @@ import { useIsMobile } from '../hooks/useIsMobile.js'
 
 function StatusBadge({ connected }) {
   return connected
-    ? <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 99, background: 'rgba(111,129,104,.15)', color: '#6f8168' }}>Connected</span>
+    ? <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 99, background: 'rgba(111,129,104,.15)', color: 'var(--sage)' }}>Connected</span>
     : <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 99, background: 'var(--surface-3)', color: 'var(--muted)' }}>Not connected</span>
 }
 
 function IntegrationCard({ icon, name, description, connected, onConnect, onDisconnect, warning }) {
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '22px 24px', display: 'flex', alignItems: 'center', gap: 18 }}>
+    <div style={{ ...card, padding: '22px 24px', display: 'flex', alignItems: 'center', gap: 18 }}>
       <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 22 }}>
         {icon}
       </div>
@@ -24,7 +25,7 @@ function IntegrationCard({ icon, name, description, connected, onConnect, onDisc
         </div>
         <div style={{ fontSize: 13, color: 'var(--mid)', lineHeight: 1.4 }}>{description}</div>
         {warning && (
-          <div style={{ marginTop: 7, display: 'inline-flex', fontSize: 12, color: '#b08a3e', background: 'rgba(176,138,62,.12)', padding: '4px 10px', borderRadius: 7 }}>
+          <div style={{ marginTop: 7, display: 'inline-flex', fontSize: 12, color: 'var(--gold)', background: 'rgba(176,138,62,.12)', padding: '4px 10px', borderRadius: 7 }}>
             {warning}
           </div>
         )}
@@ -39,7 +40,7 @@ function IntegrationCard({ icon, name, description, connected, onConnect, onDisc
 
 function ComingSoonCard({ icon, name, description }) {
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '22px 24px', display: 'flex', alignItems: 'center', gap: 18, opacity: 0.5 }}>
+    <div style={{ ...card, padding: '22px 24px', display: 'flex', alignItems: 'center', gap: 18, opacity: 0.5 }}>
       <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 22 }}>{icon}</div>
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{name}</div>
@@ -76,7 +77,7 @@ function GitHubCard() {
   }
 
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '22px 24px' }}>
+    <div style={{ ...card, padding: '22px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
         <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', fontSize: 22 }}>
           🐙
@@ -113,7 +114,7 @@ function GitHubCard() {
             type="password"
             style={{ padding: '9px 13px', borderRadius: 9, border: '1.5px solid var(--bd-xl)', background: 'var(--surface-2)', fontSize: 13.5, fontFamily: 'inherit', color: 'var(--ink)', outline: 'none' }}
           />
-          {error && <div style={{ fontSize: 12, color: '#c15f3c' }}>{error}</div>}
+          {error && <div style={{ fontSize: 12, color: 'var(--accent)' }}>{error}</div>}
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="submit" disabled={loading}
               style={{ padding: '8px 18px', borderRadius: 9, border: 'none', background: 'var(--ink)', color: 'var(--surface-2)', fontSize: 13, fontWeight: 600, cursor: loading ? 'default' : 'pointer', fontFamily: 'inherit', opacity: loading ? 0.7 : 1 }}>
@@ -225,7 +226,7 @@ function MigrationCard() {
   }
 
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 16, padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div style={{ ...card, padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 3 }}>One-time data migration</div>
@@ -245,7 +246,7 @@ function MigrationCard() {
       {progress.length > 0 && (
         <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 5 }}>
           {progress.map((p, i) => (
-            <div key={i} style={{ fontSize: 12.5, color: p.ok ? 'var(--mid)' : '#c15f3c', fontFamily: 'monospace' }}>
+            <div key={i} style={{ fontSize: 12.5, color: p.ok ? 'var(--mid)' : 'var(--accent)', fontFamily: 'monospace' }}>
               {p.ok ? '✓' : '✗'} {p.msg}
             </div>
           ))}
@@ -263,27 +264,20 @@ export default function AccountsPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'flex-end', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', gap: isMobile ? 12 : 0, marginBottom: 28 }}>
-        <div>
-          <h1 style={{ margin: 0, fontFamily: "'Newsreader', serif", fontSize: isMobile ? 26 : 34, fontWeight: 500 }}>Settings</h1>
-          <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--mid)' }}>Connections, keyboard shortcuts and your data.</p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 4 }}>
+      <PageHeader title="Settings" subtitle="Connections, keyboard shortcuts and your data." isMobile={isMobile} stackOnMobile>
+        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, flexWrap: 'wrap', paddingBottom: 4 }}>
           {user && <span style={{ fontSize: 13, color: 'var(--mid)' }}>{user.email}</span>}
-          <button onClick={() => signOut()} style={{ padding: '7px 14px', borderRadius: 9, border: '1px solid var(--bd-xl)', background: 'transparent', color: 'var(--mid)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
-            Sign out
-          </button>
-          <button title="Signs out every phone, laptop and browser — use if you think a session has leaked"
-            onClick={() => window.confirm('Sign out on every device? You will need to sign in again everywhere.') && signOut({ everywhere: true })}
-            style={{ padding: '7px 14px', borderRadius: 9, border: '1px solid rgba(193,95,60,.35)', background: 'transparent', color: '#c15f3c', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>
+          <Button variant="ghost" onClick={() => signOut()}>Sign out</Button>
+          <Button variant="danger" title="Signs out every phone, laptop and browser — use if you think a session has leaked"
+            onClick={() => window.confirm('Sign out on every device? You will need to sign in again everywhere.') && signOut({ everywhere: true })}>
             Sign out of all devices
-          </button>
+          </Button>
         </div>
-      </div>
+      </PageHeader>
 
       <div style={{ maxWidth: 720, display: 'flex', flexDirection: 'column', gap: 10 }}>
 
-        <h2 style={{ margin: '4px 0 6px', fontFamily: "'Newsreader', serif", fontSize: 17, fontWeight: 600, color: 'var(--muted)' }}>Calendar</h2>
+        <h2 style={groupTitle}>Calendar</h2>
 
         <IntegrationCard
           icon="📅"
@@ -296,17 +290,17 @@ export default function AccountsPage() {
         />
 
         {gcal.error && (
-          <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(193,95,60,.08)', border: '1px solid rgba(193,95,60,.2)', fontSize: 13, color: '#c15f3c' }}>
+          <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(193,95,60,.08)', border: '1px solid rgba(193,95,60,.2)', fontSize: 13, color: 'var(--accent)' }}>
             ⚠ {gcal.error}
           </div>
         )}
 
-        <h2 style={{ margin: '16px 0 6px', fontFamily: "'Newsreader', serif", fontSize: 17, fontWeight: 600, color: 'var(--muted)' }}>Finance</h2>
+        <h2 style={groupTitle}>Finance</h2>
         <ComingSoonCard icon="🏦" name="Plaid" description="Connect bank accounts, savings, and credit cards to track net worth and spending automatically." />
 
-        <h2 style={{ margin: '16px 0 6px', fontFamily: "'Newsreader', serif", fontSize: 17, fontWeight: 600, color: 'var(--muted)' }}>Notes</h2>
+        <h2 style={groupTitle}>Notes</h2>
         <GitHubCard />
-        <h2 style={{ margin: '16px 0 6px', fontFamily: "'Newsreader', serif", fontSize: 17, fontWeight: 600, color: 'var(--muted)' }}>Tasks</h2>
+        <h2 style={groupTitle}>Tasks</h2>
         <ComingSoonCard icon="✅" name="Todoist" description="Sync tasks and projects into the To-do view." />
 
       </div>
@@ -314,22 +308,22 @@ export default function AccountsPage() {
       {/* Keyboard shortcuts — not on phones, which have no keyboard to bind */}
       {!isMobile && (
         <div style={{ maxWidth: 720, marginTop: 28 }}>
-          <h2 style={{ margin: '0 0 10px', fontFamily: "'Newsreader', serif", fontSize: 17, fontWeight: 600, color: 'var(--muted)' }}>Keyboard shortcuts</h2>
+          <h2 style={{ ...groupTitle, margin: '0 0 10px' }}>Keyboard shortcuts</h2>
           <KeybindsSettings />
         </div>
       )}
 
       {/* Data migration */}
       <div style={{ maxWidth: 720, marginTop: 28 }}>
-        <h2 style={{ margin: '0 0 10px', fontFamily: "'Newsreader', serif", fontSize: 17, fontWeight: 600, color: 'var(--muted)' }}>Data</h2>
+        <h2 style={{ ...groupTitle, margin: '0 0 10px' }}>Data</h2>
         <MigrationCard />
       </div>
 
       {/* Setup guide */}
       <div style={{ maxWidth: 720, marginTop: 44 }}>
-        <h2 style={{ margin: '0 0 14px', fontFamily: "'Newsreader', serif", fontSize: 20, fontWeight: 600 }}>Google Calendar setup</h2>
+        <h2 style={{ margin: '0 0 14px', fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 600 }}>Google Calendar setup</h2>
         <div style={{ background: 'var(--ink)', borderRadius: 16, padding: '24px 28px', color: '#d4cfc6' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--faint)', marginBottom: 16 }}>Step-by-step</div>
+          <div style={{ ...eyebrow, marginBottom: 16 }}>Step-by-step</div>
           {[
             'Go to console.cloud.google.com and create a new project.',
             'Navigate to APIs & Services → Library, search "Google Calendar API" and enable it.',
@@ -339,7 +333,7 @@ export default function AccountsPage() {
             'Restart the dev server (npm run dev), then click Connect above.',
           ].map((step, i) => (
             <div key={i} style={{ display: 'flex', gap: 14, marginBottom: i < 5 ? 12 : 0 }}>
-              <span style={{ width: 22, height: 22, borderRadius: '50%', background: '#c15f3c', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flex: 'none', marginTop: 2, color: '#fff' }}>{i + 1}</span>
+              <span style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flex: 'none', marginTop: 2, color: '#fff' }}>{i + 1}</span>
               <div style={{ fontSize: 13.5, lineHeight: 1.55 }}>
                 {i === 3 ? (
                   <>

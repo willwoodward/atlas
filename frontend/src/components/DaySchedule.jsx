@@ -108,8 +108,8 @@ export default function DaySchedule({ dateStr, events, isToday, isPast, onEventC
 
             {/* Now line */}
             {isToday && (
-              <div style={{ position: 'absolute', left: -4, right: 0, top: now * hourHeight - 1, height: 2, background: '#c15f3c', zIndex: 3, pointerEvents: 'none' }}>
-                <div style={{ position: 'absolute', left: 0, top: -3, width: 8, height: 8, borderRadius: '50%', background: '#c15f3c' }} />
+              <div style={{ position: 'absolute', left: -4, right: 0, top: now * hourHeight - 1, height: 2, background: 'var(--accent)', zIndex: 3, pointerEvents: 'none' }}>
+                <div style={{ position: 'absolute', left: 0, top: -3, width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }} />
               </div>
             )}
           </div>
