@@ -588,7 +588,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
         ) : (
           <div key={i} style={{ maxWidth: '100%' }}>
             <ToolTrace tools={m.tools} latestUndo={latestUndo} />
-            <ToolCards tools={m.tools} />
+            <ToolCards tools={m.tools} onChoose={text => submit(text)} />
             <ResearchPanel research={m.research} />
             <CodingPanel coding={m.coding} />
             <QuestionPanel question={m.question} runId={m.runId} onAnswer={answer} />

@@ -17,26 +17,34 @@ import { useSyncExternalStore } from 'react'
 
 const KEY = 'atlas:voice-settings'
 export const VOICE_DEFAULTS = {
-  silenceSeconds: 3, autoSend: true, keepListening: false,
-  speakReplies: 'dock', ttsVoice: 'coral', bargeIn: true,
+  silenceSeconds: 1.5, autoSend: true, keepListening: false,
+  speakReplies: 'dock', ttsVoice: 'marin', bargeIn: false,
   floatingMic: true, voiceOpensChat: false,
 }
-export const TTS_VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse']
+// The voices of OpenAI's realtime speech model; marin and cedar sound best.
+export const TTS_VOICES = ['marin', 'cedar', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse']
 // A pause this long ends a turn in conversation mode when "stop when I pause" is off.
-export const CONVERSATION_SILENCE = 3
+export const CONVERSATION_SILENCE = 2
 // In conversation mode, how long to wait for you to start speaking before
 // giving up — long enough to think.
 export const CONVERSATION_WAIT = 120
 
 // Only settings you've changed are stored, so a new default reaches you.
-// Version 1 stored every setting whenever one changed, so its speakReplies
-// was usually just the old default ('voice') rather than a choice — it's
-// dropped, and the current default applies.
-const VERSION = 2
+// Version 1 stored every setting whenever one changed, so a saved value that
+// equals an old default was usually not a choice: those are dropped and the
+// current default applies. Version 3 changed the pause (3 s → 1.5 s), the
+// voice (coral → marin) and talking over Atlas (on → off).
+const VERSION = 3
 export function loadVoiceSettings(raw) {
   let saved = {}
   try { saved = JSON.parse(raw || '{}') || {} } catch { /* start afresh */ }
-  if ((saved.v || 1) < VERSION) delete saved.speakReplies
+  const v = saved.v || 1
+  if (v < 2) delete saved.speakReplies
+  if (v < 3) {
+    if (saved.silenceSeconds === 3) delete saved.silenceSeconds
+    if (saved.bargeIn === true) delete saved.bargeIn
+    if (saved.ttsVoice === 'coral' || (saved.ttsVoice && !TTS_VOICES.includes(saved.ttsVoice))) delete saved.ttsVoice
+  }
   delete saved.v
   return saved
 }

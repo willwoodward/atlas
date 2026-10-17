@@ -26,7 +26,9 @@ export function splitSpeech(buf, { final = false, first = false } = {}) {
   for (;;) {
     const min = isFirst ? 1 : CHUNK_CHARS
     let cut = -1
-    const re = /[.!?…]+["'”’)\]]*\s+|\n+/g
+    // The first piece may also end at a clause (after 40+ characters), so a
+    // long first sentence starts playing sooner.
+    const re = isFirst ? /[.!?…]+["'”’)\]]*\s+|\n+|(?<=.{40,})[,;:—–]\s+/gs : /[.!?…]+["'”’)\]]*\s+|\n+/g
     let m
     while ((m = re.exec(rest))) {
       const end = m.index + m[0].length
@@ -88,66 +90,188 @@ export function isEcho(heard, spoken) {
 }
 
 // ── The player ───────────────────────────────────────────────────────────────
+//
+// The API streams raw PCM (16-bit, 24 kHz, mono) per piece of text. It's played
+// through Web Audio as it arrives — no waiting for a whole file — and every
+// piece goes through the same compressor and gain, so one sentence isn't
+// louder than the next. Pieces play in order, back to back.
 
-// One audio element for everything: iOS only lets a page play sound from an
-// element that first played during a tap, so it is "unlocked" on the mic or
-// send button (unlockAudio) and reused.
-let audio = null
-const el = () => {
-  if (!audio && typeof Audio !== 'undefined') { audio = new Audio(); audio.preload = 'auto' }
-  return audio
+const RATE = 24000
+let ctx = null
+let input = null              // where sources connect: the compressor
+function audio() {
+  if (ctx) return ctx
+  const AC = typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)
+  if (!AC) return null
+  ctx = new AC()
+  const comp = ctx.createDynamicsCompressor()
+  comp.threshold.value = -26
+  comp.knee.value = 20
+  comp.ratio.value = 4
+  comp.attack.value = 0.003
+  comp.release.value = 0.25
+  const gain = ctx.createGain()
+  gain.gain.value = 1.5        // make back what the compressor took off
+  comp.connect(gain)
+  gain.connect(ctx.destination)
+  input = comp
+  return ctx
 }
 
-// A tenth of a second of silence, as a WAV, built rather than embedded.
-let silence = null
-function silentWav() {
-  if (silence) return silence
-  const n = 800, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf)
-  const str = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)))
-  str(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); str(8, 'WAVEfmt ')
-  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true)
-  v.setUint32(24, 8000, true); v.setUint32(28, 16000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true)
-  str(36, 'data'); v.setUint32(40, n * 2, true)
-  let bin = ''
-  new Uint8Array(buf).forEach(b => { bin += String.fromCharCode(b) })
-  silence = `data:audio/wav;base64,${btoa(bin)}`
-  return silence
-}
-
-/** Call from a tap or key press, before anything is spoken. */
+// iOS only starts audio from a tap; once resumed, the context stays usable.
 export function unlockAudio() {
-  const a = el()
-  if (!a || a.dataset?.unlocked || speech.speaking) return
+  const c = audio()
+  if (!c) return
   try {
-    a.src = silentWav()
-    a.play()?.then(() => { if (a.dataset) a.dataset.unlocked = '1' }).catch(() => {})
+    c.resume?.()
+    const src = c.createBufferSource()
+    src.buffer = c.createBuffer(1, 1, 22050)
+    src.connect(c.destination)
+    src.start(0)
   } catch { /* nothing to unlock */ }
 }
 
-let fetchClip = null          // text → Promise<Blob>, set by the assistant context
+// iOS: "playback" plays through the speaker at full volume even with the
+// ringer switch off; the default while the mic is on is the quieter call mode.
+function audioSession(type) {
+  try { if (navigator.audioSession) navigator.audioSession.type = type } catch { /* not supported */ }
+}
+
+/** A short, quiet tone: 'listen' (your turn) or 'heard' (got it). */
+export function chime(kind) {
+  const c = audio()
+  if (!c || c.state !== 'running') return
+  const notes = kind === 'listen' ? [[660, 0], [880, 0.07]] : [[740, 0]]
+  for (const [freq, at] of notes) {
+    const o = c.createOscillator(), g = c.createGain()
+    o.type = 'sine'
+    o.frequency.value = freq
+    const t = c.currentTime + at
+    g.gain.setValueAtTime(0, t)
+    g.gain.linearRampToValueAtTime(0.05, t + 0.01)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12)
+    o.connect(g); g.connect(c.destination)
+    o.start(t); o.stop(t + 0.14)
+  }
+}
+
+let fetchClip = null          // (text, signal) → Promise<Response>, set by the assistant context
+let warmer = null
 let utterance = null          // the run being spoken, while its text still streams
 let buffer = ''
 let firstPending = true
-let clips = []                // [{ text, url: Promise<string|null> }]
-let playing = false
+let clips = []                // texts waiting to be spoken, in order
+let pumping = false
 let gen = 0
-let endPlay = null
+let playhead = 0              // when the audio scheduled so far ends (ctx time)
+let sources = new Set()
+let abort = null
+let endTimer = null
 let recent = ''               // what was said lately, for the echo check
 let lastActive = 0
+const gates = new Set()       // while any returns true, the next piece waits
 const listeners = new Set()
 let snapshot = { speaking: false }
-const notify = () => {
-  const speaking = playing || clips.length > 0
-  if (speaking) lastActive = Date.now()
-  if (speaking !== snapshot.speaking) { snapshot = { speaking }; listeners.forEach(fn => fn()) }
+const setSpeaking = on => {
+  if (on) lastActive = Date.now()
+  if (on === snapshot.speaking) return
+  snapshot = { speaking: on }
+  audioSession(on ? 'playback' : 'auto')
+  if (!on) lastActive = Date.now()
+  listeners.forEach(fn => fn())
+}
+
+function checkEnd() {
+  clearTimeout(endTimer)
+  if (!ctx) return setSpeaking(false)
+  const left = playhead - ctx.currentTime
+  if (pumping || clips.length || left > 0.02) {
+    if (!pumping && !clips.length) endTimer = setTimeout(checkEnd, left * 1000 + 30)
+    return
+  }
+  setSpeaking(false)
+}
+
+function schedule(samples) {
+  const c = ctx
+  const buf = c.createBuffer(1, samples.length, RATE)
+  buf.copyToChannel(samples, 0)
+  const src = c.createBufferSource()
+  src.buffer = buf
+  src.connect(input)
+  const at = Math.max(playhead, c.currentTime + 0.05)
+  src.start(at)
+  playhead = at + buf.duration
+  sources.add(src)
+  src.onended = () => { sources.delete(src); checkEnd() }
+  setSpeaking(true)
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+
+async function streamClip(text, mine) {
+  const ctrl = new AbortController()
+  abort = ctrl
+  let res
+  try { res = await fetchClip(text, ctrl.signal) } catch { return }
+  if (!res?.body || mine !== gen) return
+  recent = (recent + ' ' + text).slice(-1500)
+  const reader = res.body.getReader()
+  let carry = new Uint8Array(0)
+  let pending = [], pendingLen = 0
+  const flush = () => {
+    if (!pendingLen) return
+    const out = new Float32Array(pendingLen)
+    let o = 0
+    for (const p of pending) { out.set(p, o); o += p.length }
+    pending = []; pendingLen = 0
+    schedule(out)
+  }
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (mine !== gen) { ctrl.abort(); return }
+      if (done) break
+      const bytes = new Uint8Array(carry.length + value.length)
+      bytes.set(carry); bytes.set(value, carry.length)
+      const even = bytes.length - (bytes.length % 2)
+      carry = bytes.slice(even)
+      const view = new DataView(bytes.buffer, 0, even)
+      const f = new Float32Array(even / 2)
+      for (let i = 0; i < f.length; i++) f[i] = view.getInt16(i * 2, true) / 32768
+      pending.push(f); pendingLen += f.length
+      // The first audio goes as soon as there's a little; after that, in
+      // ~0.2 s blocks, scheduled back to back.
+      if (pendingLen >= (playhead > ctx.currentTime ? RATE / 5 : RATE / 20)) flush()
+    }
+    flush()
+  } catch { /* aborted or dropped: what arrived still plays */ }
+}
+
+async function pump() {
+  if (pumping || !fetchClip) return
+  const c = audio()
+  if (!c) return
+  pumping = true
+  const mine = gen
+  try {
+    while (clips.length && mine === gen) {
+      // Someone is mid-sentence: let them finish first.
+      while ([...gates].some(g => g()) && mine === gen) await sleep(120)
+      if (mine !== gen) break
+      await streamClip(clips[0], mine)
+      if (mine === gen) clips.shift()
+    }
+  } finally {
+    if (mine === gen) pumping = false
+    checkEnd()
+  }
 }
 
 function enqueue(text) {
   if (!text || !fetchClip) return
-  const url = fetchClip(text).then(b => URL.createObjectURL(b)).catch(() => null)
-  clips.push({ text, url })
-  notify()
-  if (!playing) play()
+  clips.push(text)
+  pump()
 }
 
 function flush(final) {
@@ -159,36 +283,15 @@ function flush(final) {
   }
 }
 
-async function play() {
-  playing = true
-  const mine = gen
-  notify()
-  while (clips.length && mine === gen) {
-    const clip = clips[0]
-    const url = await clip.url
-    if (mine !== gen) { if (url) URL.revokeObjectURL(url); break }
-    if (url) {
-      recent = (recent + ' ' + clip.text).slice(-1500)
-      lastActive = Date.now()
-      await new Promise(resolve => {
-        const a = el()
-        endPlay = resolve
-        a.onended = a.onerror = () => resolve()
-        a.src = url
-        a.play()?.catch(() => resolve())
-      })
-      endPlay = null
-      URL.revokeObjectURL(url)
-    }
-    if (mine === gen) clips.shift()
-  }
-  if (mine === gen) playing = false
-  lastActive = Date.now()
-  notify()
-}
+function flushCurrent() { if (utterance) { flush(true); utterance = null } }
 
 export const speech = {
   setFetcher(fn) { fetchClip = fn },
+  setWarmer(fn) { warmer = fn },
+  /** Get the speech connection ready (call when you start listening). */
+  warm() { try { warmer?.() } catch { /* best effort */ } },
+  /** While `fn()` is true, the next piece waits (e.g. you're mid-sentence). Returns a remover. */
+  addGate(fn) { gates.add(fn); return () => gates.delete(fn) },
   /** Start reading a reply as it streams. A reply already playing finishes first. */
   begin(id) { if (utterance !== id) { flushCurrent(); utterance = id; buffer = ''; firstPending = true } },
   push(id, text) { if (id === utterance) { buffer += text; flush(false) } },
@@ -198,15 +301,13 @@ export const speech = {
   /** Stop talking, and drop everything still to be said. */
   cancel() {
     gen++
-    utterance = null; buffer = ''
-    clips.forEach(c => c.url.then(u => u && URL.revokeObjectURL(u)))
-    clips = []
-    playing = false
-    const a = audio
-    if (a) { try { a.pause() } catch { /* already stopped */ } }
-    endPlay?.(); endPlay = null
-    lastActive = Date.now()
-    notify()
+    utterance = null; buffer = ''; clips = []; pumping = false
+    abort?.abort(); abort = null
+    for (const src of sources) { try { src.stop() } catch { /* already stopped */ } }
+    sources = new Set()
+    playhead = 0
+    clearTimeout(endTimer)
+    setSpeaking(false)
   },
   get speaking() { return snapshot.speaking },
   /** Whether anything was said since `t` (ms). */
@@ -214,8 +315,6 @@ export const speech = {
   recentText: () => recent,
   subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn) },
 }
-
-function flushCurrent() { if (utterance) { flush(true); utterance = null } }
 
 export const useSpeaking = () => useSyncExternalStore(speech.subscribe, () => snapshot.speaking)
 

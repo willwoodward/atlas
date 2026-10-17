@@ -3,7 +3,10 @@ import { useAssistant } from '../context/AssistantContext.jsx'
 import { useVoiceInput } from './useVoiceInput.js'
 import { getVoiceSettings, CONVERSATION_SILENCE, CONVERSATION_WAIT } from '../lib/voiceSettings.js'
 import { checkSignOff } from '../lib/voiceSignoff.js'
-import { speech, isEcho, unlockAudio } from '../lib/speech.js'
+import { speech, isEcho, unlockAudio, chime, useSpeaking } from '../lib/speech.js'
+
+// How long after Atlas stops talking before the mic opens again.
+const RESUME_AFTER_SPEECH_MS = 500
 
 const joinText = (a, b) => (a.trim() && b ? a.trimEnd() + ' ' : a) + b
 
@@ -20,9 +23,12 @@ const joinText = (a, b) => (a.trim() && b ? a.trimEnd() + ' ' : a) + b
  * and ends when you sign off ("that's all, thanks"), on end(), after that long
  * in silence, or when the component goes away.
  *
- * Spoken replies: talking over one stops it (if "Stop when I talk" is on),
- * and anything the mic picked up that is only Atlas's own voice coming back
- * through the speakers is dropped rather than sent.
+ * Spoken replies: the mic pauses while Atlas talks and picks up again after
+ * (keeping it on puts phones and some laptops into "call" audio, which is
+ * quieter and uneven). With "Stop when I talk" on, it stays on instead, and
+ * talking over Atlas cuts it off. Either way, if you're mid-sentence when a
+ * reply is ready, it waits for you to finish; and anything the mic picked up
+ * that is only Atlas's own voice is dropped rather than sent.
  *
  * `draft` is text already typed, which the transcript is added to.
  */
@@ -62,7 +68,11 @@ export function useVoiceConversation({ draft = '', onSend, onDraft, viaDock = fa
     onNothingHeard: () => setConversing(false),
   })
 
-  const listen = opts => { startedAt.current = Date.now(); voice.start(opts) }
+  const listen = opts => {
+    startedAt.current = Date.now()
+    if (getVoiceSettings().speakReplies !== 'never') speech.warm()
+    voice.start(opts)
+  }
   const begin = () => {
     unlockAudio()   // a tap or key press: the moment iOS allows sound to be enabled
     const { keepListening } = getVoiceSettings()
@@ -70,14 +80,50 @@ export function useVoiceConversation({ draft = '', onSend, onDraft, viaDock = fa
     listenAgain.current = false
     listen(keepListening ? conversationOpts() : {})
   }
-  const end = () => { setConversing(false); listenAgain.current = false; speech.cancel(); voice.cancel() }
+  const end = () => { setConversing(false); listenAgain.current = false; pausedForSpeech.current = false; speech.cancel(); voice.cancel() }
 
-  // The last message is away: listen for the next one.
+  // ── Sharing the air with spoken replies ──
+  const speaking = useSpeaking()
+  const pausedForSpeech = useRef(false)
+  const voiceRef = useRef(voice)
+  voiceRef.current = voice
+  // A reply waits while you're mid-sentence.
+  useEffect(() => speech.addGate(() => voiceRef.current.state === 'recording' && voiceRef.current.hasSpeech()), [])
+  useEffect(() => {
+    const barge = getVoiceSettings().bargeIn
+    if (speaking && !barge && voice.state === 'recording' && !voice.hasSpeech()) {
+      // Atlas starts talking while the mic waits for you: step aside.
+      pausedForSpeech.current = conversingRef.current
+      voice.cancel()
+    } else if (!speaking && pausedForSpeech.current && conversingRef.current && voice.state === 'idle') {
+      // A moment before listening again: the end of the reply is still
+      // ringing out of the speaker and round the room, and the mic would
+      // otherwise catch it and send it as if you'd said it.
+      pausedForSpeech.current = false
+      const t = setTimeout(() => {
+        if (conversingRef.current && !speech.speaking && voiceRef.current.state === 'idle') listen(conversationOpts())
+      }, RESUME_AFTER_SPEECH_MS)
+      return () => clearTimeout(t)
+    }
+  }, [speaking, voice.state]) // eslint-disable-line
+
+  // The last message is away: listen for the next one (after Atlas has
+  // spoken, unless talking over it is allowed).
   useEffect(() => {
     if (!conversing || voice.state !== 'idle' || !listenAgain.current) return
     listenAgain.current = false
+    if (speech.speaking && !getVoiceSettings().bargeIn) { pausedForSpeech.current = true; return }
     listen(conversationOpts())
   }, [conversing, voice.state]) // eslint-disable-line
+
+  // A soft tone when it starts listening, and when it has heard you.
+  const lastState = useRef(voice.state)
+  useEffect(() => {
+    const was = lastState.current
+    lastState.current = voice.state
+    if (was === 'idle' && voice.state === 'recording') chime('listen')
+    if (was === 'recording' && voice.state === 'transcribing') chime('heard')
+  }, [voice.state])
 
   // Tap or shortcut. While Atlas is talking it only cuts the reply off; in a
   // conversation it's already listening for what you say next.

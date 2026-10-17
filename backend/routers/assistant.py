@@ -69,6 +69,9 @@ class RunRequest(BaseModel):
     # Said aloud, and the reply will be read out: the agent keeps it short and
     # speakable (no tables, lists or links).
     spoken: bool = False
+    # Said to the corner mic, with no chat on screen: the spoken reply is all
+    # they get, so no cards or buttons to point at.
+    voice_only: bool = False
 
 
 def _now() -> str:
@@ -288,7 +291,7 @@ async def start_run(req: RunRequest, request: Request, user: dict = Depends(get_
         if session_id:
             await db.execute("UPDATE agent_sessions SET updated_at=? WHERE id=?", (now, session_id))
         await db.commit()
-        body = await run_body(db, run_id, session_id, messages, spoken=req.spoken)
+        body = await run_body(db, run_id, session_id, messages, spoken=req.spoken or req.voice_only, voice_only=req.voice_only)
     finally:
         await db.close()
 
@@ -709,10 +712,9 @@ async def undo_action(action_id: str, user: dict = Depends(get_current_user)):
 # (Content-Type audio/webm, audio/mp4 …) rather than a form upload, which keeps
 # a multipart parser out of the API.
 
-# A dated snapshot on purpose: the plain "gpt-4o-mini-transcribe" alias is
-# scheduled for shutdown on 2027-02-26, and this snapshot has no date set.
-# gpt-transcribe is the newer family if this one is ever retired.
-TRANSCRIBE_MODEL = os.getenv("TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe-2025-12-15")
+# OpenAI shuts down whisper-1 and the gpt-4o(-mini)-transcribe models on
+# 2027-02-26 and names gpt-transcribe as the replacement ($0.0045/min).
+TRANSCRIBE_MODEL = os.getenv("TRANSCRIBE_MODEL", "gpt-transcribe")
 MAX_AUDIO_BYTES = 10 * 1024 * 1024   # ~10 min of browser audio; OpenAI's own limit is 25 MB
 _AUDIO_EXT = {"webm": "webm", "mp4": "mp4", "mpeg": "mp3", "mp3": "mp3", "ogg": "ogg",
               "wav": "wav", "x-wav": "wav", "m4a": "m4a", "x-m4a": "m4a", "aac": "m4a"}
@@ -755,39 +757,50 @@ async def transcribe(request: Request, user: dict = Depends(get_current_user)):
 
 
 # Spoken replies: the browser sends the reply a sentence or two at a time as it
-# streams in, and plays each clip as it arrives. Nothing is stored.
-TTS_MODEL = os.getenv("TTS_MODEL", "gpt-4o-mini-tts")
-TTS_VOICES = ("alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse")
-TTS_MAX_CHARS = 2000
-TTS_INSTRUCTIONS = ("Speak naturally and warmly, like a helpful assistant talking to someone "
-                    "they know well. Keep a relaxed, conversational pace.")
-
+# streams in, and plays the audio as it arrives. Raw PCM16 at 24 kHz, mono —
+# see speech_engine.py for the engines. Nothing is stored.
 
 class SpeakIn(BaseModel):
-    text: str = Field(..., min_length=1, max_length=TTS_MAX_CHARS)
-    voice: str = "coral"
+    text: str = Field(..., min_length=1, max_length=2000)
+    voice: str = "marin"
 
 
 @router.post("/speak")
 async def speak(req: SpeakIn, user: dict = Depends(get_current_user)):
-    key = os.getenv("OPENAI_API_KEY")
-    if not key:
-        raise HTTPException(503, "Spoken replies need OPENAI_API_KEY on the server.")
-    voice = req.voice if req.voice in TTS_VOICES else "coral"
-    base = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+    import speech_engine
+    chunks = speech_engine.stream(req.text, req.voice)
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
-            resp = await client.post(
-                f"{base}/audio/speech",
-                headers={"Authorization": f"Bearer {key}"},
-                json={"model": TTS_MODEL, "voice": voice, "input": req.text,
-                      "instructions": TTS_INSTRUCTIONS, "response_format": "mp3"},
-            )
-    except httpx.HTTPError:
-        raise HTTPException(502, "Couldn't reach the text-to-speech service.")
-    if resp.status_code >= 400:
-        raise HTTPException(502, f"Text-to-speech failed ({resp.status_code}): {resp.text[:200]}")
-    return Response(content=resp.content, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
+        first = await chunks.__anext__()   # fail with a status, not a broken stream
+    except StopAsyncIteration:
+        first = b""
+    except speech_engine.SpeechError as exc:
+        raise HTTPException(503 if "OPENAI_API_KEY" in str(exc) else 502, str(exc))
+    except Exception as exc:
+        raise HTTPException(502, f"Couldn't make speech: {type(exc).__name__}")
+
+    async def body():
+        try:
+            yield first
+            async for chunk in chunks:
+                yield chunk
+        finally:
+            await chunks.aclose()
+
+    return StreamingResponse(body(), media_type="audio/pcm",
+                             headers={"Cache-Control": "no-store", "X-Audio-Format": f"pcm16;rate={speech_engine.RATE};channels=1"})
+
+
+class WarmIn(BaseModel):
+    voice: str = "marin"
+
+
+@router.post("/speak/warm")
+async def speak_warm(req: WarmIn, user: dict = Depends(get_current_user)):
+    """Open the speech connection while you're still talking, so the first
+    sentence of the reply starts sooner."""
+    import speech_engine
+    asyncio.create_task(speech_engine.warm(req.voice))
+    return {"ok": True}
 
 
 @router.get("/health")

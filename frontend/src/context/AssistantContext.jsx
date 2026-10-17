@@ -222,15 +222,20 @@ export function AssistantProvider({ children }) {
 
   // Spoken replies fetch their audio from the API with this device's token.
   useEffect(() => {
-    speech.setFetcher(async text => {
+    // A stream of raw PCM per piece of text (backend/speech_engine.py).
+    speech.setFetcher(async (text, signal) => {
       const res = await fetch(`${API}/assistant/speak`, {
-        method: 'POST',
+        method: 'POST', signal,
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ text: text.slice(0, 2000), voice: getVoiceSettings().ttsVoice }),
       })
       if (!res.ok) throw new Error(`speak ${res.status}`)
-      return res.blob()
+      return res
     })
+    speech.setWarmer(() => fetch(`${API}/assistant/speak/warm`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ voice: getVoiceSettings().ttsVoice }),
+    }).catch(() => {}))
   }, [token])
 
   // Cache for an instant first paint. Tool arguments, results and research
@@ -496,7 +501,7 @@ export function AssistantProvider({ children }) {
       const res = await fetch(`${API}/assistant/runs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ message: prompt, session_id: sessionRef.current, spoken: aloud }),
+        body: JSON.stringify({ message: prompt, session_id: sessionRef.current, spoken: aloud, voice_only: viaDock }),
       })
       if (res.status === 409) {
         // A reply is still running that this device isn't following yet

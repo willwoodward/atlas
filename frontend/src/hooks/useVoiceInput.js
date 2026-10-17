@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { getVoiceSettings } from '../lib/voiceSettings.js'
+import { extraPause } from '../lib/voiceTurn.js'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const MAX_SECONDS = 5 * 60
@@ -56,7 +57,7 @@ function livePreview(onPartial) {
  * tracked as it goes (quick to drop, slow to rise, so talking doesn't raise
  * it). `heard()` lets other signals — words from the live preview — count too.
  */
-function silenceWatch(stream, seconds, onSilence, onNothing, nothingSeconds = Math.max(8, seconds + 5)) {
+function silenceWatch(stream, seconds, onSilence, onNothing, nothingSeconds = Math.max(8, seconds + 5), grace = () => 0) {
   const AC = window.AudioContext || window.webkitAudioContext
   let ctx, analyser
   try {
@@ -65,7 +66,7 @@ function silenceWatch(stream, seconds, onSilence, onNothing, nothingSeconds = Ma
     analyser.fftSize = 1024
     ctx.createMediaStreamSource(stream).connect(analyser)
   } catch {
-    return { heard() {}, stop() {} }   // no Web Audio: just no auto-stop
+    return { heard() {}, hasHeard: () => false, stop() {} }   // no Web Audio: just no auto-stop
   }
   const buf = new Float32Array(analyser.fftSize)
   const began = Date.now()
@@ -79,11 +80,12 @@ function silenceWatch(stream, seconds, onSilence, onNothing, nothingSeconds = Ma
     floor = floor === null ? rms : rms < floor ? rms : floor + (rms - floor) * 0.01
     const now = Date.now()
     if (rms > Math.max(0.012, floor * 3) && now - began > 250) { heard = true; lastVoice = now }
-    if (heard && now - lastVoice > seconds * 1000) { done = true; onSilence() }
+    if (heard && now - lastVoice > (seconds + grace()) * 1000) { done = true; onSilence() }
     else if (!heard && now - began > nothingSeconds * 1000) { done = true; onNothing() }
   }, 100)
   return {
     heard() { heard = true; lastVoice = Date.now() },
+    hasHeard: () => heard,
     stop() { done = true; clearInterval(timer); ctx.close?.().catch(() => {}) },
   }
 }
@@ -192,7 +194,9 @@ export function useVoiceInput(onText, onPartial, { onNothingHeard } = {}) {
           setError("Didn't hear anything, so it stopped listening.")
           onNothingRef.current?.()
         },
-        opts.nothingSeconds)
+        opts.nothingSeconds,
+        // "and…", "um…": more is probably coming.
+        () => extraPause(previewText.current))
     }
     setSeconds(0)
     setState('recording')
@@ -220,5 +224,8 @@ export function useVoiceInput(onText, onPartial, { onNothingHeard } = {}) {
     else if (state === 'idle') start()
   }, [state, start, stop])
 
-  return { state, seconds, error, clearError: () => setError(null), start, stop, cancel, toggle }
+  // Whether any speech has been heard in the current recording.
+  const hasSpeech = useCallback(() => !!rec.current?.watch?.hasHeard?.(), [])
+
+  return { state, seconds, error, clearError: () => setError(null), start, stop, cancel, toggle, hasSpeech }
 }

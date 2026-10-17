@@ -16,6 +16,8 @@ import aiosqlite
 import assistant_memory
 import agent_actions as actions
 import agent_tools
+import agent_cards
+from agent_cards import change_card, note_card
 import inbox
 from agent_actions import snapshot, restore_rows, delete_rows
 from crypto import enc, dec
@@ -218,6 +220,22 @@ def _gcal_color_id(name: str) -> str | None:
     return _GCAL_COLORS.get(n, "9")
 
 
+def _gcal_when(ev: dict | None) -> str | None:
+    """'Tue 21 Oct, 14:00–15:00' (or the date alone for an all-day event)."""
+    if not ev:
+        return None
+    s, e = (ev.get("start") or {}), (ev.get("end") or {})
+    if s.get("date") and not s.get("dateTime"):
+        return datetime.fromisoformat(s["date"]).strftime("%a %-d %b") + ", all day"
+    if not s.get("dateTime"):
+        return None
+    a = datetime.fromisoformat(s["dateTime"].replace("Z", "+00:00"))
+    out = a.strftime("%a %-d %b, %H:%M")
+    if e.get("dateTime"):
+        out += "–" + datetime.fromisoformat(e["dateTime"].replace("Z", "+00:00")).strftime("%H:%M")
+    return out
+
+
 def _first_line(body: str) -> str:
     line = next((l for l in (body or "").splitlines() if l.strip()), "Untitled")
     return line.lstrip("# ").strip()[:60]
@@ -285,6 +303,7 @@ async def list_tools() -> list[Tool]:
         ))
 
     tools += [t for t in agent_tools.TOOLS if MCP_TRANSACTIONS != "off" or t.name not in _TXN_TOOLS]
+    tools += agent_cards.TOOLS
     tools += inbox.TOOLS
     return tools
 
@@ -352,7 +371,9 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         verb = "Reopened" if before[0]["done"] else "Completed"
         undo_id = await actions.record(db, name, f"{verb} “{before[0]['text']}”",
                                        {"sql": restore_rows("todos", before)}, {"kind": "todo", "id": args["id"]})
-        return {"ok": True, "done": not before[0]["done"], "undo_id": undo_id}
+        b = before[0]
+        return {"ok": True, "done": not b["done"], "undo_id": undo_id,
+                "card": {"type": "todos", "title": "To-do", "rows": [{"id": b["id"], "text": b["text"], "bucket": b["bucket"], "done": not b["done"]}]}}
 
     if name == "move_todo":
         before = await snapshot(db, "todos", "id = ?", (args["id"],))
@@ -362,7 +383,10 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         await db.commit()
         undo_id = await actions.record(db, name, f"Moved “{before[0]['text']}” to {args['bucket']}",
                                        {"sql": restore_rows("todos", before)}, {"kind": "todo", "id": args["id"]})
-        return {"ok": True, "undo_id": undo_id}
+        labels = agent_cards.BUCKET_LABEL
+        return {"ok": True, "undo_id": undo_id,
+                "card": change_card(f"To-do · {before[0]['text']}", [("List", labels.get(before[0]["bucket"], before[0]["bucket"]), labels.get(args["bucket"], args["bucket"]))],
+                                    {"kind": "todo", "id": args["id"]})}
 
     if name == "get_week_outcomes":
         # Get Monday of current week
@@ -466,7 +490,7 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         await db.commit()
         undo_id = await actions.record(db, name, f"Created note “{_first_line(args['body'])}”",
                                        {"sql": delete_rows("notes", "id", [new_id])}, {"kind": "note", "id": new_id})
-        return {"id": new_id, "ok": True, "undo_id": undo_id}
+        return {"id": new_id, "ok": True, "undo_id": undo_id, "card": note_card(new_id, args["body"])}
 
     if name == "update_note":
         before = await snapshot(db, "notes", "id = ?", (args["id"],))
@@ -476,7 +500,7 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         await db.commit()
         undo_id = await actions.record(db, name, f"Edited note “{_first_line(before[0]['body'])}”",
                                        {"sql": restore_rows("notes", before)}, {"kind": "note", "id": args["id"]})
-        return {"ok": True, "undo_id": undo_id}
+        return {"ok": True, "undo_id": undo_id, "card": note_card(args["id"], args["body"])}
 
     if name == "list_events":
         date = args.get("date")
@@ -559,7 +583,14 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         undo_id = await actions.record(db, name, f"Changed “{(before or data).get('summary', 'event')}”",
                                        {"gcal": [{"method": "PATCH", "path": f"/{args['id']}", "body": restore}]} if restore else None,
                                        {"kind": "event", "id": args["id"], "date": ev_date})
-        return {"ok": True, "id": data.get("id"), "title": data.get("summary"), "date": ev_date, "undo_id": undo_id}
+        after = {**(before or {}), **body}
+        card = change_card(f"Event · {data.get('summary') or 'event'}", [
+            ("Title", (before or {}).get("summary"), after.get("summary")),
+            ("When", _gcal_when(before), _gcal_when(after)),
+            ("Where", (before or {}).get("location"), after.get("location")),
+            ("Colour", _GCAL_COLOR_NAMES.get((before or {}).get("colorId")) or "default", _GCAL_COLOR_NAMES.get(after.get("colorId")) or "default"),
+        ], {"kind": "event", "id": args["id"], "date": ev_date})
+        return {"ok": True, "id": data.get("id"), "title": data.get("summary"), "date": ev_date, "undo_id": undo_id, "card": card}
 
     if name == "delete_event":
         before = await _gcal_get(db, args["id"])
@@ -592,7 +623,8 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         await db.commit()
         undo = {"sql": restore_rows("week_outcomes", before) if before else delete_rows("week_outcomes", "week_str", [monday])}
         undo_id = await actions.record(db, name, "Updated this week's outcomes", undo, {"kind": "page", "page": "todos"})
-        return {"ok": True, "week": monday, "undo_id": undo_id}
+        return {"ok": True, "week": monday, "undo_id": undo_id,
+                "card": change_card("This week's outcomes", [("Outcomes", before[0]["text"] if before else None, args["text"])], {"kind": "page", "page": "todos"})}
 
     if name == "get_today_summary":
         d = datetime.now(timezone.utc).date()
@@ -719,6 +751,13 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
                 "previous_version": saved["previous_version"] or 0,
                 "unchanged": saved.get("unchanged", False),
                 "applies": "from the next conversation"}
+
+    if name in agent_cards.NAMES:
+        if name in ("spending_trend", "net_worth_trend") and MCP_TRANSACTIONS == "off":
+            return {"error": "Transaction access is disabled on this server (ATLAS_MCP_TRANSACTIONS=off)."}
+        result = await agent_cards.dispatch(name, args, db, gcal_events=_gcal_events)
+        if result is not None:
+            return result
 
     if name in agent_tools.NAMES:
         if name in _TXN_TOOLS and MCP_TRANSACTIONS == "off":

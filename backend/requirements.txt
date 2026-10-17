@@ -15,3 +15,6 @@ tzdata==2024.2
 # Web Push for inbox notifications (push.py). Sends with requests in a worker
 # thread; its aiohttp extra isn't used.
 pywebpush==2.5.0
+# Realtime speech (speech_engine.py). Already installed by uvicorn[standard];
+# pinned because the client API it uses arrived in 14.
+websockets>=14,<18

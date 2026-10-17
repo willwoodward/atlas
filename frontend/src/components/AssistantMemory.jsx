@@ -192,7 +192,7 @@ function SafeWebSetting() {
   )
 }
 
-const SILENCE_OPTIONS = [0, 1, 2, 3, 4, 5, 7, 10]
+const SILENCE_OPTIONS = [0, 1, 1.5, 2, 3, 4, 5, 7, 10]
 
 function SettingRow({ title, detail, children }) {
   return (
@@ -217,7 +217,7 @@ function VoiceSettings() {
         Tap the mic{bindings.voice ? <> or press <kbd style={kbd}>{displayCombo(bindings.voice)}</kbd></> : null} to talk to Atlas. These settings are kept on this device.
       </p>
       <SettingRow title="Stop when I pause"
-        detail="Stops listening after this long without speech, so you don't have to tap again.">
+        detail="Stops listening after this long without speech, so you don't have to tap again. It waits a little longer if you trail off mid-sentence (“and…”, “um…”).">
         <select aria-label="Stop after a pause of" value={silenceSeconds}
           onChange={e => setVoiceSettings({ silenceSeconds: Number(e.target.value) })}
           style={{ fontSize: 13, padding: '6px 8px', borderRadius: 8, border: '1px solid var(--bd-xl)', background: 'var(--surface-2)', color: 'var(--ink)', fontFamily: 'inherit' }}>
@@ -250,7 +250,7 @@ function VoiceSettings() {
           </div>
         </SettingRow>
         <SettingRow title="Stop when I talk"
-          detail="Talking over Atlas cuts the reply off, so you can interrupt. The mic button and the voice shortcut always do.">
+          detail="Keeps the mic on while Atlas talks, so you can interrupt by speaking. Off, the mic pauses while it talks, which keeps the volume steady (phones and some laptops turn playback down while the mic is on). The mic button and the voice shortcut always cut it off.">
           <Switch checked={bargeIn} onChange={v => setVoiceSettings({ bargeIn: v })} label="Stop when I talk" />
         </SettingRow>
       </>}

@@ -21,6 +21,11 @@ from mcp.types import Tool
 import agent_actions as actions
 from agent_actions import delete_rows, restore_rows, snapshot
 
+
+def change_card(*a, **kw):
+    from agent_cards import change_card as cc   # lazy: agent_cards imports this module
+    return cc(*a, **kw)
+
 UNCATEGORISED = "Uncategorised"
 CARD_ROWS = 10          # rows drawn in a card; the rest fold into "Other"
 PERIODS = ["30d", "month", "last-month", "3m", "year", "all"]
@@ -190,7 +195,8 @@ TOOLS = [
              "required": []}),
     Tool(name="show_day",
          description="Draw one day's calendar in the chat (e.g. after rescheduling, to show the result).",
-         inputSchema={"type": "object", "properties": {"date": {"type": "string"}, "highlight": {"type": "string", "description": "Event id to highlight"}}, "required": ["date"]}),
+         inputSchema={"type": "object", "properties": {"date": {"type": "string"}, "days": {"type": "integer", "description": "How many days from date, 1 (default) to 7"},
+                                                       "highlight": {"type": "string", "description": "Event id to highlight"}}, "required": ["date"]}),
     # Other edits
     Tool(name="create_habit",
          description="Add a habit to track daily.",
@@ -250,7 +256,9 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
         return {
             "period": {"from": start, "to": end, "label": label}, "currency": "EUR", "kind": kind, "by": by,
             "total": total, "transactions": sum(r["count"] for r in rows), "rows": rows[:30],
-            "card": {"type": "breakdown", "title": title, "currency": "EUR", "total": total, "by": by, "rows": _fold(rows)},
+            "card": {"type": "breakdown", "title": title, "currency": "EUR", "total": total, "by": by, "rows": _fold(rows),
+                     "range": {"from": start, "to": end}, "kind": "income" if kind == "income" else "expense",
+                     "category": args.get("category")},
             "show": {"kind": "finances", "category": args.get("category"), "range": {"from": start, "to": end},
                      "type": "income" if kind == "income" else "expense"},
         }
@@ -269,7 +277,8 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
             "currency": "EUR", "a": {"label": alabel, "total": ta}, "b": {"label": blabel, "total": tb}, "change": round(ta - tb, 2),
             "rows": rows[:20],
             "card": {"type": "compare", "title": f"{'Income' if kind == 'income' else 'Spending'}: {alabel} vs {blabel}",
-                     "currency": "EUR", "a": {"label": alabel, "total": ta}, "b": {"label": blabel, "total": tb}, "rows": rows[:8]},
+                     "currency": "EUR", "a": {"label": alabel, "total": ta}, "b": {"label": blabel, "total": tb}, "rows": rows[:8],
+                     "range": {"from": a0, "to": a1}, "kind": "income" if kind == "income" else "expense"},
         }
 
     if name == "search_transactions":
@@ -327,7 +336,13 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
         txns = await _transactions(db, s, e)
         status, unbudgeted = (finance_insights.budget_status(budgets, txns, value=lambda t: t.get("eur") or 0)
                               if budgets else ([], None))
-        return {"currency": "EUR", "month": today.strftime("%B %Y"), "budgets": status, "unbudgeted": unbudgeted}
+        import calendar
+        elapsed = today.day / calendar.monthrange(today.year, today.month)[1]
+        card = {"type": "budgets", "title": f"Budgets · {today.strftime('%B')}", "currency": "EUR", "elapsed": round(elapsed, 3),
+                "rows": [{"name": b["category"], "spent": b["spent"], "amount": float(b.get("amount") or 0), "pace": b["pace"],
+                          "categories": b.get("categories") or []} for b in status]} if status else None
+        return {"currency": "EUR", "month": today.strftime("%B %Y"), "budgets": status, "unbudgeted": unbudgeted,
+                **({"card": card, "show": {"kind": "page", "page": "finances"}} if card else {})}
 
     if name == "set_transaction_category":
         ids = [str(i) for i in args.get("ids") or []][:500]
@@ -345,7 +360,9 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
         undo_id = await actions.record(db, name, f"Categorised {who} as {category}",
                                        {"sql": restore_rows("finances_transactions", before)},
                                        {"kind": "finances", "category": category})
-        return {"ok": True, "updated": len(before), "category": category, "undo_id": undo_id}
+        olds = sorted({_cat(b) for b in before})
+        card = change_card(f"Category · {who}", [("Category", ", ".join(olds), category)], {"kind": "finances", "category": category})
+        return {"ok": True, "updated": len(before), "category": category, "undo_id": undo_id, "card": card}
 
     if name == "rename_category":
         old, new = (args.get("old") or "").strip(), (args.get("new") or "").strip()
@@ -361,7 +378,8 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
         undo_id = await actions.record(db, name, f"Renamed category {old} → {new}",
                                        {"sql": restore_rows("finances_transactions", txns) + restore_rows("finances_import_rules", rules)},
                                        {"kind": "finances", "category": new})
-        return {"ok": True, "transactions": len(txns), "rules": len(rules), "undo_id": undo_id}
+        return {"ok": True, "transactions": len(txns), "rules": len(rules), "undo_id": undo_id,
+                "card": change_card(f"Renamed category · {len(txns)} transactions", [("Name", old, new)], {"kind": "finances", "category": new})}
 
     if name == "add_category_rule":
         pattern, category = (args.get("pattern") or "").strip(), (args.get("category") or "").strip()
@@ -397,7 +415,10 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
         await db.commit()
         undo = {"sql": restore_rows("finances_budgets", before) if before else delete_rows("finances_budgets", "category", [bname])}
         undo_id = await actions.record(db, name, f"Budget {bname}: €{float(args['amount']):g}/month", undo, {"kind": "page", "page": "finances"})
-        return {"ok": True, "undo_id": undo_id}
+        rows = [("Monthly", f"€{float(before[0]['amount']):g}" if before else None, f"€{float(args['amount']):g}")]
+        if cats:
+            rows.append(("Counts", (before[0].get("categories") or "").strip("[]").replace('"', "") if before else None, ", ".join(cats)))
+        return {"ok": True, "undo_id": undo_id, "card": change_card(f"Budget · {bname}", rows, {"kind": "page", "page": "finances"})}
 
     if name == "search_events":
         q = (args.get("query") or "").strip().lower()
@@ -428,17 +449,32 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
                 cursor = max(cursor, e)
                 if cursor >= hi:
                     break
-            days.append({"date": d.isoformat(), "weekday": d.strftime("%a"), "free": slots})
+            days.append({"date": d.isoformat(), "weekday": d.strftime("%a"), "free": slots,
+                         "busy": [{"start": e["start_h"], "end": e["end_h"], "title": e["title"]}
+                                  for e in events if e["date"] == d.isoformat() and not e.get("all_day")
+                                  and e.get("start_h") is not None and e.get("end_h") is not None]})
             d += timedelta(days=1)
-        return {"hours_needed": hours, "days": days}
+        label = f"{hours:g} hour{'s' if hours != 1 else ''}"
+        return {"hours_needed": hours, "days": [{k: v for k, v in x.items() if k != "busy"} for x in days],
+                "card": {"type": "week", "title": f"Free time · {label} or more", "from": lo, "to": hi, "hours": hours,
+                         "days": days[:7]}}
 
     if name == "show_day":
         d = date.fromisoformat(args["date"])
-        events = sorted(await _all_events(db, d, d, gcal_events), key=lambda e: (not e.get("all_day"), e.get("start_h") or 0))
-        return {"date": d.isoformat(), "events": events,
-                "card": {"type": "day", "date": d.isoformat(), "title": d.strftime("%A %-d %B"),
-                         "highlight": args.get("highlight"),
-                         "events": [{k: e.get(k) for k in ("id", "title", "start_h", "end_h", "all_day", "color")} for e in events[:16]]},
+        n = max(1, min(int(args.get("days") or 1), 7))
+        everything = await _all_events(db, d, d + timedelta(days=n - 1), gcal_events)
+        keep = ("id", "title", "start_h", "end_h", "all_day", "color")
+        days = []
+        for i in range(n):
+            day = d + timedelta(days=i)
+            evs = sorted((e for e in everything if e["date"] == day.isoformat()),
+                         key=lambda e: (not e.get("all_day"), e.get("start_h") or 0))
+            days.append({"date": day.isoformat(), "title": day.strftime("%A %-d %B" if n == 1 else "%a %-d"),
+                         "events": [{k: e.get(k) for k in keep} for e in evs[:16]]})
+        title = days[0]["title"] if n == 1 else f"{d.strftime('%a %-d %b')} – {(d + timedelta(days=n - 1)).strftime('%a %-d %b')}"
+        return {"date": d.isoformat(), "events": [e for day in days for e in day["events"]],
+                "card": {"type": "day", "date": d.isoformat(), "title": title, "highlight": args.get("highlight"),
+                         "days": days, "events": days[0]["events"]},
                 "show": {"kind": "calendar", "date": d.isoformat()}}
 
     if name == "create_habit":
@@ -468,7 +504,11 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
         await db.commit()
         undo_id = await actions.record(db, name, f"Changed {', '.join(what)} on “{before[0]['title']}”",
                                        {"sql": restore_rows("goals", before)}, {"kind": "goal", "id": args["id"]})
-        return {"ok": True, "undo_id": undo_id}
+        b = before[0]
+        rows = [("Title", b["title"], args.get("title") or b["title"]), ("Calendar tags", b.get("tags"), args["tags"] if args.get("tags") is not None else b.get("tags"))]
+        if args.get("quarter") and args.get("focus") is not None:
+            rows.append((f"{args['quarter']} focus", b.get(args["quarter"].lower()), args["focus"]))
+        return {"ok": True, "undo_id": undo_id, "card": change_card(f"Goal · {b['title']}", rows, {"kind": "goal", "id": args["id"]})}
 
     if name == "add_subtask":
         parent = await snapshot(db, "todos", "id = ?", (args["parent_id"],))
@@ -499,7 +539,11 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
             summary, show = f"Added to note “{first}”", {"kind": "note", "id": args["id"]}
         await db.commit()
         undo_id = await actions.record(db, name, summary, {"sql": restore_rows("notes", before)}, show)
-        return {"ok": True, "undo_id": undo_id}
+        out = {"ok": True, "undo_id": undo_id}
+        if name == "append_to_note":
+            from agent_cards import note_card
+            out["card"] = {**note_card(args["id"], body), "added": args["text"][:400]}
+        return out
 
     if name == "show":
         v = args["view"]

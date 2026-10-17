@@ -291,7 +291,7 @@ class TestTranscribe:
         sent = openai[0]
         assert sent.url.path.endswith("/audio/transcriptions")
         body = sent.read()
-        assert b'filename="recording.webm"' in body and b"gpt-4o-mini-transcribe" in body
+        assert b'filename="recording.webm"' in body and b"gpt-transcribe" in body
 
     async def test_needs_a_token(self, client, openai):
         resp = await client.post("/assistant/transcribe", content=b"x" * 5000, headers={"Content-Type": "audio/webm"})
@@ -337,39 +337,96 @@ class TestSettings:
 
 class TestSpeak:
     @pytest.fixture
-    def openai(self, monkeypatch):
-        import httpx
-        import routers.assistant as assistant
+    def engine(self, monkeypatch):
+        import speech_engine
         calls = []
-        real = httpx.AsyncClient
 
-        def handler(request: httpx.Request):
-            calls.append(json.loads(request.read()))
-            return httpx.Response(200, content=b"ID3fake-mp3", headers={"content-type": "audio/mpeg"})
-
-        monkeypatch.setattr(assistant.httpx, "AsyncClient",
-                            lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+        async def fake_stream(text, voice="marin"):
+            calls.append((text, voice))
+            yield b"\x01\x00" * 100
+            yield b"\x02\x00" * 100
+        monkeypatch.setattr(speech_engine, "stream", fake_stream)
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         return calls
 
-    async def test_text_comes_back_as_audio(self, client, auth, openai):
-        resp = await client.post("/assistant/speak", json={"text": "You're free after three.", "voice": "sage"}, headers=auth)
+    async def test_text_streams_back_as_pcm(self, client, auth, engine):
+        resp = await client.post("/assistant/speak", json={"text": "You're free after three.", "voice": "cedar"}, headers=auth)
         assert resp.status_code == 200
-        assert resp.headers["content-type"] == "audio/mpeg" and resp.content == b"ID3fake-mp3"
-        assert openai[0]["input"] == "You're free after three."
-        assert openai[0]["voice"] == "sage" and openai[0]["model"] == "gpt-4o-mini-tts"
+        assert resp.headers["content-type"] == "audio/pcm" and resp.headers["x-audio-format"] == "pcm16;rate=24000;channels=1"
+        assert len(resp.content) == 400 and engine == [("You're free after three.", "cedar")]
 
-    async def test_an_unknown_voice_falls_back(self, client, auth, openai):
-        await client.post("/assistant/speak", json={"text": "Hi", "voice": "darth"}, headers=auth)
-        assert openai[0]["voice"] == "coral"
-
-    async def test_needs_a_token(self, client, openai):
+    async def test_needs_a_token(self, client, engine):
         assert (await client.post("/assistant/speak", json={"text": "Hi"})).status_code == 401
-        assert openai == []
+        assert engine == []
 
-    async def test_long_text_is_refused(self, client, auth, openai):
+    async def test_long_text_is_refused(self, client, auth, engine):
         resp = await client.post("/assistant/speak", json={"text": "x" * 2001}, headers=auth)
-        assert resp.status_code == 422 and openai == []
+        assert resp.status_code == 422 and engine == []
+
+    async def test_an_engine_failure_is_a_status_not_a_broken_stream(self, client, auth, monkeypatch):
+        import speech_engine
+
+        async def broken(text, voice="marin"):
+            raise speech_engine.SpeechError("upstream down")
+            yield b""
+        monkeypatch.setattr(speech_engine, "stream", broken)
+        resp = await client.post("/assistant/speak", json={"text": "Hi"}, headers=auth)
+        assert resp.status_code == 502 and "upstream down" in resp.json()["detail"]
+
+
+class TestSpeechEngine:
+    async def test_realtime_failure_falls_back_to_the_speech_endpoint(self, monkeypatch):
+        import speech_engine
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setattr(speech_engine, "ENGINE", "realtime")
+
+        async def rt_down(text, voice):
+            raise OSError("no route")
+            yield b""
+
+        async def fallback(text, voice):
+            yield b"pcm"
+        monkeypatch.setattr(speech_engine._realtime, "stream", rt_down)
+        monkeypatch.setattr(speech_engine, "_speech_stream", fallback)
+        assert [c async for c in speech_engine.stream("Hi", "nova")] == [b"pcm"]
+
+    async def test_realtime_protocol(self, monkeypatch):
+        """What goes over the socket, against a stand-in Realtime server."""
+        import base64
+        import speech_engine
+        sent = []
+
+        class FakeWS:
+            close_code = None
+            def __init__(self):
+                self.events = [{"type": "response.created"},
+                               {"type": "response.output_audio.delta", "delta": base64.b64encode(b"abcd").decode()},
+                               {"type": "response.output_audio.delta", "delta": base64.b64encode(b"efgh").decode()},
+                               {"type": "response.done", "response": {"status": "completed"}}]
+            async def send(self, m): sent.append(json.loads(m))
+            async def recv(self): return json.dumps(self.events.pop(0))
+            async def close(self): self.close_code = 1000
+
+        async def fake_connect(url, **kw):
+            sent.append({"url": url, "auth": kw["additional_headers"]["Authorization"]})
+            return FakeWS()
+        import websockets.asyncio.client as wsc
+        monkeypatch.setattr(wsc, "connect", fake_connect)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        voice = speech_engine.RealtimeVoice()
+        out = [c async for c in voice.stream("Read me.", "marin")]
+        assert out == [b"abcd", b"efgh"]
+        assert sent[0]["url"].startswith("wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini")
+        session = sent[1]["session"]
+        assert session["output_modalities"] == ["audio"] and session["audio"]["output"] == {"format": {"type": "audio/pcm", "rate": 24000}, "voice": "marin"}
+        resp = sent[2]["response"]
+        assert resp["conversation"] == "none" and resp["input"][0]["content"][0]["text"] == "Read me."
+        # The connection is kept for the next sentence.
+        events_before = len(sent)
+        voice.ws.events = [{"type": "response.output_audio.delta", "delta": base64.b64encode(b"x").decode()},
+                           {"type": "response.done", "response": {"status": "completed"}}]
+        assert [c async for c in voice.stream("Again.", "marin")] == [b"x"]
+        assert len(sent) == events_before + 1   # no reconnect, just the new response
 
 
 class TestSpoken:
@@ -382,3 +439,11 @@ class TestSpoken:
     async def test_typed_messages_are_not(self, client, auth, sent):
         await _send(client, auth, "Hi")
         assert sent[-1]["spoken"] is False
+
+
+class TestVoiceOnly:
+    async def test_the_corner_mic_flags_voice_only(self, client, auth, sent):
+        resp = await client.post("/assistant/runs", json={"message": "What's on?", "voice_only": True}, headers=auth)
+        assert resp.status_code == 200
+        await asyncio.sleep(0)
+        assert sent[-1]["voice_only"] is True and sent[-1]["spoken"] is True

@@ -39,6 +39,9 @@ if not CODING_ENABLED:
 # Covers reasoning tokens too, so this needs more headroom than a visible-reply budget.
 MAX_TOKENS = int(os.getenv("AGENT_MAX_TOKENS", "8192"))
 TIMEZONE = os.getenv("TZ", "Europe/London")
+# A spoken turn wants an answer in a second or two, not a long think: the
+# model's reasoning effort for those. Empty leaves the model's default.
+VOICE_REASONING = os.getenv("AGENT_VOICE_REASONING", "low").strip().lower()
 
 CODING_SECTION = """Coding: for anything that means changing code in a repository, use \
 delegate_coding. It clones the repo into an isolated sandbox, works on its own \
@@ -92,9 +95,16 @@ guessing, and be concise."""
 APP_SECTION = """In the app: the user sees the chat inside their Atlas app, and your tools \
 work with it.
 
-- Pictures over paragraphs. finance_breakdown, compare_spending, \
-search_transactions and show_day draw a chart or list in the chat. When you use \
-them, don't repeat every number in text: give the takeaway in a line or two.
+- Pictures over paragraphs. Several tools draw something in the chat: \
+finance_breakdown, compare_spending, search_transactions and get_budgets \
+(money); spending_trend, net_worth_trend and goal_time (charts over time); \
+show_day (a timeline, up to 7 days) and find_free_time (a week of free slots \
+they can tap to book); show_todos (a checklist they can tick); habit_streaks; \
+lift_progress (their gym log); show_note. Edits show a before → after \
+card by themselves. When you use these, don't repeat every number in text: \
+give the takeaway in a line or two.
+- When there are a few clear options (time slots, two plans), use \
+offer_choices so they can answer with a tap, then stop and wait.
 - Investigating money: start broad (finance_breakdown, compare_spending), then \
 drill in (a category by merchant, search_transactions). Tidy categories when \
 asked or when it clearly helps: set_transaction_category, rename_category \
@@ -153,6 +163,15 @@ def _memory_section(memory: str | None, name: str) -> str:
     return MEMORY_SECTION.format(name=name, memory=text)
 
 
+VOICE_ONLY_SECTION = """
+
+Voice only: {name} is talking to you through the voice button, away from the \
+chat. They will hear your reply and see nothing else: no cards, charts or \
+buttons. So never point at anything on screen ("here's", "see below", "I've \
+put it in a chart"), don't use offer_choices, and say the facts that matter \
+in words — the total, the one or two biggest items, the time of the next \
+thing. If they need to look at something, say it's in the chat or the app."""
+
 VOICE_SECTION = """
 
 Voice: your reply to this message will be read out loud to {name}. \
@@ -194,7 +213,7 @@ def _background_section(background: dict | None, name: str) -> str:
 
 
 def build_system_prompt(template: str | None, name: str, today: str, memory: str | None,
-                        spoken: bool = False, background: dict | None = None) -> str:
+                        spoken: bool = False, background: dict | None = None, voice_only: bool = False) -> str:
     """The editable prompt, then the fixed sections: coding, memory.
 
     The editable part is filled with plain replacement, not str.format — it is
@@ -207,12 +226,12 @@ def build_system_prompt(template: str | None, name: str, today: str, memory: str
     coding = CODING_SECTION if CODING_ENABLED else CODING_DISABLED_SECTION
     # Voice goes last: everything before it stays the same between turns, so
     # the prompt cache still covers it.
-    voice = VOICE_SECTION.format(name=name) if spoken else ""
+    voice = (VOICE_SECTION.format(name=name) if spoken or voice_only else "") + (VOICE_ONLY_SECTION.format(name=name) if voice_only else "")
     return (f"{base}\n\n{coding.rstrip()}\n\n{APP_SECTION.rstrip()}" + _memory_section(memory, name)
             + voice + _background_section(background, name))
 
 
-def _model() -> OpenAIResponsesModel:
+def _model(spoken: bool = False) -> OpenAIResponsesModel:
     """Build the model on the Responses API (/v1/responses).
 
     Not chat/completions: reasoning models reject function tools there unless
@@ -229,7 +248,8 @@ def _model() -> OpenAIResponsesModel:
     return OpenAIResponsesModel(
         client_args=client_args,
         model_id=MODEL_ID,
-        params={"max_output_tokens": MAX_TOKENS},
+        params={"max_output_tokens": MAX_TOKENS,
+                **({"reasoning": {"effort": VOICE_REASONING}} if spoken and VOICE_REASONING else {})},
     )
 
 
@@ -254,7 +274,8 @@ def _to_strands(messages: list[dict]) -> list[dict]:
 
 async def stream_reply(messages: list[dict], user_name: str, run_id: str | None = None,
                        memory: str | None = None, system_prompt: str | None = None,
-                       safe_web: bool = False, spoken: bool = False, background: dict | None = None):
+                       safe_web: bool = False, spoken: bool = False, background: dict | None = None,
+                       voice_only: bool = False):
     """Yield (event_type, payload) tuples: ("token", str) | ("tool", str) | ("error", str)."""
     history = _to_strands(messages)
     if not history or history[-1]["role"] != "user":
@@ -263,7 +284,7 @@ async def stream_reply(messages: list[dict], user_name: str, run_id: str | None 
     prompt, prior = history[-1]["content"], history[:-1]
 
     today = datetime.now(ZoneInfo(TIMEZONE)).strftime("%A %-d %B %Y")
-    system_prompt = build_system_prompt(system_prompt, user_name or "the user", today, memory, spoken, background)
+    system_prompt = build_system_prompt(system_prompt, user_name or "the user", today, memory, spoken, background, voice_only)
 
     client = _mcp_client(run_id, (background or {}).get("approval") if background else None)
     try:
@@ -290,7 +311,7 @@ async def stream_reply(messages: list[dict], user_name: str, run_id: str | None 
         DONE = object()
 
         agent = Agent(
-            model=_model(),
+            model=_model(spoken=spoken or voice_only),
             system_prompt=system_prompt,
             # Dashboard tools over MCP, plus web access and the ability to
             # delegate to a research team it composes itself.

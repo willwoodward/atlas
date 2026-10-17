@@ -82,3 +82,16 @@ def test_the_mcp_connection_carries_the_run_and_approval():
     finally:
         runtime.sse_client = orig
     assert captured["X-Atlas-Run"] == "run-1" and captured["X-Atlas-Approval"] == "ask"
+
+
+def test_voice_only_turns_dont_point_at_the_screen():
+    p = build_system_prompt("Be brief.", "Will", "Monday", "", voice_only=True)
+    assert "read out loud to Will" in p and "never point at anything on screen" in p
+    assert "never point at anything on screen" not in build_system_prompt("Be brief.", "Will", "Monday", "", spoken=True)
+
+
+def test_spoken_turns_think_less(monkeypatch):
+    import runtime
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    assert runtime._model(spoken=True).config["params"]["reasoning"] == {"effort": "low"}
+    assert "reasoning" not in runtime._model().config["params"]

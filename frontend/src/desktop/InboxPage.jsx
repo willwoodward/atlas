@@ -256,8 +256,9 @@ function Detail({ id, onBack, onChanged, isMobile, onRunAgain }) {
     try { await inboxFetch(token, `/${id}/approve-all`, { method: 'POST', body: {} }) } catch (e) { setErr(e.message) }
     await load(); onChanged(); refresh()
   }
-  const send = async () => {
-    const text = reply.trim()
+  const send = () => sendText(reply)
+  const sendText = async raw => {
+    const text = (raw || '').trim()
     if (!text) return
     setSending(true); setErr(null)
     try {
@@ -321,7 +322,7 @@ function Detail({ id, onBack, onChanged, isMobile, onRunAgain }) {
           return (
             <div key={i} style={{ marginBottom: 16 }}>
               <ToolTrace tools={d.tools || []} />
-              <ToolCards tools={d.tools || []} />
+              <ToolCards tools={d.tools || []} onChoose={busy ? null : sendText} />
               {content
                 ? <div className="md-prose" style={{ fontSize: 14.5, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} />
                 : m.error ? <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>{m.error}</div>

@@ -410,6 +410,16 @@ async def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_proposals_session ON inbox_proposals(session_id);
 
+            -- A value per day for things that otherwise only exist as "now"
+            -- (net worth, balances, savings, open to-dos), so they can be
+            -- charted over time. The day's row is its latest value; see snapshots.py.
+            CREATE TABLE IF NOT EXISTS daily_snapshots (
+                date TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value REAL NOT NULL,
+                PRIMARY KEY (date, key)
+            );
+
             -- Browsers to send notifications to (Web Push).
             CREATE TABLE IF NOT EXISTS push_subscriptions (
                 endpoint TEXT PRIMARY KEY,

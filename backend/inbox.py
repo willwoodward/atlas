@@ -587,11 +587,14 @@ async def run_due(now: datetime | None = None) -> list[str]:
 
 
 async def scheduler() -> None:
+    """The background loop: routines that are due, and the hourly snapshot."""
+    import snapshots
     while True:
         try:
             await run_due()
         except Exception:
             log.exception("Routine scheduler tick failed")
+        await snapshots.maybe_take()
         await asyncio.sleep(TICK_SECONDS)
 
 
@@ -654,7 +657,13 @@ async def dispatch(name: str, args: dict, db) -> dict:
             else:
                 r = await update_routine(db, args["id"], {k: v for k, v in args.items() if k != "id"})
                 summary = f"Changed routine “{r['name']}” ({r['schedule']}{'' if r['enabled'] else ', paused'})"
-                out = {"ok": True, "routine": r}
+                from agent_cards import change_card
+                b = before[0]
+                card = change_card(f"Routine · {r['name']}", [
+                    ("Name", b["name"], r["name"]), ("When", describe_schedule(b["days"], b["time"]), r["schedule"]),
+                    ("Instruction", b["prompt"], r["prompt"]), ("Asks first", "yes" if b["approval"] == "ask" else "no", "yes" if r["approval"] == "ask" else "no"),
+                    ("On", "yes" if b["enabled"] else "no", "yes" if r["enabled"] else "no")], show)
+                out = {"ok": True, "routine": r, "card": card}
             out["undo_id"] = await actions.record(db, name, summary, {"sql": restore_rows("routines", before)}, show)
             return out
         if name == "run_routine":

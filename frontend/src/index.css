@@ -206,3 +206,9 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 @media (prefers-reduced-motion: reduce) {
   .voice-dock-card, .voice-dock-pulse, .voice-dock-live { animation: none; }
 }
+
+/* Chat cards: rows and slots you can tap. */
+.card-row { transition: background .12s; }
+.card-row:hover { background: var(--surface-2); }
+.card-slot { transition: filter .12s; }
+.card-slot:not(:disabled):hover { filter: brightness(.94); }
