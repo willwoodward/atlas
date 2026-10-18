@@ -56,6 +56,8 @@ class ChatRequest(BaseModel):
     # The Agents page: per-agent model, reasoning, prompt, skills and tool
     # policies, plus the user's own agents (agent_settings.py).
     agents: dict | None = None
+    # Who answers: "atlas" or the id of one of the user's agents.
+    agent: str | None = Field(None, max_length=60)
 
 
 class AnswerRequest(BaseModel):
@@ -84,7 +86,7 @@ async def chat(req: ChatRequest, user: dict = Depends(get_current_user)):
                                                      system_prompt=req.system_prompt, safe_web=req.safe_web,
                                                      spoken=req.spoken, voice_only=req.voice_only,
                                                      background=req.background.model_dump() if req.background else None,
-                                                     agents=req.agents):
+                                                     agents=req.agents, agent=req.agent):
                 if kind == "progress":
                     # Already a full event dict (research_plan / research_done).
                     yield f"data: {json.dumps(payload)}\n\n"

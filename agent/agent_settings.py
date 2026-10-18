@@ -56,6 +56,26 @@ def custom_agents() -> list[dict]:
     return [a for a in (_settings.get() or {}).get("custom", []) if isinstance(a, dict) and a.get("id")]
 
 
+# How deep handing work on can go: you → an agent → its subagent, no further,
+# so two agents can't pass a task back and forth forever.
+MAX_DEPTH = 2
+
+
+def subagents_for(cfg: dict, agent_id: str = "atlas") -> list[str]:
+    """Who this agent can hand work to (resolved by the API). Without
+    settings at all, Atlas keeps its old team: researchers, coder, and any
+    agents of yours."""
+    if "subagents" in cfg:
+        return list(cfg.get("subagents") or [])
+    if agent_id == "atlas":
+        return ["researcher", "coder", *[a["id"] for a in custom_agents()]]
+    return []
+
+
+def custom_by_id(agent_id: str) -> dict | None:
+    return next((a for a in custom_agents() if a["id"] == agent_id), None)
+
+
 def in_background() -> bool:
     return bool(_background.get())
 
@@ -200,8 +220,12 @@ class ApprovalHook(HookProvider):
 
 # ── The user's own agents ────────────────────────────────────────────────────
 
+CHAT_FRAME = """You are {name}, one of the agents {user} has set up in Atlas, \
+their personal dashboard. You're talking with them directly (they picked you \
+in the chat). Today is {today}."""
+
 CUSTOM_FRAME = """You are {name}, one of the agents working for {user} in Atlas, \
-their personal dashboard. Atlas (the assistant they talk to) has handed you a \
+their personal dashboard. Another agent has handed you a \
 task. Do it with your tools, then reply with the result for Atlas to pass on: \
 concise, specific, and clear about anything you couldn't do. Nobody can answer \
 questions mid-task, so make reasonable assumptions and say what they were. \
@@ -211,19 +235,22 @@ MAX_RESULT_CHARS = 8000
 CUSTOM_TIMEOUT = int(os.getenv("CUSTOM_AGENT_TIMEOUT", "600"))
 
 
-def ask_agent_tool(user: str, mcp_factory, extra_tools, timezone: str, hooks_factory):
-    """Atlas's tool for handing work to one of the user's agents.
+def ask_agent_tool(user: str, mcp_factory, extra_tools, timezone: str, hooks_factory,
+                   allowed_ids=None, team_factory=None, depth: int = 0):
+    """The tool for handing work to the user's own agents (those in
+    allowed_ids, by default all of them).
 
-    mcp_factory(ask, off) opens an MCP client for that agent's policies;
-    extra_tools() is the web tools; hooks_factory(agent_name) the tracers.
+    mcp_factory(agent) opens an MCP client with that agent's policies;
+    extra_tools() is the web tools; hooks_factory(agent_name) the tracers;
+    team_factory(agent, depth) the agent's own subagent tools, if it has any.
     """
-    agents = custom_agents()
+    agents = [a for a in custom_agents() if allowed_ids is None or a["id"] in allowed_ids]
     listing = "\n".join(f"- {a['id']}: {a['name']} — {a.get('description') or 'no description'}" for a in agents)
 
     @tool(name="ask_agent", description=(
         "Hand a task to one of the user's own agents (set up on the Agents page) and get its answer back. "
         "Use when a task matches one's description. It can't see this conversation: give it everything it needs.\n\n"
-        f"Agents:\n{listing}"))
+        f"Agents you can hand work to:\n{listing}"))
     async def ask_agent(agent: str, task: str, context: str = "") -> dict:
         """Ask one of the user's agents to do something.
 
@@ -247,6 +274,9 @@ def ask_agent_tool(user: str, mcp_factory, extra_tools, timezone: str, hooks_fac
             return {"error": "Couldn't reach Atlas data for that agent."}
         try:
             tools = allowed([*tools, *extra_tools()], a, default="off")
+            # Its own subagents, one level further down (none past MAX_DEPTH).
+            if team_factory:
+                tools += team_factory(a, depth + 1)
             prompt, tools = with_skills(prompt, tools, a)
             sub = Agent(
                 model=build_model(a, max_tokens=8192),

@@ -74,6 +74,8 @@ function spokenQuestion(ev) {
   return `I need your OK before ${what}. Approve or reject it on screen.`
 }
 
+const AGENT_KEY = 'atlas:chat-agent'
+
 export function reduceMessage(msg, ev) {
   switch (ev.type) {
     case 'token':
@@ -223,6 +225,12 @@ export function AssistantProvider({ children }) {
   const [expiresAt, setExpiresAt] = useState(null)
   // Chats are temporary unless kept (backend/conversations.py).
   const [kept, setKept] = useState(false)
+  // Who you're talking to (Agents page): Atlas or one of your agents. The
+  // current chat's agent, or the one picked for the next chat. Remembered.
+  const [chatAgent, setChatAgent] = useState(() => { try { return localStorage.getItem(AGENT_KEY) || 'atlas' } catch { return 'atlas' } })
+  const chatAgentRef = useRef(chatAgent)
+  chatAgentRef.current = chatAgent
+  useEffect(() => { try { localStorage.setItem(AGENT_KEY, chatAgent) } catch { /* not kept */ } }, [chatAgent])
   const [busy, setBusy] = useState(false)
   // Messages sent while Atlas was answering, oldest first. Each goes when the
   // turn before it has finished, so replies stay in order. Kept on this device.
@@ -394,6 +402,8 @@ export function AssistantProvider({ children }) {
     setSessionId(body.session?.id ?? null)
     setExpiresAt(body.session?.expires_at ?? null)
     setKept(!!body.session?.kept)
+    // The conversation going on (maybe from another device) decides who it's with.
+    if (body.session) setChatAgent(body.session.agent_id || 'atlas')
     if (!body.session) setError(null)
     setMessages(prev => mergeThread(prev, body.messages || []))
     const active = body.active_run
@@ -537,7 +547,7 @@ export function AssistantProvider({ children }) {
       const res = await fetch(`${API}/assistant/runs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ message: prompt, session_id: sessionRef.current, spoken: aloud || !!live, voice_only: viaDock }),
+        body: JSON.stringify({ message: prompt, session_id: sessionRef.current, spoken: aloud || !!live, voice_only: viaDock, agent_id: chatAgentRef.current }),
       })
       if (res.status === 409) {
         // A reply is still running that this device isn't following yet
@@ -609,6 +619,14 @@ export function AssistantProvider({ children }) {
     } catch (e) { setKept(!on); setError(e.message) }
   }, [api])
 
+  /** Talk to someone else: a new chat with them (the current one ends, as with "New chat"). */
+  const chooseAgent = useCallback(id => {
+    if (id === chatAgentRef.current) return
+    if (sessionRef.current || messages.length) clear()
+    chatAgentRef.current = id
+    setChatAgent(id)
+  }, [clear, messages.length])
+
   /** Carry on a kept chat: it becomes the current one on every device. */
   const resume = useCallback(async (id) => {
     if (busyRef.current) throw new Error('Atlas is still answering here.')
@@ -617,6 +635,7 @@ export function AssistantProvider({ children }) {
     sessionRef.current = view.session.id
     setExpiresAt(view.session.expires_at)
     setKept(true)
+    setChatAgent(view.session.agent_id || 'atlas')
     setQueued([])
     setError(null)
     setMessages(mergeThread([], view.messages || []))
@@ -656,7 +675,7 @@ export function AssistantProvider({ children }) {
 
   return (
     <Ctx.Provider value={{ messages, busy, error, send, stop, clear, answer, registerVoiceTarget, registerVoiceDock, chatsOnScreen, queued, unqueue,
-                          sessionId, kept, keep, resume, assistantApi: api }}>
+                          sessionId, kept, keep, resume, assistantApi: api, chatAgent, chooseAgent }}>
       {children}
     </Ctx.Provider>
   )

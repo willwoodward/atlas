@@ -473,6 +473,11 @@ async def init_db():
             # Delete a routine's threads this many hours after their last
             # activity. 0: keep them until you delete them (inbox.purge_old).
             "ALTER TABLE routines ADD COLUMN keep_hours INTEGER NOT NULL DEFAULT 0",
+            # Agents page: who a chat or routine is with ('' / NULL = Atlas),
+            # and which agents each agent can hand work to (NULL = its default).
+            "ALTER TABLE routines ADD COLUMN agent_id TEXT",
+            "ALTER TABLE agent_sessions ADD COLUMN agent_id TEXT",
+            "ALTER TABLE agents ADD COLUMN subagents TEXT",
             "ALTER TABLE agent_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'",
             "ALTER TABLE todos ADD COLUMN parent_id TEXT",
             "ALTER TABLE todos ADD COLUMN completed_at TEXT",

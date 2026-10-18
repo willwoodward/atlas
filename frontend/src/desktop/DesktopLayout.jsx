@@ -65,9 +65,9 @@ const NAV_APPS = [
   { id: 'fitness',  label: 'Fitness' },
 ]
 const NAV_BOTTOM = [
+  { id: 'agents',    label: 'Agents' },
   { id: 'inbox',     label: 'Inbox' },
   { id: 'assistant', label: 'Assistant' },
-  { id: 'agents',    label: 'Agents' },
 ]
 
 // Collapsed, labels fade and clip rather than unmount, so the width

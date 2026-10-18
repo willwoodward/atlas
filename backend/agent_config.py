@@ -9,6 +9,12 @@ Agents
   custom      ones you make ("Finance analyst"). Atlas hands them work with
               its ask_agent tool, and they use only the tools you give them.
 
+You can talk to any of them except the Researcher and Coder (they work on
+a task they're handed): pick the agent in the chat, or for a routine.
+Subagents: which agents each one can hand work to. Atlas: the Researcher,
+the Coder and all of yours, unless you choose; yours: none unless you choose;
+the Researcher and Coder: none (they're the ones doing the work).
+
 Each has a model and reasoning effort (blank = the server's default), a
 prompt (built-ins: blank = their built-in prompt), skills, and a policy per
 tool: on, ask (Atlas checks with you first: an approve card in the chat, or a
@@ -66,7 +72,35 @@ def _row(r) -> dict:
     d["enabled"] = bool(d["enabled"])
     d["tools"] = json.loads(d["tools"] or "{}")
     d["skills"] = json.loads(d["skills"] or "[]")
+    d["subagents"] = json.loads(d["subagents"]) if d.get("subagents") else None
     return d
+
+
+WORKERS = ("researcher", "coder")   # do a task they're handed; no chats, no subagents
+
+
+def default_subagents(agent_id: str, agents: list[dict]) -> list[str]:
+    if agent_id == "atlas":
+        return ["researcher", "coder", *[a["id"] for a in agents if not a["builtin"]]]
+    return []
+
+
+def subagents_of(a: dict, agents: list[dict]) -> list[str]:
+    """Who this agent can hand work to: its choice, else its default, minus
+    itself, the switched-off and the gone."""
+    if a["id"] in WORKERS:
+        return []
+    chosen = a["subagents"] if a.get("subagents") is not None else default_subagents(a["id"], agents)
+    usable = {x["id"] for x in agents if x["enabled"] and x["id"] not in ("atlas", a["id"])}
+    return [x for x in chosen if x in usable]
+
+
+async def chat_agent(db, agent_id: str | None) -> str:
+    """An agent you can talk to, else Atlas."""
+    if not agent_id or agent_id == "atlas" or agent_id in WORKERS:
+        return "atlas"
+    a = await get_agent(db, agent_id, with_prompt=False)
+    return agent_id if a and a["enabled"] else "atlas"
 
 
 async def ensure_builtins(db) -> None:
@@ -152,6 +186,20 @@ async def _clean(db, fields: dict, builtin: bool) -> dict:
         out["tools"] = json.dumps(_clean_tools(fields["tools"]))
     if fields.get("skills") is not None:
         out["skills"] = json.dumps(await _clean_skills(db, fields["skills"]))
+    if "subagents" in fields and fields["subagents"] is None:
+        out["subagents"] = None   # back to the default
+    elif "subagents" in fields:
+        subs = fields["subagents"]
+        if not isinstance(subs, list):
+            raise ConfigError("subagents is a list of agent ids.")
+        known = {a["id"] for a in await list_agents(db)}
+        clean = []
+        for x in subs:
+            if x not in known or x == "atlas":
+                raise ConfigError(f"{x!r} isn't an agent that can be handed work.")
+            if x not in clean:
+                clean.append(x)
+        out["subagents"] = json.dumps(clean)
     if fields.get("enabled") is not None:
         if builtin and fields["enabled"] is False:
             raise ConfigError("Built-in agents can't be switched off; turn off the tool that uses them instead.")
@@ -163,6 +211,10 @@ async def update_agent(db, agent_id: str, fields: dict, source: str = "user") ->
     a = await get_agent(db, agent_id, with_prompt=False)
     if not a:
         return None
+    if agent_id in WORKERS and fields.get("subagents"):
+        raise ConfigError("The Researcher and Coder do the work themselves; they don't hand it on.")
+    if agent_id in (fields.get("subagents") or []):
+        raise ConfigError("An agent can't be its own subagent.")
     cols = await _clean(db, fields, a["builtin"])
     if cols:
         cols["updated_at"] = _now()
@@ -205,6 +257,12 @@ async def delete_agent(db, agent_id: str) -> bool:
     if a["builtin"]:
         raise ConfigError("Built-in agents can't be deleted.")
     await db.execute("DELETE FROM agents WHERE id=?", (agent_id,))
+    # Its routines go back to Atlas, and nobody can hand it work any more.
+    await db.execute("UPDATE routines SET agent_id=NULL WHERE agent_id=?", (agent_id,))
+    async with db.execute("SELECT id, subagents FROM agents WHERE subagents LIKE ?", (f'%"{agent_id}"%',)) as c:
+        for r in await c.fetchall():
+            await db.execute("UPDATE agents SET subagents=? WHERE id=?",
+                             (json.dumps([x for x in json.loads(r["subagents"]) if x != agent_id]), r["id"]))
     await db.commit()
     return True
 
@@ -320,9 +378,11 @@ async def run_config(db) -> dict:
     """Every agent's settings, for the agent service. Atlas's prompt isn't
     here: it travels as system_prompt, from the session's snapshot."""
     out = {"custom": []}
-    for a in await list_agents(db):
+    agents = await list_agents(db)
+    for a in agents:
         cfg = {"model": a["model"], "reasoning": a["reasoning"], "tools": a["tools"],
-               "skills": await _skills_for(db, a["skills"]), "engine": a["engine"]}
+               "skills": await _skills_for(db, a["skills"]), "engine": a["engine"],
+               "subagents": subagents_of(a, agents)}
         if a["id"] != "atlas":
             cfg["prompt"] = (await memory.current(db, prompt_kind(a["id"])))["content"]
         if a["builtin"]:
@@ -352,6 +412,8 @@ _AGENT_PROPS = {
     "reasoning": {"type": "string", "enum": list(REASONING)},
     "tools": _POLICY_SCHEMA,
     "skills": {"type": "array", "items": {"type": "string"}, "description": "Skill ids it can load (replaces the list)"},
+    "subagents": {"type": "array", "items": {"type": "string"},
+                  "description": "Agent ids it can hand work to (researcher, coder, or the user's own; replaces the list)"},
 }
 
 TOOLS = [
@@ -379,7 +441,7 @@ WRITES = {"create_agent", "update_agent", "delete_agent", "write_skill", "delete
 
 
 def _brief(a: dict) -> dict:
-    return {k: a.get(k) for k in ("id", "name", "description", "builtin", "enabled", "model", "reasoning", "skills", "tools")}
+    return {k: a.get(k) for k in ("id", "name", "description", "builtin", "enabled", "model", "reasoning", "skills", "subagents", "tools")}
 
 
 def _restore_doc_sql(kind: str, content: str) -> list:
@@ -413,8 +475,13 @@ async def dispatch(name: str, args: dict, db) -> dict:
                 return {"error": "No such agent"}
             show = {"kind": "agent", "id": aid}
             if name == "delete_agent":
+                others = await snapshot(db, "agents", "subagents LIKE ?", (f'%"{aid}"%',))
+                routines = await snapshot(db, "routines", "agent_id = ?", (aid,))
                 await delete_agent(db, aid)
-                undo = await actions.record(db, name, f"Deleted the agent “{before[0]['name']}”", {"sql": restore_rows("agents", before)}, {"kind": "page", "page": "agents"})
+                # Undo also gives back its routines and the agents that could hand it work.
+                undo = await actions.record(db, name, f"Deleted the agent “{before[0]['name']}”",
+                                            {"sql": restore_rows("agents", before + others) + restore_rows("routines", routines)},
+                                            {"kind": "page", "page": "agents"})
                 return {"ok": True, "undo_id": undo}
             old_prompt = (await memory.current(db, prompt_kind(aid)))["content"]
             if aid == "atlas" and args.get("prompt") is not None:
@@ -423,7 +490,7 @@ async def dispatch(name: str, args: dict, db) -> dict:
             sql = restore_rows("agents", before)
             if args.get("prompt") is not None and a["prompt"] != old_prompt:
                 sql += _restore_doc_sql(prompt_kind(aid), old_prompt)
-            changed = [k for k in ("name", "description", "prompt", "model", "reasoning", "tools", "skills", "enabled") if k in args]
+            changed = [k for k in ("name", "description", "prompt", "model", "reasoning", "tools", "skills", "subagents", "enabled") if k in args]
             undo = await actions.record(db, name, f"Changed {a['name']}: {', '.join(changed) or 'nothing'}", {"sql": sql}, show)
             return {"ok": True, "agent": _brief(a), "undo_id": undo, "show": show}
 
@@ -447,7 +514,7 @@ async def dispatch(name: str, args: dict, db) -> dict:
             rows = await snapshot(db, "skills", "id = ?", (sid,))
             if not rows:
                 return {"error": "No such skill"}
-            holders = [a for a in await snapshot(db, "agents", "skills LIKE ?", (f'%"{sid}"%',))]
+            holders = await snapshot(db, "agents", "skills LIKE ?", (f'%"{sid}"%',))
             await delete_skill(db, sid)
             undo = await actions.record(db, name, f"Deleted the skill “{rows[0]['name']}”",
                                         {"sql": restore_rows("skills", rows) + restore_rows("agents", holders)}, {"kind": "page", "page": "agents"})

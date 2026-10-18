@@ -8,6 +8,7 @@ import pytest
 
 import agent_config as cfg
 import inbox
+from test_inbox import agent  # noqa: F401  (the stand-in agent fixture)
 
 SKILL = """---
 name: Trip planning
@@ -222,3 +223,110 @@ class TestApprovalWording:
             assert await inbox.describe(db, "write_skill", {"content": SKILL}) == "Write the skill “Trip planning”"
         finally:
             await db.close()
+
+
+class TestSubagents:
+    async def test_defaults_and_choices(self, client, auth):
+        a = (await client.post("/agents", json={"name": "Analyst"}, headers=auth)).json()
+        b = (await client.post("/agents", json={"name": "Planner"}, headers=auth)).json()
+        db = await _db()
+        try:
+            rc = await cfg.run_config(db)
+        finally:
+            await db.close()
+        assert rc["atlas"]["subagents"] == ["researcher", "coder", a["id"], b["id"]]   # Atlas: everyone
+        assert rc["researcher"]["subagents"] == [] and rc["custom"][0]["subagents"] == []   # yours: none yet
+        upd = await client.put(f"/agents/{a['id']}", json={"subagents": [b["id"], "researcher"]}, headers=auth)
+        assert upd.status_code == 200 and upd.json()["subagents"] == [b["id"], "researcher"]
+        await client.put("/agents/atlas", json={"subagents": ["researcher"]}, headers=auth)
+        db = await _db()
+        try:
+            rc = await cfg.run_config(db)
+        finally:
+            await db.close()
+        assert rc["atlas"]["subagents"] == ["researcher"]
+        # null puts the default back.
+        back = (await client.put("/agents/atlas", json={"subagents": None}, headers=auth)).json()
+        assert back["subagents"] is None
+        db = await _db()
+        try:
+            assert (await cfg.run_config(db))["atlas"]["subagents"][:2] == ["researcher", "coder"]
+        finally:
+            await db.close()
+
+    async def test_bad_choices(self, client, auth):
+        a = (await client.post("/agents", json={"name": "Analyst"}, headers=auth)).json()
+        assert (await client.put(f"/agents/{a['id']}", json={"subagents": [a["id"]]}, headers=auth)).status_code == 422
+        assert (await client.put(f"/agents/{a['id']}", json={"subagents": ["atlas"]}, headers=auth)).status_code == 422
+        assert (await client.put(f"/agents/{a['id']}", json={"subagents": ["nobody"]}, headers=auth)).status_code == 422
+        assert (await client.put("/agents/researcher", json={"subagents": ["coder"]}, headers=auth)).status_code == 422
+
+    async def test_deleting_an_agent_tidies_up(self, client, auth):
+        a = (await client.post("/agents", json={"name": "Analyst"}, headers=auth)).json()
+        b = (await client.post("/agents", json={"name": "Planner"}, headers=auth)).json()
+        await client.put(f"/agents/{a['id']}", json={"subagents": [b["id"]]}, headers=auth)
+        r = (await client.post("/inbox/routines", json={"name": "Trips", "prompt": "Plan.", "agent_id": b["id"]}, headers=auth)).json()
+        assert r["agent_id"] == b["id"]
+        await client.delete(f"/agents/{b['id']}", headers=auth)
+        assert (await client.get(f"/agents/{a['id']}", headers=auth)).json()["subagents"] == []
+        routines = (await client.get("/inbox/routines", headers=auth)).json()["routines"]
+        assert routines[0]["agent_id"] == "atlas"
+
+
+class TestWhoYouTalkTo:
+    async def _send(self, client, auth, monkeypatch, **body):
+        import asyncio
+        import routers.assistant as assistant
+        seen = []
+
+        async def fake_drive(run_id, b, auth_):
+            seen.append(json.loads(b))
+            db = await assistant._connect()
+            await assistant._finish(db, run_id, "done", reply="ok")
+            await db.close()
+        monkeypatch.setattr(assistant, "_drive_run", fake_drive)
+        resp = await client.post("/assistant/runs", json={"message": "hi", **body}, headers=auth)
+        assert resp.status_code == 200, resp.text
+        for _ in range(50):
+            if seen and not [t for t in assistant._tasks.values() if not t.done()]:
+                break
+            await asyncio.sleep(0.02)
+        assistant._tasks.clear()
+        return resp.json(), seen[0]
+
+    async def test_a_chat_with_one_of_yours(self, client, auth, monkeypatch):
+        a = (await client.post("/agents", json={"name": "Analyst"}, headers=auth)).json()
+        first, body = await self._send(client, auth, monkeypatch)
+        assert body["agent"] == "atlas"
+        # Same agent: the same chat.
+        same, body = await self._send(client, auth, monkeypatch, session_id=first["session_id"], agent_id="atlas")
+        assert same["session_id"] == first["session_id"]
+        # Someone else: a new chat, with them.
+        other, body = await self._send(client, auth, monkeypatch, session_id=first["session_id"], agent_id=a["id"])
+        assert other["new_session"] and other["session_id"] != first["session_id"] and body["agent"] == a["id"]
+        cur = (await client.get("/assistant/sessions/current", headers=auth)).json()
+        assert cur["session"]["agent_id"] == a["id"]
+        # Workers can't be talked to; that's Atlas.
+        _, body = await self._send(client, auth, monkeypatch, agent_id="researcher")
+        assert body["agent"] == "atlas"
+
+    async def test_a_routine_done_by_one_of_yours(self, client, auth):
+        a = (await client.post("/agents", json={"name": "Analyst"}, headers=auth)).json()
+        r = (await client.post("/inbox/routines", json={"name": "Money", "prompt": "Check.", "agent_id": a["id"]}, headers=auth)).json()
+        assert r["agent_id"] == a["id"]
+        assert (await client.post("/inbox/routines", json={"name": "x", "prompt": "y", "agent_id": "coder"}, headers=auth)).status_code == 422
+        assert (await client.post("/inbox/routines", json={"name": "x", "prompt": "y", "agent_id": "nope"}, headers=auth)).status_code == 422
+        back = (await client.put(f"/inbox/routines/{r['id']}", json={"agent_id": "atlas"}, headers=auth)).json()
+        assert back["agent_id"] == "atlas"
+
+    async def test_the_routine_run_goes_to_that_agent(self, client, auth, agent):
+        from test_inbox import _settle
+        a = (await client.post("/agents", json={"name": "Analyst"}, headers=auth)).json()
+        r = (await client.post("/inbox/routines", json={"name": "Money", "prompt": "Check.", "agent_id": a["id"]}, headers=auth)).json()
+        item = (await client.post(f"/inbox/routines/{r['id']}/run", headers=auth)).json()
+        await _settle()
+        assert agent.bodies[-1]["agent"] == a["id"]
+        # A reply in its thread goes to the same agent.
+        await client.post(f"/inbox/{item['id']}/reply", json={"message": "And last month?"}, headers=auth)
+        await _settle()
+        assert agent.bodies[-1]["agent"] == a["id"]

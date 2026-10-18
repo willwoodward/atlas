@@ -84,6 +84,7 @@ class AgentIn(BaseModel):
     engine: str | None = None
     tools: dict[str, str] | None = None
     skills: list[str] | None = None
+    subagents: list[str] | None = None
     enabled: bool | None = None
     prompt: str | None = Field(None, max_length=memory.MAX_CHARS)
 
@@ -194,7 +195,9 @@ async def get_agent(agent_id: str, user: dict = Depends(get_current_user)):
 async def put_agent(agent_id: str, body: AgentIn, user: dict = Depends(get_current_user)):
     db = await _connect()
     try:
-        a = await cfg.update_agent(db, agent_id, body.model_dump(exclude_none=True))
+        # exclude_unset: a null that was sent means something ("subagents":
+        # null puts the default back); fields not sent are left alone.
+        a = await cfg.update_agent(db, agent_id, body.model_dump(exclude_unset=True))
     except cfg.ConfigError as exc:
         _err(exc)
     finally:

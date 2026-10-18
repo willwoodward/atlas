@@ -9,6 +9,7 @@ import { SettingsButton, MemoryEditChip } from './AssistantMemory.jsx'
 import { KeepButton, PastChatsButton, KeepNote } from './PastChats.jsx'
 import { ToolCards, ActionUndoChip } from './ChatCards.jsx'
 import ApprovalCard from './ApprovalCard.jsx'
+import AgentPicker, { useChatAgent } from './AgentPicker.jsx'
 import { voiceSupported } from '../hooks/useVoiceInput.js'
 import { useVoiceConversation } from '../hooks/useVoiceConversation.js'
 import { speech, useSpeaking, unlockAudio } from '../lib/speech.js'
@@ -350,6 +351,7 @@ const COLUMN = 720
 export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240, showNewChat = true, panel = false }) {
   // Thread state lives in AssistantContext so it survives navigating away and back.
   const { messages, busy, error, send, stop, clear, answer, registerVoiceTarget, queued, unqueue } = useAssistant()
+  const withAgent = useChatAgent()   // Atlas, or one of your agents (Agents page)
   const { bindings } = useKeybinds() || {}
   // The mobile shell renders the assistant with no padding (it was built for the
   // centred orb), so the chat supplies its own gutters and safe-area inset there.
@@ -438,7 +440,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
         readOnly={voice.state !== 'idle'}
         onChange={e => { setInput(e.target.value); autosize(); if (voice.error) voice.clearError() }}
         onKeyDown={onKeyDown}
-        placeholder={listening ? 'Listening…' : voice.state === 'transcribing' ? 'Transcribing…' : 'Message Atlas…'}
+        placeholder={listening ? 'Listening…' : voice.state === 'transcribing' ? 'Transcribing…' : `Message ${withAgent.name}…`}
         style={{ flex: 1, alignSelf: 'center', resize: 'none', border: 'none', outline: 'none', background: 'transparent', fontSize: 14, fontFamily: 'inherit', color: voice.state === 'idle' ? 'var(--ink)' : 'var(--mid)', lineHeight: 1.5, maxHeight: 140 }}
       />
       {listening && (
@@ -495,21 +497,24 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
   if (empty) {
     return (
       <div style={{ position: 'relative', flex: 1, minHeight: 0, height: '100%', width: '100%', maxWidth: COLUMN, margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: `24px ${Math.max(gutter, orbSize < 160 ? 20 : 0)}px`, paddingBottom: isMobile ? 'max(24px, env(safe-area-inset-bottom))' : 24 }}>
-        <div style={{ position: 'absolute', top: 6, right: gutter, display: 'flex', gap: 8 }}>
+        <div style={{ position: 'absolute', top: 6, left: gutter, right: gutter, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <AgentPicker style={{ marginRight: 'auto' }} />
           <PastChatsButton />
           <SettingsButton />
         </div>
         {!panel && <AtlasOrb orbSize={orbSize} ring1={ring1} ring2={ring2} />}
 
         <h1 style={{ margin: '14px 0 6px', fontFamily: 'var(--font-serif)', fontSize: panel ? 24 : 30, fontWeight: 500, color: 'var(--ink)' }}>
-          How can I help you plan today?
+          {withAgent.id === 'atlas' ? 'How can I help you plan today?' : `Talking to ${withAgent.name}`}
         </h1>
         <p style={{ margin: '0 0 26px', fontSize: panel ? 13.5 : 14.5, color: 'var(--mid)', maxWidth: 440, lineHeight: 1.55 }}>
-          Ask me to schedule your week, review your spending, or reflect on a goal. I have the full picture.
+          {withAgent.id === 'atlas'
+            ? 'Ask me to schedule your week, review your spending, or reflect on a goal. I have the full picture.'
+            : withAgent.description || 'One of your agents, with its own prompt, tools and skills.'}
         </p>
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center', maxWidth: 560, marginBottom: 26 }}>
-          {assistantPrompts.map(p => (
+          {withAgent.id === 'atlas' && assistantPrompts.map(p => (
             <button key={p} onClick={() => submit(p)}
               style={{ padding: '9px 15px', borderRadius: 99, background: 'var(--surface)', border: '1px solid var(--bd)', fontSize: 13, fontFamily: 'inherit', color: 'var(--ink-2)', cursor: 'pointer' }}>
               {p}
@@ -534,6 +539,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
           out. Desktop and mobile get it from the header "+ New chat"; the tablet
           deck has no header, so it keeps this one. */}
       <div style={{ flex: 'none', display: 'flex', justifyContent: 'flex-end', gap: 8, padding: `6px ${gutter}px 0` }}>
+        <AgentPicker style={{ marginRight: 'auto' }} />
         <KeepButton />
         <PastChatsButton />
         <SettingsButton />

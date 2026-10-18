@@ -72,6 +72,9 @@ class RunRequest(BaseModel):
     # Said to the corner mic, with no chat on screen: the spoken reply is all
     # they get, so no cards or buttons to point at.
     voice_only: bool = False
+    # Who to talk to (Agents page): "atlas" or one of yours. A different agent
+    # from the current chat's starts a new chat.
+    agent_id: str | None = Field(None, max_length=60)
 
 
 def _now() -> str:
@@ -273,6 +276,16 @@ async def start_run(req: RunRequest, request: Request, user: dict = Depends(get_
             live = await _live_session(db, req.session_id or await _current_session_id(db))
             if live and live.get("kind", "chat") != "chat":
                 live = None   # an inbox thread: replies to those go through /inbox
+            import agent_config
+            wanted = await agent_config.chat_agent(db, req.agent_id) if req.agent_id else None
+            if live and wanted and wanted != (live.get("agent_id") or "atlas"):
+                # Talking to someone else now: that's a new conversation.
+                async with db.execute("SELECT 1 FROM agent_runs WHERE session_id=? AND status IN ('running','awaiting_input')",
+                                      (live["id"],)) as c:
+                    if await c.fetchone():
+                        raise HTTPException(409, "The assistant is still working on the last message.")
+                await db.execute("UPDATE agent_sessions SET closed=1 WHERE id=?", (live["id"],))
+                live = None
             if live:
                 session_id = live["id"]
                 async with db.execute(
@@ -284,7 +297,7 @@ async def start_run(req: RunRequest, request: Request, user: dict = Depends(get_
                         # replies into one thread.
                         raise HTTPException(409, "The assistant is still working on the last message.")
             else:
-                session_id, new_session = await new_session_row(db, prompt), True
+                session_id, new_session = await new_session_row(db, prompt, agent_id=wanted), True
             history = await _history(db, session_id)
             messages = [*history, {"role": "user", "content": prompt}]
         else:
@@ -310,7 +323,7 @@ async def start_run(req: RunRequest, request: Request, user: dict = Depends(get_
     return {"run_id": run_id, "status": "running", "session_id": session_id, "new_session": new_session}
 
 
-async def new_session_row(db, title: str, kind: str = "chat") -> str:
+async def new_session_row(db, title: str, kind: str = "chat", agent_id: str | None = None) -> str:
     """Start a session. Its memory and prompt are snapshotted now: every turn
     uses these versions, so the system prompt stays identical (and cacheable)
     for the whole conversation; edits made during it apply from the next one."""
@@ -318,9 +331,10 @@ async def new_session_row(db, title: str, kind: str = "chat") -> str:
     mem_v = (await memory.current(db, "memory"))["version"] or 0
     prompt_v = (await memory.current(db, "prompt"))["version"] or 0
     await db.execute(
-        "INSERT INTO agent_sessions (id, created_at, updated_at, title, memory_version, prompt_version, kind) "
-        "VALUES (?,?,?,?,?,?,?)",
-        (session_id, now, now, " ".join(title.split())[:80], mem_v, prompt_v, kind),
+        "INSERT INTO agent_sessions (id, created_at, updated_at, title, memory_version, prompt_version, kind, agent_id) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (session_id, now, now, " ".join(title.split())[:80], mem_v, prompt_v, kind,
+         None if agent_id in (None, "", "atlas") else agent_id),
     )
     return session_id
 
@@ -344,6 +358,11 @@ async def run_body(db, run_id: str, session_id: str | None, messages: list[dict]
         mem_text = (await memory.current(db, "memory"))["content"]
         prompt_text = (await memory.current(db, "prompt"))["content"]
     import agent_config
+    agent_id = "atlas"
+    if session_id:
+        async with db.execute("SELECT agent_id FROM agent_sessions WHERE id=?", (session_id,)) as c:
+            row = await c.fetchone()
+        agent_id = await agent_config.chat_agent(db, row["agent_id"] if row else None)
     # run_id goes to the agent so ask_user has an address to be answered at.
     return json.dumps({
         "messages": messages,
@@ -353,6 +372,8 @@ async def run_body(db, run_id: str, session_id: str | None, messages: list[dict]
         "safe_web": settings["safe_web"],
         # The Agents page: models, prompts, skills and tool policies.
         "agents": await agent_config.run_config(db),
+        # Who's answering: Atlas, or one of yours (its prompt is in "agents").
+        "agent": agent_id,
         **extra,
     }).encode()
 

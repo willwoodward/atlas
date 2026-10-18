@@ -46,6 +46,15 @@ def agent(monkeypatch):
     assistant._tasks.clear()
 
 
+async def _drain():
+    """Wait for every other task on this loop to finish (background clean-up)."""
+    for _ in range(100):
+        rest = [t for t in asyncio.all_tasks() if t is not asyncio.current_task() and not t.done()]
+        if not rest:
+            return
+        await asyncio.sleep(0.02)
+
+
 async def _settle():
     """Let background runs finish."""
     import routers.assistant as assistant
@@ -422,6 +431,9 @@ class TestDelete:
         for t in assistant._tasks.values():
             t.cancel()
         assistant._tasks.clear()
+        # Cancelling still runs the shielded clean-up (finish_item); let it
+        # close its connection before this test's event loop goes away.
+        await _drain()
 
 
 class TestAutoDelete:

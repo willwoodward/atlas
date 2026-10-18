@@ -143,3 +143,18 @@ async def run_id(client, auth, monkeypatch):
     for task in assistant._tasks.values():
         task.cancel()
     assistant._tasks.clear()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Never hang on the way out. aiosqlite runs each connection on its own
+    non-daemon thread that only ends when the connection is closed; one left
+    open by a background task cut off at the end of a test (its event loop
+    gone) keeps Python from exiting after the last test passes. Stop any such
+    threads, and say which, so the leak can be fixed where it starts."""
+    import threading
+    import aiosqlite
+    left = [t for t in threading.enumerate() if isinstance(t, aiosqlite.Connection) and t.is_alive()]
+    for t in left:
+        t._stop_running()
+    if left:
+        print(f"\nNote: stopped {len(left)} database connection(s) left open by a test.")

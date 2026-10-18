@@ -4,6 +4,7 @@ import { API } from '../context/InboxContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { useFocusRequest } from '../lib/focus.js'
 import { toolLabel } from '../lib/toolLabels.js'
+import { agentsChanged } from '../components/AgentPicker.jsx'
 import { Button, IconButton, BinButton, Input, Textarea, Select, Switch, PageHeader, card, eyebrow } from '../components/ui.jsx'
 
 // The Agents page: who does the work and how. Atlas (the assistant), the
@@ -165,7 +166,41 @@ function ToolList({ agentId, tools, policies, defaultPolicy, onChange }) {
   )
 }
 
-function AgentEditor({ token, id, catalog, skills, onSaved, onDeleted, isMobile }) {
+function Subagents({ id, value, agents, codingOn, onChange }) {
+  if (id === 'researcher' || id === 'coder') {
+    return <div style={hint}>Works on its own: it does the task it’s handed, and doesn’t pass it on.</div>
+  }
+  const others = agents.filter(a => a.id !== 'atlas' && a.id !== id)
+  // Not chosen yet: Atlas can hand work to everyone; your own agents to nobody.
+  const current = value ?? (id === 'atlas' ? others.map(a => a.id) : [])
+  if (!others.length) return <div style={hint}>—</div>
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {others.map(a => {
+          const on = current.includes(a.id)
+          const off = (a.id === 'coder' && codingOn === false) || !a.enabled
+          return (
+            <button key={a.id} type="button" aria-pressed={on} title={a.description}
+              onClick={() => onChange(on ? current.filter(x => x !== a.id) : [...current, a.id])}
+              style={{ padding: '5px 11px', borderRadius: 99, fontSize: 12.5, fontFamily: 'inherit', cursor: 'pointer',
+                       border: `1px solid ${on ? 'var(--accent-line)' : 'var(--bd)'}`, background: on ? 'var(--accent-soft)' : 'transparent',
+                       color: on ? 'var(--accent)' : 'var(--mid)', opacity: off ? 0.6 : 1 }}>
+              {on ? '✓ ' : ''}{a.name}{off ? (a.id === 'coder' ? ' (off on this server)' : ' (off)') : ''}
+            </button>
+          )
+        })}
+      </div>
+      <div style={hint}>
+        Who it can hand a task to. {id === 'atlas' ? 'Atlas starts with everyone.' : 'Your agents start with nobody.'} Handing on stops two levels down
+        (an agent’s subagent can use the Researcher and Coder, but not pass work on to another of yours).
+        {value != null && id === 'atlas' && <> <Button variant="link" onClick={() => onChange(null)} style={{ fontSize: 12 }}>Back to everyone</Button></>}
+      </div>
+    </div>
+  )
+}
+
+function AgentEditor({ token, id, catalog, skills, agents, onSaved, onDeleted, isMobile }) {
   const isNew = id === 'new'
   const [agent, setAgent] = useState(null)   // as saved
   const [draft, setDraft] = useState(null)
@@ -175,7 +210,7 @@ function AgentEditor({ token, id, catalog, skills, onSaved, onDeleted, isMobile 
   const builtinPrompt = catalog?.defaults?.[id]?.prompt
   const load = () => {
     if (isNew) {
-      const fresh = { id: 'new', name: '', description: '', builtin: false, enabled: true, model: '', reasoning: '', tools: {}, skills: [], prompt: '', engine: 'strands' }
+      const fresh = { id: 'new', name: '', description: '', builtin: false, enabled: true, model: '', reasoning: '', tools: {}, skills: [], subagents: null, prompt: '', engine: 'strands' }
       setAgent(fresh); setDraft(fresh); return Promise.resolve()
     }
     return agentsFetch(token, `/${id}`).then(a => { setAgent(a); setDraft(a); setError(null) }).catch(e => setError(e.message))
@@ -192,7 +227,7 @@ function AgentEditor({ token, id, catalog, skills, onSaved, onDeleted, isMobile 
   const kind = id === 'atlas' || id === 'researcher' || id === 'coder' ? id : 'custom'
   const tools = catalog?.tools?.[kind] || []
   const defaultPolicy = draft.builtin ? 'on' : 'off'
-  const fields = ['name', 'description', 'model', 'reasoning', 'tools', 'skills', 'enabled', 'prompt']
+  const fields = ['name', 'description', 'model', 'reasoning', 'tools', 'skills', 'subagents', 'enabled', 'prompt']
   const dirty = fields.some(k => !sameJSON(draft[k], agent[k]))
 
   const save = async () => {
@@ -311,6 +346,11 @@ function AgentEditor({ token, id, catalog, skills, onSaved, onDeleted, isMobile 
               })}
             </div>}
         <div style={hint}>It sees each skill’s name and description, and loads the full instructions when one fits.</div>
+      </div>
+
+      <div>
+        <span style={label}>Subagents</span>
+        <Subagents id={id} value={draft.subagents} agents={agents} codingOn={catalog?.coding_enabled} onChange={v => set({ subagents: v })} />
       </div>
 
       <div>
@@ -450,7 +490,7 @@ export default function AgentsPage() {
   const [sel, setSel] = useState(isMobile ? null : { kind: 'agent', id: 'atlas' })
   const [error, setError] = useState(null)
 
-  const load = () => agentsFetch(token, '').then(d => { setData(d); setError(null); return d }).catch(e => setError(e.message))
+  const load = () => agentsFetch(token, '').then(d => { setData(d); setError(null); agentsChanged(); return d }).catch(e => setError(e.message))
   useEffect(() => {
     load()
     agentsFetch(token, '/catalog').then(setCatalog).catch(() => setCatalog({ tools: {}, defaults: {}, reasoning: [''] }))
@@ -483,7 +523,7 @@ export default function AgentsPage() {
   )
 
   const editor = sel && data && (sel.kind === 'agent'
-    ? <AgentEditor key={`a-${sel.id}`} token={token} id={sel.id} catalog={catalog} skills={skills} isMobile={isMobile}
+    ? <AgentEditor key={`a-${sel.id}`} token={token} id={sel.id} catalog={catalog} skills={skills} agents={agents} isMobile={isMobile}
         onSaved={newId => { load(); if (newId !== sel.id) setSel({ kind: 'agent', id: newId }) }}
         onDeleted={() => { load(); setSel(isMobile ? null : { kind: 'agent', id: 'atlas' }) }} />
     : <SkillEditor key={`s-${sel.id}`} token={token} id={sel.id} agents={agents} isMobile={isMobile}

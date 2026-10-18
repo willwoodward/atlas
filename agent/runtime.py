@@ -76,13 +76,32 @@ another way, such as calling a code-hosting API through a web tool.
 
 """
 
-def local_tools(background: bool = False) -> list:
-    """Tools the orchestrator gets beyond the MCP dashboard tools. The web
-    reader depends on "Safer web access" (web_fetch.py); the coding tool is
-    only included when coding is switched on. A background run has no one to
-    answer ask_user, so it doesn't get it."""
-    return [delegate_research, *([] if background else [ask_user]), tavily.tavily_search, *web_tools(),
-            *([delegate_coding] if CODING_ENABLED else [])]
+def local_tools(background: bool = False, cfg: dict | None = None, agent_id: str = "atlas") -> list:
+    """Tools the agent you're talking to gets beyond the MCP dashboard tools:
+    asking you, the web, and handing work to its subagents' researchers and
+    coder (your own agents come through ask_agent). The web reader depends on
+    "Safer web access" (web_fetch.py); the coding tool is only included when
+    coding is switched on. A background run has no one to answer ask_user,
+    so it doesn't get it."""
+    subs = agents_cfg.subagents_for(cfg or {}, agent_id)
+    return [*([delegate_research] if "researcher" in subs else []), *([] if background else [ask_user]),
+            tavily.tavily_search, *web_tools(),
+            *([delegate_coding] if CODING_ENABLED and "coder" in subs else [])]
+
+
+def team_tools(cfg: dict, agent_id: str, depth: int, user_name: str, opener) -> list:
+    """An agent's subagents as tools, for one of your agents working at
+    `depth` (1 = handed a task by the agent you talk to). The researchers and
+    the coder at any depth; your own agents only above MAX_DEPTH."""
+    subs = agents_cfg.subagents_for(cfg, agent_id)
+    out = [*([delegate_research] if "researcher" in subs else []),
+           *([delegate_coding] if CODING_ENABLED and "coder" in subs else [])]
+    customs = [x for x in subs if agents_cfg.custom_by_id(x)]
+    if customs and depth < agents_cfg.MAX_DEPTH:
+        out.append(agents_cfg.ask_agent_tool(
+            user_name, opener, web_tools, TIMEZONE, _agent_tracers, allowed_ids=customs,
+            team_factory=lambda a, d: team_tools(a, a["id"], d, user_name, opener), depth=depth))
+    return out
 
 
 # The editable prompt arrives with each run (the API stores it, versioned; its
@@ -225,7 +244,8 @@ def _background_section(background: dict | None, name: str) -> str:
 
 
 def build_system_prompt(template: str | None, name: str, today: str, memory: str | None,
-                        spoken: bool = False, background: dict | None = None, voice_only: bool = False) -> str:
+                        spoken: bool = False, background: dict | None = None, voice_only: bool = False,
+                        coding: bool | None = None) -> str:
     """The editable prompt, then the fixed sections: coding, memory.
 
     The editable part is filled with plain replacement, not str.format — it is
@@ -235,11 +255,13 @@ def build_system_prompt(template: str | None, name: str, today: str, memory: str
     if "{today}" not in base:
         base += "\n\nToday is {today}."  # the date is not optional, whatever the edit
     base = base.replace("{name}", name).replace("{today}", today)
-    coding = CODING_SECTION if CODING_ENABLED else CODING_DISABLED_SECTION
+    # coding=False: this agent can't hand work to the coder at all, so the
+    # section would only confuse it.
+    coding = "" if coding is False else CODING_SECTION if CODING_ENABLED else CODING_DISABLED_SECTION
     # Voice goes last: everything before it stays the same between turns, so
     # the prompt cache still covers it.
     voice = (VOICE_SECTION.format(name=name) if spoken or voice_only else "") + (VOICE_ONLY_SECTION.format(name=name) if voice_only else "")
-    return (f"{base}\n\n{coding.rstrip()}\n\n{APP_SECTION.rstrip()}" + _memory_section(memory, name)
+    return (f"{base}\n\n" + (f"{coding.rstrip()}\n\n" if coding else "") + APP_SECTION.rstrip() + _memory_section(memory, name)
             + voice + _background_section(background, name))
 
 
@@ -304,7 +326,7 @@ def _to_strands(messages: list[dict]) -> list[dict]:
 async def stream_reply(messages: list[dict], user_name: str, run_id: str | None = None,
                        memory: str | None = None, system_prompt: str | None = None,
                        safe_web: bool = False, spoken: bool = False, background: dict | None = None,
-                       voice_only: bool = False, agents: dict | None = None):
+                       voice_only: bool = False, agents: dict | None = None, agent: str | None = None):
     """Yield (event_type, payload) tuples: ("token", str) | ("tool", str) | ("error", str)."""
     history = _to_strands(messages)
     if not history or history[-1]["role"] != "user":
@@ -313,11 +335,25 @@ async def stream_reply(messages: list[dict], user_name: str, run_id: str | None 
     prompt, prior = history[-1]["content"], history[:-1]
 
     today = datetime.now(ZoneInfo(TIMEZONE)).strftime("%A %-d %B %Y")
-    system_prompt = build_system_prompt(system_prompt, user_name or "the user", today, memory, spoken, background, voice_only)
     # The Agents page: every agent's settings, for this run and the agents it starts.
     agents_cfg.set_settings(agents, background=bool(background))
-    atlas = agents_cfg.settings("atlas")
-    ask, off = agents_cfg.ask_lists(atlas)
+    # Who's answering: Atlas, or one of your agents picked in the chat or for
+    # the routine. Yours get their own prompt (after a short frame), model,
+    # skills and only the tools switched on for them.
+    me = agents_cfg.custom_by_id(agent) if agent and agent != "atlas" else None
+    who = me["id"] if me else "atlas"
+    cfg = me or agents_cfg.settings("atlas")
+    default_policy = "off" if me else "on"
+    user = user_name or "the user"
+    if me:
+        template = agents_cfg.CHAT_FRAME.format(name=me["name"], user=user, today="{today}")
+        if (me.get("prompt") or "").strip():
+            template += "\n\n" + me["prompt"].strip()
+        system_prompt = template
+    subs = agents_cfg.subagents_for(cfg, who)
+    system_prompt = build_system_prompt(system_prompt, user, today, memory, spoken, background, voice_only,
+                                        coding=None if not me else "coder" in subs)
+    ask, off = agents_cfg.ask_lists(cfg)
     approval = (background or {}).get("approval") if background else None
 
     client = _mcp_client(run_id, approval, ask if background else None, off)
@@ -349,20 +385,27 @@ async def stream_reply(messages: list[dict], user_name: str, run_id: str | None 
         # own agents). No ask_user where nobody can see the question:
         # background and voice-only runs. Tools switched off on the Agents
         # page are left out; skills come with load_skill.
-        own = local_tools(background=bool(background) or voice_only)
-        if agents_cfg.custom_agents():
+        names = [agents_cfg.tool_name(t) for t in tools]
+        opener = lambda a: _open_for_agent(a, run_id, approval, names)  # noqa: E731
+        own = local_tools(background=bool(background) or voice_only, cfg=cfg, agent_id=who)
+        customs = [x for x in subs if agents_cfg.custom_by_id(x)]
+        if customs:
             own.append(agents_cfg.ask_agent_tool(
-                user_name, lambda a, _n=[agents_cfg.tool_name(t) for t in tools]: _open_for_agent(a, run_id, approval, _n),
-                web_tools, TIMEZONE, _agent_tracers))
-        all_tools = agents_cfg.allowed([*tools, *own], atlas)
-        system_prompt, all_tools = agents_cfg.with_skills(system_prompt, all_tools, atlas)
+                user_name, opener, web_tools, TIMEZONE, _agent_tracers, allowed_ids=customs,
+                team_factory=lambda a, d: team_tools(a, a["id"], d, user_name, opener), depth=0))
+        # Handing work on is decided by subagents; tool policies cover the rest.
+        team = {"delegate_research", "delegate_coding", "ask_agent"}
+        all_tools = [t for t in [*tools, *own]
+                     if agents_cfg.tool_name(t) in team or agents_cfg.policy(cfg, agents_cfg.tool_name(t), default_policy) != "off"]
+        system_prompt, all_tools = agents_cfg.with_skills(system_prompt, all_tools, cfg)
 
         agent = Agent(
-            model=_model(spoken=spoken or voice_only, cfg=atlas),
+            model=_model(spoken=spoken or voice_only, cfg=cfg),
             system_prompt=system_prompt,
             tools=all_tools,
             messages=prior,
-            hooks=[agents_cfg.ApprovalHook(atlas, "Atlas", dashboard={agents_cfg.tool_name(t) for t in tools}), ToolTracer(
+            hooks=[agents_cfg.ApprovalHook(cfg, me["name"] if me else "Atlas", default=default_policy,
+                                           dashboard={agents_cfg.tool_name(t) for t in tools}), ToolTracer(
                 emit=queue.put_nowait,
                 build=lambda *, tool_use_id, name, args, status, output: ("progress", {
                     "type": "tool_result",

@@ -172,7 +172,7 @@ class TestRuntimeWiring:
     """stream_reply with the Agents page's settings: the right tools, skills,
     hooks and MCP headers reach the agent. The model and MCP are faked."""
 
-    def _run(self, monkeypatch, agents, background=None):
+    def _run(self, monkeypatch, agents, background=None, agent=None):
         import runtime
         seen, headers = {}, []
 
@@ -203,7 +203,8 @@ class TestRuntimeWiring:
 
         async def go():
             return [e async for e in runtime.stream_reply([{"role": "user", "content": "hi"}], "Will", run_id="r1",
-                                                         system_prompt="You are Atlas. {today}", agents=agents, background=background)]
+                                                         system_prompt="You are Atlas. {today}", agents=agents, background=background,
+                                                         agent=agent)]
         events = asyncio.run(go())
         s.set_settings(None)
         return seen, headers, events
@@ -275,3 +276,51 @@ class TestYourOwnAgents:
             assert "No agent" in asyncio.run(tool._tool_func("nobody", "x"))["error"]
         finally:
             s.set_settings(None)
+
+
+class TestChoosingAgents:
+    """Talking to one of your agents, and who each can hand work to."""
+
+    def _run(self, monkeypatch, agents, agent=None):
+        return TestRuntimeWiring()._run(monkeypatch, agents, agent=agent)
+
+    def test_talking_to_your_own_agent(self, monkeypatch):
+        agents = {"atlas": {"subagents": ["researcher"]},
+                  "custom": [{"id": "analyst", "name": "Analyst", "description": "Money", "prompt": "Be precise about {name}'s money.",
+                              "model": "gpt-y", "tools": {"list_todos": "on", "tavily_search": "on"}, "subagents": ["planner"],
+                              "skills": [{"name": "Budgets", "description": "Budget reviews", "body": "Steps."}]},
+                             {"id": "planner", "name": "Planner", "description": "Trips", "prompt": "", "tools": {}}]}
+        seen, headers, _ = self._run(monkeypatch, agents, agent="analyst")
+        p = seen["system_prompt"]
+        assert p.startswith("You are Analyst, one of the agents Will has set up") and "Be precise about Will's money." in p
+        assert "You are Atlas" not in p and "delegate_coding" not in p   # no coder subagent, no coding section
+        tools = names(seen["tools"])
+        assert "list_todos" in tools and "tavily_search" in tools
+        assert "delete_todo" not in tools and "add_todo" not in tools and "ask_user" not in tools   # not switched on
+        assert "delegate_research" not in tools and "ask_agent" in tools and "load_skill" in tools
+        ask_agent = next(t for t in seen["tools"] if s.tool_name(t) == "ask_agent")
+        assert "planner: Planner" in ask_agent.tool_spec["description"] and "analyst:" not in ask_agent.tool_spec["description"]
+        assert seen["model"].config["model_id"] == "gpt-y"
+
+    def test_atlas_only_gets_its_subagents(self, monkeypatch):
+        agents = {"atlas": {"subagents": ["researcher"]}, "custom": [{"id": "analyst", "name": "Analyst"}]}
+        seen, _, _ = self._run(monkeypatch, agents)
+        tools = names(seen["tools"])
+        assert "delegate_research" in tools and "ask_agent" not in tools and "delegate_coding" not in tools
+
+    def test_an_unknown_or_switched_off_agent_means_atlas(self, monkeypatch):
+        seen, _, _ = self._run(monkeypatch, {"atlas": {}, "custom": []}, agent="gone")
+        assert seen["system_prompt"].startswith("You are Atlas")
+
+    def test_handing_on_stops_two_levels_down(self):
+        import runtime
+        s.set_settings({"custom": [{"id": "a", "name": "A", "subagents": ["b", "researcher"]},
+                                   {"id": "b", "name": "B", "subagents": ["a"]}]})
+        try:
+            a = s.custom_by_id("a")
+            one = names(runtime.team_tools(a, "a", 1, "Will", None))
+            two = names(runtime.team_tools(a, "a", 2, "Will", None))
+        finally:
+            s.set_settings(None)
+        assert one == ["delegate_research", "ask_agent"]
+        assert two == ["delegate_research"]   # its own agents are out of reach that deep

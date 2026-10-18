@@ -11,13 +11,14 @@ export const SHORTCUTS = [
   { id: 'sidebar', label: 'Collapse / expand the sidebar', hint: 'Desktop', default: 'Mod+B' },
 ]
 
-// Jump to a page in the sidebar: Ctrl+1 to Ctrl+9 in sidebar order, Ctrl+0
-// for the Assistant. Their ids are "go:<page>"; the layout handles them.
+// Jump to a page in the sidebar: Ctrl+1 to Ctrl+9 down the sidebar, Ctrl+0
+// for the Assistant. Agents (between Fitness and Inbox) has no number by
+// default: there are ten digits and Inbox is used more. Ids are "go:<page>".
 export const PAGE_SHORTCUTS = [
-  ['home', 'Home'], ['calendar', 'Calendar'], ['habits', 'Habits'], ['todos', 'To-do'], ['goals', 'Goals'],
-  ['notes', 'Notes'], ['finances', 'Finances'], ['fitness', 'Fitness'], ['inbox', 'Inbox'], ['assistant', 'Assistant'],
-  ['agents', 'Agents'],
-].map(([page, label], i) => ({ id: `go:${page}`, page, label: `Go to ${label}`, group: 'Pages', default: i < 9 ? `Mod+${i + 1}` : i === 9 ? 'Mod+0' : '' }))
+  ['home', 'Home', 'Mod+1'], ['calendar', 'Calendar', 'Mod+2'], ['habits', 'Habits', 'Mod+3'], ['todos', 'To-do', 'Mod+4'],
+  ['goals', 'Goals', 'Mod+5'], ['notes', 'Notes', 'Mod+6'], ['finances', 'Finances', 'Mod+7'], ['fitness', 'Fitness', 'Mod+8'],
+  ['agents', 'Agents', ''], ['inbox', 'Inbox', 'Mod+9'], ['assistant', 'Assistant', 'Mod+0'],
+].map(([page, label, combo]) => ({ id: `go:${page}`, page, label: `Go to ${label}`, group: 'Pages', default: combo }))
 
 export const ALL_SHORTCUTS = [...SHORTCUTS, ...PAGE_SHORTCUTS]
 

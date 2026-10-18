@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { inboxFetch } from '../context/InboxContext.jsx'
 import { pushSupported, needsInstall, pushStatus, enablePush, disablePush, testPush } from '../lib/push.js'
 import { Button, Input, Textarea, Switch, Select, eyebrow } from './ui.jsx'
+import { useChatAgents } from './AgentPicker.jsx'
 
 // Routines: Atlas working on a schedule, leaving the result in the inbox.
 // Listed here with pause / run now / edit, plus notifications for this device.
@@ -21,7 +22,7 @@ const STARTERS = [
     prompt: 'Look at next week: calendar, to-dos and this week’s outcomes. Tell me what the week looks like, flag clashes or overloaded days, and suggest outcomes for the week if I haven’t set them.' },
 ]
 
-const EMPTY = { name: '', prompt: '', days: DAYS.map(d => d[0]), time: '08:00', approval: 'ask', notify: true, enabled: true, keep_hours: 0 }
+const EMPTY = { name: '', prompt: '', days: DAYS.map(d => d[0]), time: '08:00', approval: 'ask', notify: true, enabled: true, keep_hours: 0, agent_id: 'atlas' }
 
 // How long a routine's threads stay in the inbox. Counted from their last
 // activity; threads with suggestions waiting stay until answered.
@@ -67,6 +68,7 @@ function Notifications() {
 
 function Editor({ initial, onSave, onCancel, onDelete, onTest }) {
   const [f, setF] = useState(initial)
+  const agents = useChatAgents()   // Atlas and your agents (Agents page)
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
   const set = patch => setF(x => ({ ...x, ...patch }))
@@ -89,7 +91,14 @@ function Editor({ initial, onSave, onCancel, onDelete, onTest }) {
       <label><span style={label}>Name</span>
         <Input value={f.name} onChange={e => set({ name: e.target.value })} placeholder="e.g. Morning plan" style={{ width: '100%' }} maxLength={80} />
       </label>
-      <label><span style={label}>What Atlas should do</span>
+      {agents.length > 1 && (
+        <label><span style={label}>Who does it</span>
+          <Select value={agents.some(a => a.id === f.agent_id) ? f.agent_id : 'atlas'} onChange={e => set({ agent_id: e.target.value })} aria-label="Who does it" style={{ width: '100%' }}>
+            {agents.map(a => <option key={a.id} value={a.id}>{a.name}{a.id !== 'atlas' && a.description ? ` — ${a.description.slice(0, 60)}` : ''}</option>)}
+          </Select>
+        </label>
+      )}
+      <label><span style={label}>What {agents.find(a => a.id === f.agent_id)?.name || 'Atlas'} should do</span>
         <Textarea value={f.prompt} onChange={e => set({ prompt: e.target.value })} rows={5} style={{ width: '100%', fontSize: 13.5 }}
           placeholder="Written as an instruction. Atlas starts fresh each time, so include everything it needs." />
       </label>
@@ -146,6 +155,8 @@ function Editor({ initial, onSave, onCancel, onDelete, onTest }) {
 }
 
 export default function RoutinesSheet({ onClose, onRan, openId = null }) {
+  const agentList = useChatAgents()
+  const agentName = id => (id && id !== 'atlas' ? agentList.find(a => a.id === id)?.name : null)
   const { token } = useAuth()
   const [routines, setRoutines] = useState(null)
   const [editing, setEditing] = useState(null)   // a routine, or EMPTY for a new one
@@ -156,7 +167,7 @@ export default function RoutinesSheet({ onClose, onRan, openId = null }) {
   useEffect(() => { load().then(list => { const r = openId && list?.find(x => x.id === openId); if (r) setEditing({ ...r }) }) }, []) // eslint-disable-line
 
   const save = async f => {
-    const body = { name: f.name, prompt: f.prompt, days: f.days, time: f.time, approval: f.approval, notify: f.notify, keep_hours: f.keep_hours || 0 }
+    const body = { name: f.name, prompt: f.prompt, days: f.days, time: f.time, approval: f.approval, notify: f.notify, keep_hours: f.keep_hours || 0, agent_id: f.agent_id || 'atlas' }
     if (f.id) await inboxFetch(token, `/routines/${f.id}`, { method: 'PUT', body })
     else await inboxFetch(token, '/routines', { method: 'POST', body })
     setEditing(null); load()
@@ -196,7 +207,7 @@ export default function RoutinesSheet({ onClose, onRan, openId = null }) {
                   <button onClick={() => setEditing({ ...r })} style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{r.name}</div>
                     <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                      {r.schedule} · {r.approval === 'ask' ? 'asks first' : 'acts itself'} ·{keepLabel(r.keep_hours) ? ` clears after ${keepLabel(r.keep_hours)} ·` : ''} {r.enabled ? nextLabel(r.next_run_at) : 'Paused'}
+                      {agentName(r.agent_id) ? `${agentName(r.agent_id)} · ` : ''}{r.schedule} · {r.approval === 'ask' ? 'asks first' : 'acts itself'} ·{keepLabel(r.keep_hours) ? ` clears after ${keepLabel(r.keep_hours)} ·` : ''} {r.enabled ? nextLabel(r.next_run_at) : 'Paused'}
                     </div>
                   </button>
                   <Button size="sm" variant="ghost" onClick={() => runNow(r, true)} title="See what it would do: nothing changes unless you approve it, and no notification">Test run</Button>

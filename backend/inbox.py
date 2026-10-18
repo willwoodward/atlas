@@ -339,7 +339,7 @@ async def start_routine(routine_id: str, trigger: str = "schedule", test: bool =
             if await c.fetchone():
                 return None
         now = _now()
-        session_id = await assistant.new_session_row(db, r["name"], kind="routine")
+        session_id = await assistant.new_session_row(db, r["name"], kind="routine", agent_id=r["agent_id"])
         run_id, item_id = str(uuid.uuid4()), uuid.uuid4().hex[:12]
         await db.execute(
             "INSERT INTO agent_runs (id, created_at, updated_at, status, prompt, user_message, session_id) "
@@ -489,7 +489,7 @@ async def counts(db) -> dict:
 
 # ── Routines ─────────────────────────────────────────────────────────────────
 
-ROUTINE_FIELDS = ("name", "prompt", "days", "time", "approval", "notify", "enabled", "keep_hours")
+ROUTINE_FIELDS = ("name", "prompt", "days", "time", "approval", "notify", "enabled", "keep_hours", "agent_id")
 # The longest a routine can be told to keep its threads for: a year.
 MAX_KEEP_HOURS = 24 * 365
 
@@ -541,6 +541,7 @@ def routine_row(r) -> dict:
     d["days"] = parse_days(d["days"])
     d["schedule"] = describe_schedule(",".join(d["days"]), d["time"])
     d["keep_hours"] = d.get("keep_hours") or 0
+    d["agent_id"] = d.get("agent_id") or "atlas"
     return d
 
 
@@ -562,15 +563,30 @@ def _schedule_next(r: dict) -> str | None:
     return nxt.isoformat() if nxt else None
 
 
+async def _check_agent(db, fields: dict) -> dict:
+    """A routine is done by Atlas or one of your agents (stored NULL for Atlas)."""
+    if "agent_id" in fields:
+        import agent_config
+        aid = fields["agent_id"] or "atlas"
+        if aid != "atlas":
+            if aid in agent_config.WORKERS:
+                raise ValueError("The Researcher and Coder only take tasks from another agent; pick Atlas or one of yours.")
+            if not await agent_config.get_agent(db, aid, with_prompt=False):
+                raise ValueError(f"No agent called {aid!r}.")
+        fields = {**fields, "agent_id": None if aid == "atlas" else aid}
+    return fields
+
+
 async def create_routine(db, fields: dict) -> dict:
-    f = {"days": ",".join(DAYS), "time": "08:00", "approval": "ask", "notify": 1, "enabled": 1, "keep_hours": 0, **_clean(fields)}
+    fields = await _check_agent(db, _clean(fields))
+    f = {"days": ",".join(DAYS), "time": "08:00", "approval": "ask", "notify": 1, "enabled": 1, "keep_hours": 0, "agent_id": None, **fields}
     if "name" not in f or "prompt" not in f:
         raise ValueError("A routine needs a name and what to do.")
     rid, now = uuid.uuid4().hex[:12], _now()
     await db.execute(
-        "INSERT INTO routines (id, name, prompt, days, time, approval, notify, enabled, keep_hours, created_at, updated_at, next_run_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        (rid, f["name"], f["prompt"], f["days"], f["time"], f["approval"], f["notify"], f["enabled"], f["keep_hours"], now, now, _schedule_next(f)),
+        "INSERT INTO routines (id, name, prompt, days, time, approval, notify, enabled, keep_hours, agent_id, created_at, updated_at, next_run_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (rid, f["name"], f["prompt"], f["days"], f["time"], f["approval"], f["notify"], f["enabled"], f["keep_hours"], f["agent_id"], now, now, _schedule_next(f)),
     )
     await db.commit()
     return await get_routine(db, rid)
@@ -581,10 +597,10 @@ async def update_routine(db, routine_id: str, fields: dict) -> dict | None:
         row = await c.fetchone()
     if not row:
         return None
-    f = {**dict(row), **_clean(fields)}
+    f = {**dict(row), **await _check_agent(db, _clean(fields))}
     await db.execute(
-        "UPDATE routines SET name=?, prompt=?, days=?, time=?, approval=?, notify=?, enabled=?, keep_hours=?, updated_at=?, next_run_at=? WHERE id=?",
-        (f["name"], f["prompt"], f["days"], f["time"], f["approval"], f["notify"], f["enabled"], f.get("keep_hours") or 0, _now(), _schedule_next(f), routine_id),
+        "UPDATE routines SET name=?, prompt=?, days=?, time=?, approval=?, notify=?, enabled=?, keep_hours=?, agent_id=?, updated_at=?, next_run_at=? WHERE id=?",
+        (f["name"], f["prompt"], f["days"], f["time"], f["approval"], f["notify"], f["enabled"], f.get("keep_hours") or 0, f.get("agent_id"), _now(), _schedule_next(f), routine_id),
     )
     await db.commit()
     return await get_routine(db, routine_id)
@@ -711,6 +727,7 @@ _ROUTINE_PROPS = {
                  "description": "ask (default): changes you'd make wait for the user's approval in the inbox. "
                                 "auto: make them directly (still logged and undoable)"},
     "notify": {"type": "boolean", "description": "Send a notification when it's done (default true)"},
+    "agent_id": {"type": "string", "description": "Who does it: 'atlas' (default) or one of the user's agents (list_agents)"},
     "keep_hours": {"type": "integer", "description": "Delete each run's inbox thread this many hours after its last activity "
                                                     "(e.g. 24 for a daily brief, 168 for a week). 0 (default) keeps them. "
                                                     "Threads with suggestions still waiting are kept until answered."},
@@ -744,7 +761,7 @@ async def dispatch(name: str, args: dict, db) -> dict:
             return {"items": [{k: i.get(k) for k in ("id", "title", "created_at", "status", "pending", "read", "test", "preview", "routine_id")}
                               for i in out["items"]], "counts": out["counts"]}
         if name == "list_routines":
-            return {"routines": [{k: r[k] for k in ("id", "name", "prompt", "schedule", "approval", "notify", "enabled", "keep_hours", "next_run_at")}
+            return {"routines": [{k: r[k] for k in ("id", "name", "prompt", "schedule", "approval", "notify", "enabled", "keep_hours", "agent_id", "next_run_at")}
                                  for r in await list_routines(db)]}
         if name == "create_routine":
             r = await create_routine(db, args)

@@ -21,6 +21,7 @@ class RoutineIn(BaseModel):
     notify: bool | None = None
     enabled: bool | None = None
     keep_hours: int | None = None   # 0: keep threads; else delete them this long after
+    agent_id: str | None = Field(None, max_length=60)   # who does it: "atlas" or one of yours
 
 
 @router.get("/routines")
