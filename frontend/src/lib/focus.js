@@ -66,6 +66,8 @@ export function showTarget(show) {
     case 'finances': return { page: 'finances', target: { kind: 'finances', category: show.category, range: show.range, type: show.type } }
     case 'inbox':    return { page: 'inbox', target: show.id ? { kind: 'inbox', id: show.id } : null }
     case 'routine':  return { page: 'inbox', target: { kind: 'routine', id: show.id } }
+    case 'agent':    return { page: 'agents', target: { kind: 'agent', id: show.id } }
+    case 'skill':    return { page: 'agents', target: { kind: 'skill', id: show.id } }
     case 'page':     return { page: show.page, target: null }
     default:         return null
   }

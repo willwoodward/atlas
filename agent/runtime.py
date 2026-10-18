@@ -18,6 +18,7 @@ from strands.models.openai_responses import OpenAIResponsesModel
 from strands.tools.mcp import MCPClient
 from strands_tools import tavily
 
+import agent_settings as agents_cfg
 from coding import CODING_ENABLED, delegate_coding
 from progress import set_progress_queue
 from questions import ask_user, set_run_id
@@ -242,7 +243,7 @@ def build_system_prompt(template: str | None, name: str, today: str, memory: str
             + voice + _background_section(background, name))
 
 
-def _model(spoken: bool = False) -> OpenAIResponsesModel:
+def _model(spoken: bool = False, cfg: dict | None = None) -> OpenAIResponsesModel:
     """Build the model on the Responses API (/v1/responses).
 
     Not chat/completions: reasoning models reject function tools there unless
@@ -250,28 +251,45 @@ def _model(spoken: bool = False) -> OpenAIResponsesModel:
     Note the Responses API budget parameter is `max_output_tokens`, and it
     covers reasoning tokens as well as the visible reply.
     """
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set on the agent container")
-    client_args = {"api_key": api_key}
-    if os.getenv("OPENAI_BASE_URL"):
-        client_args["base_url"] = os.environ["OPENAI_BASE_URL"]
-    return OpenAIResponsesModel(
-        client_args=client_args,
-        model_id=MODEL_ID,
-        params={"max_output_tokens": MAX_TOKENS,
-                **({"reasoning": {"effort": VOICE_REASONING}} if spoken and VOICE_REASONING else {})},
-    )
+    # The Agents page's model and reasoning for Atlas; a spoken turn keeps
+    # its quick reasoning whatever's set there.
+    return agents_cfg.build_model(cfg or {}, max_tokens=MAX_TOKENS,
+                                  force_effort=VOICE_REASONING if spoken and VOICE_REASONING else None)
 
 
-def _mcp_client(run_id: str | None = None, approval: str | None = None) -> MCPClient:
+def _mcp_client(run_id: str | None = None, approval: str | None = None,
+                ask: list[str] | None = None, off: list[str] | None = None) -> MCPClient:
     headers = {"Authorization": f"Bearer {MCP_KEY}"} if MCP_KEY else {}
     # Tells the dashboard which run is calling, and for a background routine
     # set to "ask", that changes must wait for approval (backend/inbox.py).
+    # The Agents page's policies go too: "ask" tools become suggestions (only
+    # sent for background runs; a chat asks in the chat) and "off" are refused.
     if run_id:
         headers["X-Atlas-Run"] = run_id
         headers["X-Atlas-Approval"] = approval or "auto"
+        if ask:
+            headers["X-Atlas-Ask"] = ",".join(ask)
+        if off:
+            headers["X-Atlas-Off"] = ",".join(off)
     return MCPClient(lambda: sse_client(MCP_URL, headers=headers))
+
+
+async def _open_for_agent(a: dict, run_id: str | None, approval: str | None, names: list[str]):
+    """An MCP connection for one of the user's agents, with its own policies:
+    of the dashboard's tools (`names`) it only gets the ones switched on for it."""
+    ask, off = agents_cfg.ask_lists(a, default="off", names=names)
+    client = _mcp_client(run_id, approval, ask if agents_cfg.in_background() else None, off)
+    await asyncio.to_thread(client.start)
+    return client, await asyncio.to_thread(client.list_tools_sync)
+
+
+def _agent_tracers(agent_name: str) -> list:
+    """Show one of the user's agents' tool calls in the chat, labelled with it."""
+    from progress import emit
+    return [ToolTracer(emit=emit, build=lambda *, tool_use_id, name, args, status, output: {
+        "type": "agent_activity", "agent": agent_name, "tool": name, "status": status,
+        "input": pretty_args(args)[:400],
+    })]
 
 
 def _to_strands(messages: list[dict]) -> list[dict]:
@@ -286,7 +304,7 @@ def _to_strands(messages: list[dict]) -> list[dict]:
 async def stream_reply(messages: list[dict], user_name: str, run_id: str | None = None,
                        memory: str | None = None, system_prompt: str | None = None,
                        safe_web: bool = False, spoken: bool = False, background: dict | None = None,
-                       voice_only: bool = False):
+                       voice_only: bool = False, agents: dict | None = None):
     """Yield (event_type, payload) tuples: ("token", str) | ("tool", str) | ("error", str)."""
     history = _to_strands(messages)
     if not history or history[-1]["role"] != "user":
@@ -296,8 +314,13 @@ async def stream_reply(messages: list[dict], user_name: str, run_id: str | None 
 
     today = datetime.now(ZoneInfo(TIMEZONE)).strftime("%A %-d %B %Y")
     system_prompt = build_system_prompt(system_prompt, user_name or "the user", today, memory, spoken, background, voice_only)
+    # The Agents page: every agent's settings, for this run and the agents it starts.
+    agents_cfg.set_settings(agents, background=bool(background))
+    atlas = agents_cfg.settings("atlas")
+    ask, off = agents_cfg.ask_lists(atlas)
+    approval = (background or {}).get("approval") if background else None
 
-    client = _mcp_client(run_id, (background or {}).get("approval") if background else None)
+    client = _mcp_client(run_id, approval, ask if background else None, off)
     try:
         await asyncio.to_thread(client.start)
     except Exception:
@@ -321,15 +344,25 @@ async def stream_reply(messages: list[dict], user_name: str, run_id: str | None 
         begin_run((m["content"] for m in messages if m.get("role") == "user"), safe=safe_web)
         DONE = object()
 
+        # Dashboard tools over MCP, plus web access and the ability to
+        # delegate to a research team it composes itself (and to the user's
+        # own agents). No ask_user where nobody can see the question:
+        # background and voice-only runs. Tools switched off on the Agents
+        # page are left out; skills come with load_skill.
+        own = local_tools(background=bool(background) or voice_only)
+        if agents_cfg.custom_agents():
+            own.append(agents_cfg.ask_agent_tool(
+                user_name, lambda a, _n=[agents_cfg.tool_name(t) for t in tools]: _open_for_agent(a, run_id, approval, _n),
+                web_tools, TIMEZONE, _agent_tracers))
+        all_tools = agents_cfg.allowed([*tools, *own], atlas)
+        system_prompt, all_tools = agents_cfg.with_skills(system_prompt, all_tools, atlas)
+
         agent = Agent(
-            model=_model(spoken=spoken or voice_only),
+            model=_model(spoken=spoken or voice_only, cfg=atlas),
             system_prompt=system_prompt,
-            # Dashboard tools over MCP, plus web access and the ability to
-            # delegate to a research team it composes itself.
-            # No ask_user where nobody can see the question: background and voice-only runs.
-            tools=[*tools, *local_tools(background=bool(background) or voice_only)],
+            tools=all_tools,
             messages=prior,
-            hooks=[ToolTracer(
+            hooks=[agents_cfg.ApprovalHook(atlas, "Atlas", dashboard={agents_cfg.tool_name(t) for t in tools}), ToolTracer(
                 emit=queue.put_nowait,
                 build=lambda *, tool_use_id, name, args, status, output: ("progress", {
                     "type": "tool_result",

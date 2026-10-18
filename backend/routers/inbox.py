@@ -20,6 +20,7 @@ class RoutineIn(BaseModel):
     approval: str | None = None
     notify: bool | None = None
     enabled: bool | None = None
+    keep_hours: int | None = None   # 0: keep threads; else delete them this long after
 
 
 @router.get("/routines")
@@ -232,21 +233,15 @@ async def patch_item(item_id: str, body: FlagsIn, user: dict = Depends(get_curre
 
 @router.delete("/{item_id}")
 async def delete_item(item_id: str, user: dict = Depends(get_current_user)):
-    """Delete a thread for good: the item, its conversation and its
-    suggestions. Changes already approved stay (and stay undoable)."""
-    import conversations
+    """Delete a thread for good (see inbox.delete_item)."""
     db = await inbox.connect()
     try:
-        async with db.execute("SELECT session_id FROM inbox_items WHERE id=?", (item_id,)) as c:
-            row = await c.fetchone()
-        if not row:
+        try:
+            found = await inbox.delete_item(db, item_id)
+        except inbox.BusyError as exc:
+            raise HTTPException(409, str(exc))
+        if not found:
             raise HTTPException(404, "No such item")
-        if await inbox._busy(db, row["session_id"]):
-            raise HTTPException(409, "Atlas is still working on this one.")
-        await db.execute("DELETE FROM inbox_proposals WHERE session_id=?", (row["session_id"],))
-        await conversations.delete_session(db, row["session_id"])
-        await db.execute("DELETE FROM inbox_items WHERE id=?", (item_id,))
-        await db.commit()
         return {"ok": True, "counts": await inbox.counts(db)}
     finally:
         await db.close()

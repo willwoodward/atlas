@@ -29,6 +29,7 @@ from strands_tools import tavily
 
 from web_fetch import UrlCollector, web_tools
 
+import agent_settings as agents_cfg
 from progress import emit as _emit, set_progress_queue  # noqa: F401 (re-exported for runtime)
 from tool_trace import ToolTracer, summarise_args
 
@@ -91,20 +92,15 @@ others. They cannot see your searches — only what you write."""
 
 
 def _subagent_model() -> OpenAIResponsesModel:
-    """Same model as the orchestrator; subagents differ by prompt and tools, not brains."""
-    client_args = {"api_key": os.environ["OPENAI_API_KEY"]}
-    if os.getenv("OPENAI_BASE_URL"):
-        client_args["base_url"] = os.environ["OPENAI_BASE_URL"]
-    return OpenAIResponsesModel(
-        client_args=client_args,
-        model_id=os.getenv("AGENT_MODEL_ID", "gpt-6-luna"),
-        params={
-            # Deliberately lower than the coder's. A researcher's job is to read
-            # sources and report what they say; the expensive thinking belongs in
-            # the synthesis step, not in each of several parallel subagents.
-            "reasoning": {"effort": os.getenv("RESEARCH_REASONING_EFFORT", "high")},
-            "max_output_tokens": int(os.getenv("SUBAGENT_MAX_TOKENS", "8192")),
-        },
+    """Same model as the orchestrator unless the Agents page says otherwise;
+    subagents differ by prompt and tools, not brains."""
+    return agents_cfg.build_model(
+        agents_cfg.settings("researcher"),
+        # Deliberately lower than the coder's. A researcher's job is to read
+        # sources and report what they say; the expensive thinking belongs in
+        # the synthesis step, not in each of several parallel subagents.
+        effort=os.getenv("RESEARCH_REASONING_EFFORT", "high"),
+        max_tokens=int(os.getenv("SUBAGENT_MAX_TOKENS", "8192")),
     )
 
 
@@ -148,15 +144,21 @@ def _extract_sources(summary: str) -> list[str]:
 
 async def _attempt(index: int, objective: str, context: str, retry: bool) -> str:
     """One pass at an objective. Raises on failure."""
-    prompt = RESEARCHER_PROMPT.format(
-        objective=objective,
-        context=f"Shared context for the wider task:\n{context}" if context else "",
+    cfg = agents_cfg.settings("researcher")
+    # The Agents page may have its own prompt for researchers.
+    prompt = agents_cfg.fill(
+        (cfg.get("prompt") or "").strip() or RESEARCHER_PROMPT,
+        {"objective": objective, "context": f"Shared context for the wider task:\n{context}" if context else ""},
+        required=("objective", "context"),
     )
+    # Open web tools, or the safer read-only pair (Assistant settings), less
+    # any switched off on the Agents page.
+    tools = agents_cfg.allowed([tavily.tavily_search, *web_tools(include_extract=True)], cfg)
+    prompt, tools = agents_cfg.with_skills(prompt, tools, cfg)
     agent = Agent(
         model=_subagent_model(),
         system_prompt=prompt + (RETRY_NOTE if retry else ""),
-        # Open web tools, or the safer read-only pair (Assistant settings).
-        tools=[tavily.tavily_search, *web_tools(include_extract=True)],
+        tools=tools,
         conversation_manager=SlidingWindowConversationManager(
             # A retry gets a tighter window still — the first run proved the
             # objective generates more material than the default can hold.

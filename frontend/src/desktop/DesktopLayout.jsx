@@ -6,7 +6,7 @@ import { useTheme } from '../context/ThemeContext.jsx'
 import { useUser } from '../context/UserContext.jsx'
 import { useQuickAddAction } from '../context/QuickAddContext.jsx'
 import { onShortcut, useKeybinds } from '../context/KeybindsContext.jsx'
-import { displayCombo } from '../lib/keybinds.js'
+import { displayCombo, PAGE_SHORTCUTS } from '../lib/keybinds.js'
 import HomePage      from './HomePage.jsx'
 import CalendarPage  from './CalendarPage.jsx'
 import HabitsPage    from './HabitsPage.jsx'
@@ -17,6 +17,7 @@ import FitnessPage   from './FitnessPage.jsx'
 import GoalsPage     from './GoalsPage.jsx'
 import AssistantPage from './AssistantPage.jsx'
 import InboxPage     from './InboxPage.jsx'
+import AgentsPage    from './AgentsPage.jsx'
 import { useInbox } from '../context/InboxContext.jsx'
 import AccountsPage  from './AccountsPage.jsx'
 import AssistantPanel from './AssistantPanel.jsx'
@@ -47,6 +48,7 @@ const navIcons = {
   fitness:   I(<path d="M3 12h4l3-7 4 14 3-7h4" key="a"/>),
   goals:     I(<circle cx="12" cy="12" r="8" key="a"/>, <circle cx="12" cy="12" r="3.5" key="b"/>),
   assistant: I(<circle cx="12" cy="12" r="7" key="a"/>, <circle cx="12" cy="12" r="2.5" key="b"/>),
+  agents:    I(<circle cx="12" cy="6.5" r="2.8" key="a"/>, <circle cx="5.5" cy="17" r="2.5" key="b"/>, <circle cx="18.5" cy="17" r="2.5" key="c"/>, <path d="M10.4 8.9L7 14.7M13.6 8.9l3.4 5.8M8 17h8" key="d"/>),
   accounts:  I(<circle cx="12" cy="8" r="4" key="a"/>, <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" key="b"/>),
 }
 
@@ -65,6 +67,7 @@ const NAV_APPS = [
 const NAV_BOTTOM = [
   { id: 'inbox',     label: 'Inbox' },
   { id: 'assistant', label: 'Assistant' },
+  { id: 'agents',    label: 'Agents' },
 ]
 
 // Collapsed, labels fade and clip rather than unmount, so the width
@@ -75,18 +78,23 @@ const labelStyle = collapsed => ({
 })
 
 function NavBtn({ id, label, active, onClick, collapsed, badge }) {
+  const { bindings } = useKeybinds()
+  const key = bindings[`go:${id}`]
+  const shortcut = key ? ` (${displayCombo(key)})` : ''
   return (
     <button
       onClick={onClick}
-      title={collapsed ? label + (badge ? ` · ${badge} unread` : '') : undefined}
+      className="nav-btn"
+      aria-current={active ? 'page' : undefined}
+      title={(collapsed ? label + (badge ? ` · ${badge} unread` : '') : label) + shortcut}
       aria-label={badge ? `${label}, ${badge} unread` : label}
       style={{
         display: 'flex', alignItems: 'center', gap: 11, width: '100%', padding: '9px 12px',
         border: 'none', borderRadius: 9, cursor: 'pointer', textAlign: 'left',
         fontFamily: 'inherit', fontSize: 13.5, fontWeight: active ? 600 : 500,
-        letterSpacing: '.01em', transition: 'background .12s',
-        background: active ? 'var(--surface-3)' : 'transparent',
-        color: active ? 'var(--ink)' : 'var(--mid)',
+        letterSpacing: '.01em', transition: 'background .12s, color .12s',
+        // Hover: .nav-btn in index.css.
+        ...(active ? { background: 'var(--surface-3)', color: 'var(--ink)' } : {}),
       }}
     >
       <span style={{ display: 'flex', width: 19, height: 19, flex: 'none', position: 'relative' }}>
@@ -230,6 +238,11 @@ export default function DesktopLayout() {
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(SIDEBAR_KEY) === '1' } catch { return false } })
   useEffect(() => { try { localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0') } catch { /* not kept */ } }, [collapsed])
   useEffect(() => onShortcut('sidebar', () => setCollapsed(c => !c)), [])
+  // Ctrl+1… jump to a page (changeable in Settings → Keyboard shortcuts).
+  useEffect(() => {
+    const offs = PAGE_SHORTCUTS.map(s => onShortcut(s.id, () => setActive(s.page)))
+    return () => offs.forEach(off => off())
+  }, []) // eslint-disable-line
   const sidebarWidth = collapsed ? SIDEBAR_RAIL : SIDEBAR_WIDE
   const { counts: inboxCounts } = useInbox()
   useEffect(() => {
@@ -277,6 +290,7 @@ export default function DesktopLayout() {
     fitness:   <FitnessPage />,
     goals:     <GoalsPage />,
     assistant: <AssistantPage />,
+    agents:    <AgentsPage />,
     accounts:  <AccountsPage />,
   }
 

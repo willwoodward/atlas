@@ -220,9 +220,11 @@ TOOLS = [
          inputSchema={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}),
     # The app itself
     Tool(name="show",
-         description="Open a view in the user's Atlas app so they can see something: a page, the finances for a category and period, a calendar day or event, a note, a routine or inbox item, or a search. Be as specific as you can: when they ask to see a particular thing, pass its id so that thing opens, not just its page (find ids with search_notes, list_routines, list_inbox, list_events…).",
+         description="Open a view in the user's Atlas app so they can see something: a page, the finances for a category and period, a calendar day or event, a note, a routine or inbox item, an agent or skill (the Agents page), or a search. Be as specific as you can: when they ask to see a particular thing, pass its id so that thing opens, not just its page (find ids with search_notes, list_routines, list_inbox, list_events…).",
          inputSchema={"type": "object", "properties": {
-             "view": {"type": "string", "enum": ["home", "calendar", "finances", "todos", "goals", "habits", "notes", "inbox", "fitness", "search"]},
+             "view": {"type": "string", "enum": ["home", "calendar", "finances", "todos", "goals", "habits", "notes", "inbox", "fitness", "agents", "search"]},
+             "agent_id": {"type": "string", "description": "agents: the agent to open (list_agents)"},
+             "skill_id": {"type": "string", "description": "agents: the skill to open (list_skills)"},
              "date": {"type": "string", "description": "calendar: day to open"},
              "event_id": {"type": "string", "description": "calendar: event to open"},
              "category": {"type": "string", "description": "finances: filter the transaction log to this category"},
@@ -565,6 +567,10 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
             show = {"kind": "routine", "id": args["routine_id"]}
         elif v == "inbox" and args.get("inbox_item_id"):
             show = {"kind": "inbox", "id": args["inbox_item_id"]}
+        elif v == "agents" and args.get("agent_id"):
+            show = {"kind": "agent", "id": args["agent_id"]}
+        elif v == "agents" and args.get("skill_id"):
+            show = {"kind": "skill", "id": args["skill_id"]}
         elif v in ("todos", "goals", "habits") and args.get("item_id"):
             show = {"kind": {"todos": "todo", "goals": "goal", "habits": "habit"}[v], "id": args["item_id"]}
         elif v == "search":

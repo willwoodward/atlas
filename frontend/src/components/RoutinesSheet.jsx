@@ -3,7 +3,7 @@ import Sheet from './Sheet.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { inboxFetch } from '../context/InboxContext.jsx'
 import { pushSupported, needsInstall, pushStatus, enablePush, disablePush, testPush } from '../lib/push.js'
-import { Button, Input, Textarea, Switch, eyebrow } from './ui.jsx'
+import { Button, Input, Textarea, Switch, Select, eyebrow } from './ui.jsx'
 
 // Routines: Atlas working on a schedule, leaving the result in the inbox.
 // Listed here with pause / run now / edit, plus notifications for this device.
@@ -21,7 +21,12 @@ const STARTERS = [
     prompt: 'Look at next week: calendar, to-dos and this week’s outcomes. Tell me what the week looks like, flag clashes or overloaded days, and suggest outcomes for the week if I haven’t set them.' },
 ]
 
-const EMPTY = { name: '', prompt: '', days: DAYS.map(d => d[0]), time: '08:00', approval: 'ask', notify: true, enabled: true }
+const EMPTY = { name: '', prompt: '', days: DAYS.map(d => d[0]), time: '08:00', approval: 'ask', notify: true, enabled: true, keep_hours: 0 }
+
+// How long a routine's threads stay in the inbox. Counted from their last
+// activity; threads with suggestions waiting stay until answered.
+const KEEP = [[0, 'Keep them'], [12, '12 hours'], [24, '1 day'], [72, '3 days'], [168, '1 week'], [336, '2 weeks'], [720, '30 days']]
+const keepLabel = h => !h ? null : (KEEP.find(k => k[0] === h)?.[1] || `${h} hours`)
 
 function nextLabel(iso) {
   if (!iso) return 'Paused'
@@ -118,6 +123,15 @@ function Editor({ initial, onSave, onCancel, onDelete, onTest }) {
           <div style={{ flex: 1, fontSize: 13.5, color: 'var(--ink)', fontWeight: 500 }}>Notify me when it’s done</div>
           <Switch checked={f.notify} onChange={v => set({ notify: v })} label="Notify me when it’s done" />
         </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13.5, color: 'var(--ink)', fontWeight: 500 }}>Delete its threads after</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>Counted from the last message in each thread. Threads with suggestions waiting stay until you answer them.</div>
+          </div>
+          <Select value={f.keep_hours || 0} onChange={e => set({ keep_hours: Number(e.target.value) })} aria-label="Delete its threads after" style={{ width: 130 }}>
+            {[...KEEP, ...(KEEP.some(k => k[0] === (f.keep_hours || 0)) ? [] : [[f.keep_hours, `${f.keep_hours} hours`]])].map(([h, l]) => <option key={h} value={h}>{h ? l : 'Never'}</option>)}
+          </Select>
+        </div>
       </div>
       {err && <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>{err}</div>}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -142,7 +156,7 @@ export default function RoutinesSheet({ onClose, onRan, openId = null }) {
   useEffect(() => { load().then(list => { const r = openId && list?.find(x => x.id === openId); if (r) setEditing({ ...r }) }) }, []) // eslint-disable-line
 
   const save = async f => {
-    const body = { name: f.name, prompt: f.prompt, days: f.days, time: f.time, approval: f.approval, notify: f.notify }
+    const body = { name: f.name, prompt: f.prompt, days: f.days, time: f.time, approval: f.approval, notify: f.notify, keep_hours: f.keep_hours || 0 }
     if (f.id) await inboxFetch(token, `/routines/${f.id}`, { method: 'PUT', body })
     else await inboxFetch(token, '/routines', { method: 'POST', body })
     setEditing(null); load()
@@ -182,7 +196,7 @@ export default function RoutinesSheet({ onClose, onRan, openId = null }) {
                   <button onClick={() => setEditing({ ...r })} style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{r.name}</div>
                     <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                      {r.schedule} · {r.approval === 'ask' ? 'asks first' : 'acts itself'} · {r.enabled ? nextLabel(r.next_run_at) : 'Paused'}
+                      {r.schedule} · {r.approval === 'ask' ? 'asks first' : 'acts itself'} ·{keepLabel(r.keep_hours) ? ` clears after ${keepLabel(r.keep_hours)} ·` : ''} {r.enabled ? nextLabel(r.next_run_at) : 'Paused'}
                     </div>
                   </button>
                   <Button size="sm" variant="ghost" onClick={() => runNow(r, true)} title="See what it would do: nothing changes unless you approve it, and no notification">Test run</Button>

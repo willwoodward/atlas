@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useUser } from '../context/UserContext.jsx'
 import { onShortcut } from '../context/KeybindsContext.jsx'
+import { PAGE_SHORTCUTS } from '../lib/keybinds.js'
 import SearchPalette from '../components/SearchPalette.jsx'
 import VoiceDock from '../components/VoiceDock.jsx'
 import { requestFocus, showTarget } from '../lib/focus.js'
@@ -16,6 +17,7 @@ import FinancesPage  from '../desktop/FinancesPage.jsx'
 import FitnessPage   from '../desktop/FitnessPage.jsx'
 import AssistantPage from '../desktop/AssistantPage.jsx'
 import InboxPage     from '../desktop/InboxPage.jsx'
+import AgentsPage    from '../desktop/AgentsPage.jsx'
 import { useInbox } from '../context/InboxContext.jsx'
 import AccountsPage  from '../desktop/AccountsPage.jsx'
 
@@ -30,11 +32,12 @@ const PAGES = [
   { id: 'finances',  label: 'Finances',  component: FinancesPage },
   { id: 'fitness',   label: 'Fitness',   component: FitnessPage },
   { id: 'assistant', label: 'Assistant', component: AssistantPage },
+  { id: 'agents',    label: 'Agents',    component: AgentsPage },
   { id: 'accounts',  label: 'Settings',  component: AccountsPage },
 ]
 
 // Pages shown in the drawer nav (excludes accounts — accessed via avatar)
-const NAV_PAGES = ['home', 'calendar', 'habits', 'todos', 'goals', 'notes', 'finances', 'fitness', 'inbox', 'assistant']
+const NAV_PAGES = ['home', 'calendar', 'habits', 'todos', 'goals', 'notes', 'finances', 'fitness', 'inbox', 'assistant', 'agents']
 
 const I = (...kids) => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{kids}</svg>
@@ -50,6 +53,7 @@ const icons = {
   finances:  I(<path d="M4 15l5-5 4 3 7-8" key="a"/>, <line x1="4" y1="20" x2="20" y2="20" key="b"/>),
   fitness:   I(<path d="M3 12h4l3-7 4 14 3-7h4" key="a"/>),
   assistant: I(<circle cx="12" cy="12" r="7" key="a"/>, <circle cx="12" cy="12" r="2.5" key="b"/>),
+  agents:    I(<circle cx="12" cy="6.5" r="2.8" key="a"/>, <circle cx="5.5" cy="17" r="2.5" key="b"/>, <circle cx="18.5" cy="17" r="2.5" key="c"/>, <path d="M10.4 8.9L7 14.7M13.6 8.9l3.4 5.8M8 17h8" key="d"/>),
   accounts:  I(<circle cx="12" cy="8" r="4" key="a"/>, <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" key="b"/>),
 }
 
@@ -71,6 +75,11 @@ export default function MobileLayout() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   useEffect(() => onShortcut('search', () => { setSearchQuery(''); setSearchOpen(o => !o) }), [])
+  // Ctrl+1… on a tablet or phone with a keyboard.
+  useEffect(() => {
+    const offs = PAGE_SHORTCUTS.map(s => onShortcut(s.id, () => { setActive(s.page); setDrawerOpen(false) }))
+    return () => offs.forEach(off => off())
+  }, [])
   // Only what you asked to see: following Atlas's edits on a phone would pull
   // you out of the conversation every time it changed something.
   useEffect(() => {

@@ -35,3 +35,10 @@ describe('readToolResult', () => {
     expect(showTarget({ kind: 'routine', id: 'r1' })).toEqual({ page: 'inbox', target: { kind: 'routine', id: 'r1' } })
   })
 })
+
+describe('agents page', () => {
+  it('opens an agent or a skill', () => {
+    expect(showTarget({ kind: 'agent', id: 'researcher' })).toEqual({ page: 'agents', target: { kind: 'agent', id: 'researcher' } })
+    expect(showTarget({ kind: 'skill', id: 'trip' })).toEqual({ page: 'agents', target: { kind: 'skill', id: 'trip' } })
+  })
+})

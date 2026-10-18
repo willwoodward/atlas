@@ -62,6 +62,50 @@ def pending_count(run_id: str) -> int:
     return len([f for f in _pending.get(run_id, {}).values() if not f.done()])
 
 
+async def _wait(event: dict) -> str | None:
+    """Emit a question event and wait for its answer. None: nobody can answer
+    (no run), or no answer in time."""
+    run_id = _run_id.get()
+    if not run_id:
+        return None
+    question_id = uuid.uuid4().hex[:12]
+    future: asyncio.Future = asyncio.get_running_loop().create_future()
+    _pending.setdefault(run_id, {})[question_id] = future
+    emit({"type": "question", "questionId": question_id, **event})
+    log.info("Waiting on %s %s for run %s", event.get("kind", "question"), question_id, run_id)
+    try:
+        answer = await asyncio.wait_for(future, timeout=ANSWER_TIMEOUT)
+        emit({"type": "question_answered", "questionId": question_id, "answer": answer[:500]})
+        return answer
+    except asyncio.TimeoutError:
+        emit({"type": "question_timeout", "questionId": question_id})
+        return None
+    finally:
+        _pending.get(run_id, {}).pop(question_id, None)
+        if not _pending.get(run_id):
+            _pending.pop(run_id, None)
+
+
+APPROVE, REJECT = "Approve", "Reject"
+
+
+async def request_approval(tool_name: str, args: dict, agent: str = "Atlas", reason: str = "") -> bool | None:
+    """Ask the user to approve one tool call (Agents page → "ask"). The chat
+    shows it as an approve card. True/False, or None if nobody could answer."""
+    answer = await _wait({
+        "kind": "approval",
+        "question": f"{agent} wants to use {tool_name}",
+        "options": [APPROVE, REJECT],
+        "tool": tool_name,
+        "input": args if isinstance(args, dict) else {},
+        "agent": agent,
+        "reason": reason[:300],
+    })
+    if answer is None:
+        return None
+    return answer.strip().lower() in ("approve", "approved", "yes", "y", "ok")
+
+
 @tool
 async def ask_user(question: str, options: list[str] | None = None) -> str:
     """Ask the user something and wait for their answer before continuing.
@@ -84,38 +128,14 @@ async def ask_user(question: str, options: list[str] | None = None) -> str:
     Returns:
         The user's answer as text.
     """
-    run_id = _run_id.get()
-    if not run_id:
+    if not _run_id.get():
         # No durable run behind this call, so nobody could ever answer. Better
         # to say so than to hang for eight hours.
         return ("No interactive session is available, so this question cannot be "
                 "answered. Proceed with your best judgement and state the assumption "
                 "you made in your summary.")
-
-    question_id = uuid.uuid4().hex[:12]
-    loop = asyncio.get_running_loop()
-    future: asyncio.Future = loop.create_future()
-    _pending.setdefault(run_id, {})[question_id] = future
-
-    emit({
-        "type": "question",
-        "questionId": question_id,
-        "question": question,
-        "options": [o for o in (options or []) if o][:6],
-    })
-    log.info("Waiting on question %s for run %s", question_id, run_id)
-
-    try:
-        answer = await asyncio.wait_for(future, timeout=ANSWER_TIMEOUT)
-        emit({"type": "question_answered", "questionId": question_id, "answer": answer[:500]})
-        return answer
-    except asyncio.TimeoutError:
-        emit({"type": "question_timeout", "questionId": question_id})
+    answer = await _wait({"question": question, "options": [o for o in (options or []) if o][:6]})
+    if answer is None:
         return ("The user did not answer within the time limit. Proceed with your best "
                 "judgement and state clearly in your summary what you assumed.")
-    except asyncio.CancelledError:
-        raise
-    finally:
-        _pending.get(run_id, {}).pop(question_id, None)
-        if not _pending.get(run_id):
-            _pending.pop(run_id, None)
+    return answer

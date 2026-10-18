@@ -52,6 +52,8 @@ WRITE_TOOLS = {
     "set_transaction_category", "rename_category", "add_category_rule", "set_budget",
     "create_habit", "update_goal", "add_subtask",
     "create_routine", "update_routine", "delete_routine",
+    # The Agents page: a background run never changes its own team unasked.
+    "create_agent", "update_agent", "delete_agent", "write_skill", "delete_skill",
 }
 
 # The run a tool call belongs to, and whether it must ask first. Set per MCP
@@ -190,6 +192,17 @@ async def describe(db, tool: str, a: dict) -> str:
         return f"{'Change' if tool == 'update_routine' else 'Delete'} a routine"
     if tool in ("write_github_note", "create_github_folder"):
         return f"Draft {q(a.get('path', ''))} in your GitHub notes"
+    if tool == "create_agent":
+        return f"Make the agent {q(a.get('name', ''))}"
+    if tool in ("update_agent", "delete_agent"):
+        changed = [k for k in ("name", "description", "prompt", "model", "reasoning", "tools", "skills", "enabled") if k in a]
+        verb = "Change" if tool == "update_agent" else "Delete"
+        return f"{verb} the agent {q(a.get('id', ''))}" + (f" ({', '.join(changed)})" if changed and tool == "update_agent" else "")
+    if tool == "write_skill":
+        import agent_config
+        return f"{'Rewrite' if a.get('id') else 'Write'} the skill {q(agent_config.parse_skill(a.get('content', ''))[0] or a.get('id', ''))}"
+    if tool == "delete_skill":
+        return f"Delete the skill {q(a.get('id', ''))}"
     return tool.replace("_", " ").capitalize()
 
 
@@ -476,7 +489,9 @@ async def counts(db) -> dict:
 
 # ── Routines ─────────────────────────────────────────────────────────────────
 
-ROUTINE_FIELDS = ("name", "prompt", "days", "time", "approval", "notify", "enabled")
+ROUTINE_FIELDS = ("name", "prompt", "days", "time", "approval", "notify", "enabled", "keep_hours")
+# The longest a routine can be told to keep its threads for: a year.
+MAX_KEEP_HOURS = 24 * 365
 
 
 def _clean(fields: dict) -> dict:
@@ -501,7 +516,23 @@ def _clean(fields: dict) -> dict:
     for k in ("notify", "enabled"):
         if k in out:
             out[k] = 1 if out[k] else 0
+    if "keep_hours" in out:
+        try:
+            out["keep_hours"] = int(out["keep_hours"])
+        except (TypeError, ValueError):
+            raise ValueError("keep_hours is a whole number of hours (0 keeps them).")
+        if not 0 <= out["keep_hours"] <= MAX_KEEP_HOURS:
+            raise ValueError("keep_hours is between 0 (keep) and a year.")
     return out
+
+
+def describe_keep(hours: int) -> str:
+    if not hours:
+        return "kept until you delete them"
+    if hours % 24 == 0:
+        d = hours // 24
+        return f"deleted after {d} day{'s' if d != 1 else ''}"
+    return f"deleted after {hours} hour{'s' if hours != 1 else ''}"
 
 
 def routine_row(r) -> dict:
@@ -509,6 +540,7 @@ def routine_row(r) -> dict:
     d["notify"], d["enabled"] = bool(d["notify"]), bool(d["enabled"])
     d["days"] = parse_days(d["days"])
     d["schedule"] = describe_schedule(",".join(d["days"]), d["time"])
+    d["keep_hours"] = d.get("keep_hours") or 0
     return d
 
 
@@ -531,14 +563,14 @@ def _schedule_next(r: dict) -> str | None:
 
 
 async def create_routine(db, fields: dict) -> dict:
-    f = {"days": ",".join(DAYS), "time": "08:00", "approval": "ask", "notify": 1, "enabled": 1, **_clean(fields)}
+    f = {"days": ",".join(DAYS), "time": "08:00", "approval": "ask", "notify": 1, "enabled": 1, "keep_hours": 0, **_clean(fields)}
     if "name" not in f or "prompt" not in f:
         raise ValueError("A routine needs a name and what to do.")
     rid, now = uuid.uuid4().hex[:12], _now()
     await db.execute(
-        "INSERT INTO routines (id, name, prompt, days, time, approval, notify, enabled, created_at, updated_at, next_run_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        (rid, f["name"], f["prompt"], f["days"], f["time"], f["approval"], f["notify"], f["enabled"], now, now, _schedule_next(f)),
+        "INSERT INTO routines (id, name, prompt, days, time, approval, notify, enabled, keep_hours, created_at, updated_at, next_run_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (rid, f["name"], f["prompt"], f["days"], f["time"], f["approval"], f["notify"], f["enabled"], f["keep_hours"], now, now, _schedule_next(f)),
     )
     await db.commit()
     return await get_routine(db, rid)
@@ -551,11 +583,55 @@ async def update_routine(db, routine_id: str, fields: dict) -> dict | None:
         return None
     f = {**dict(row), **_clean(fields)}
     await db.execute(
-        "UPDATE routines SET name=?, prompt=?, days=?, time=?, approval=?, notify=?, enabled=?, updated_at=?, next_run_at=? WHERE id=?",
-        (f["name"], f["prompt"], f["days"], f["time"], f["approval"], f["notify"], f["enabled"], _now(), _schedule_next(f), routine_id),
+        "UPDATE routines SET name=?, prompt=?, days=?, time=?, approval=?, notify=?, enabled=?, keep_hours=?, updated_at=?, next_run_at=? WHERE id=?",
+        (f["name"], f["prompt"], f["days"], f["time"], f["approval"], f["notify"], f["enabled"], f.get("keep_hours") or 0, _now(), _schedule_next(f), routine_id),
     )
     await db.commit()
     return await get_routine(db, routine_id)
+
+
+async def delete_item(db, item_id: str) -> bool:
+    """Delete a thread for good: the item, its conversation and its
+    suggestions. Changes already approved stay (and stay undoable).
+    Raises BusyError while Atlas is still working on it."""
+    import conversations
+    async with db.execute("SELECT session_id FROM inbox_items WHERE id=?", (item_id,)) as c:
+        row = await c.fetchone()
+    if not row:
+        return False
+    if await _busy(db, row["session_id"]):
+        raise BusyError("Atlas is still working on this one.")
+    await db.execute("DELETE FROM inbox_proposals WHERE session_id=?", (row["session_id"],))
+    await conversations.delete_session(db, row["session_id"])
+    await db.execute("DELETE FROM inbox_items WHERE id=?", (item_id,))
+    await db.commit()
+    return True
+
+
+async def purge_old(db, now: datetime | None = None) -> list[str]:
+    """Delete threads from routines set to clear them up (keep_hours > 0),
+    once nothing has happened in them for that long. Threads still running,
+    or with suggestions waiting for an answer, are left alone."""
+    now = now or datetime.now(timezone.utc)
+    async with db.execute(
+        "SELECT i.id, i.updated_at, r.keep_hours FROM inbox_items i JOIN routines r ON r.id = i.routine_id "
+        "WHERE r.keep_hours > 0 AND i.status != 'running' "
+        "AND NOT EXISTS (SELECT 1 FROM inbox_proposals p WHERE p.session_id = i.session_id AND p.status = 'pending')"
+    ) as c:
+        rows = await c.fetchall()
+    gone = []
+    for r in rows:
+        try:
+            last = datetime.fromisoformat(r["updated_at"])
+        except (TypeError, ValueError):
+            continue
+        if now - last >= timedelta(hours=r["keep_hours"]):
+            try:
+                if await delete_item(db, r["id"]):
+                    gone.append(r["id"])
+            except BusyError:
+                pass
+    return gone
 
 
 async def delete_routine(db, routine_id: str) -> bool:
@@ -607,6 +683,14 @@ async def scheduler() -> None:
             await conversations.purge_now()
         except Exception:
             log.exception("Couldn't clear finished chats")
+        try:
+            db = await connect()
+            try:
+                await purge_old(db)
+            finally:
+                await db.close()
+        except Exception:
+            log.exception("Couldn't clear old inbox threads")
         await asyncio.sleep(TICK_SECONDS)
 
 
@@ -627,6 +711,9 @@ _ROUTINE_PROPS = {
                  "description": "ask (default): changes you'd make wait for the user's approval in the inbox. "
                                 "auto: make them directly (still logged and undoable)"},
     "notify": {"type": "boolean", "description": "Send a notification when it's done (default true)"},
+    "keep_hours": {"type": "integer", "description": "Delete each run's inbox thread this many hours after its last activity "
+                                                    "(e.g. 24 for a daily brief, 168 for a week). 0 (default) keeps them. "
+                                                    "Threads with suggestions still waiting are kept until answered."},
 }
 
 TOOLS = [
@@ -657,7 +744,7 @@ async def dispatch(name: str, args: dict, db) -> dict:
             return {"items": [{k: i.get(k) for k in ("id", "title", "created_at", "status", "pending", "read", "test", "preview", "routine_id")}
                               for i in out["items"]], "counts": out["counts"]}
         if name == "list_routines":
-            return {"routines": [{k: r[k] for k in ("id", "name", "prompt", "schedule", "approval", "notify", "enabled", "next_run_at")}
+            return {"routines": [{k: r[k] for k in ("id", "name", "prompt", "schedule", "approval", "notify", "enabled", "keep_hours", "next_run_at")}
                                  for r in await list_routines(db)]}
         if name == "create_routine":
             r = await create_routine(db, args)
@@ -680,7 +767,8 @@ async def dispatch(name: str, args: dict, db) -> dict:
                 card = change_card(f"Routine · {r['name']}", [
                     ("Name", b["name"], r["name"]), ("When", describe_schedule(b["days"], b["time"]), r["schedule"]),
                     ("Instruction", b["prompt"], r["prompt"]), ("Asks first", "yes" if b["approval"] == "ask" else "no", "yes" if r["approval"] == "ask" else "no"),
-                    ("On", "yes" if b["enabled"] else "no", "yes" if r["enabled"] else "no")], show)
+                    ("On", "yes" if b["enabled"] else "no", "yes" if r["enabled"] else "no"),
+                    ("Threads", describe_keep(b["keep_hours"] or 0), describe_keep(r["keep_hours"]))], show)
                 out = {"ok": True, "routine": r, "card": card}
             routine_show = {"kind": "routine", "id": args["id"]} if name == "update_routine" else show
             out["undo_id"] = await actions.record(db, name, summary, {"sql": restore_rows("routines", before)}, routine_show)

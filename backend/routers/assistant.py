@@ -215,6 +215,14 @@ async def _drive_run(run_id: str, body: bytes, auth: str) -> None:
                         # subscriber stops counting it as stalled.
                         if kind == "question":
                             await _set_status(db, run_id, "awaiting_input")
+                            # An "ask first" tool: say what it would do in words
+                            # ("Delete to-do “Renew passport”"), not as raw ids.
+                            if ev.get("kind") == "approval" and isinstance(ev.get("input"), dict):
+                                try:
+                                    import inbox
+                                    ev["summary"] = await inbox.describe(db, ev.get("tool") or "", ev["input"])
+                                except Exception:
+                                    pass
                         elif kind in ("question_answered", "question_timeout"):
                             await _set_status(db, run_id, "running")
                         if kind == "error":
@@ -335,6 +343,7 @@ async def run_body(db, run_id: str, session_id: str | None, messages: list[dict]
     else:
         mem_text = (await memory.current(db, "memory"))["content"]
         prompt_text = (await memory.current(db, "prompt"))["content"]
+    import agent_config
     # run_id goes to the agent so ask_user has an address to be answered at.
     return json.dumps({
         "messages": messages,
@@ -342,6 +351,8 @@ async def run_body(db, run_id: str, session_id: str | None, messages: list[dict]
         "memory": mem_text,
         "system_prompt": prompt_text,
         "safe_web": settings["safe_web"],
+        # The Agents page: models, prompts, skills and tool policies.
+        "agents": await agent_config.run_config(db),
         **extra,
     }).encode()
 

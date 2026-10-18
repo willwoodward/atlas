@@ -9,9 +9,13 @@ import { renderMarkdown } from '../lib/markdown.js'
 import { displayCombo } from '../lib/keybinds.js'
 import { toolLabel } from './AssistantChat.jsx'
 import { IconButton } from './ui.jsx'
+import ApprovalCard from './ApprovalCard.jsx'
 
-// How long the reply stays up after everything has gone quiet.
+// How long a one-off reply stays up after everything has gone quiet.
 const LINGER_MS = 10000
+// After a voice conversation ends (you said bye, pressed stop, or it timed
+// out), the card goes once Atlas has finished speaking: there's nothing left.
+const AFTER_END_MS = 1200
 
 const MicIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
@@ -29,7 +33,7 @@ const CheckIcon = () => <svg width="17" height="17" viewBox="0 0 24 24" fill="no
  * Changes Atlas makes still show on the page as they happen.
  */
 export default function VoiceDock({ right = 16, bottom = 16 }) {
-  const { messages, busy, queued, registerVoiceDock, chatsOnScreen } = useAssistant()
+  const { messages, busy, queued, registerVoiceDock, chatsOnScreen, answer } = useAssistant()
   const { floatingMic } = useVoiceSettings()
   const { bindings } = useKeybinds() || {}
   const speaking = useSpeaking()
@@ -56,12 +60,24 @@ export default function VoiceDock({ right = 16, bottom = 16 }) {
   // The card is up while there's something to show, then lingers a little.
   const round = since !== null
   const showing = working || (round && (busy || speaking))
+  // Whether this round was a conversation that has now ended.
+  const [ended, setEnded] = useState(false)
+  const wasConversing = useRef(false)
   useEffect(() => {
-    if (!round || showing || hover) return
+    if (conversing) { wasConversing.current = true; setEnded(false) }
+    else if (wasConversing.current) { wasConversing.current = false; setEnded(true) }
+  }, [conversing])
+  useEffect(() => { if (!round) { setEnded(false); setHover(false) } }, [round])
+  useEffect(() => {
+    if (!round || showing) return
+    // A finished conversation closes itself; a one-off reply lingers to be read
+    // (longer while the pointer is on it).
+    if (ended) { const t = setTimeout(() => setSince(null), AFTER_END_MS); return () => clearTimeout(t) }
+    if (hover) return
     const t = setTimeout(() => setSince(null), LINGER_MS)
     return () => clearTimeout(t)
-  }, [round, showing, hover])
-  const close = () => { end(); setSince(null) }
+  }, [round, showing, hover, ended])
+  const close = () => { end(); setSince(null); setHover(false) }
 
   const replies = round ? messages.slice(since).filter(m => m.role === 'assistant') : []
   const reply = replies[replies.length - 1]
@@ -73,7 +89,10 @@ export default function VoiceDock({ right = 16, bottom = 16 }) {
   if (chatsOnScreen > 0 && !round && !working) return null
 
   const lastTool = reply?.tools?.filter(t => typeof t === 'object').slice(-1)[0]
-  const atlasStatus = lastTool && !lastTool.status ? toolLabel(lastTool.name) : reply?.content ? 'Answering' : 'Thinking'
+  // A tool set to "ask first" (Agents page) is waiting for a yes. The only
+  // thing the corner shows besides speech: a change can't go ahead unseen.
+  const approval = reply?.question?.kind === 'approval' && reply.question.status === 'open' ? reply.question : null
+  const atlasStatus = approval ? 'Needs your OK' : lastTool && !lastTool.status ? toolLabel(lastTool.name) : reply?.content ? 'Answering' : 'Thinking'
   const status = fast
     ? (fast.phase === 'connecting' ? 'Connecting' : fast.phase === 'closing' ? 'Ending'
       : busy ? atlasStatus : fast.speaking ? 'Speaking' : fast.active ? 'Listening' : 'Atlas')
@@ -91,10 +110,9 @@ export default function VoiceDock({ right = 16, bottom = 16 }) {
   }
 
   return (
-    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      style={{ position: 'fixed', right, bottom, zIndex: 150, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10, pointerEvents: 'none' }}>
+    <div style={{ position: 'fixed', right, bottom, zIndex: 150, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10, pointerEvents: 'none' }}>
       {round && (
-        <div role="status" aria-live="polite" className="voice-dock-card"
+        <div role="status" aria-live="polite" className="voice-dock-card" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
           style={{ pointerEvents: 'auto', width: 'min(360px, calc(100vw - 32px))', borderRadius: 'var(--radius-lg)', background: 'var(--surface)', border: '1px solid var(--bd)', boxShadow: 'var(--shadow-pop)', overflow: 'hidden', transformOrigin: 'bottom right' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 10px 8px 14px' }}>
             <span className={listening || busy ? 'voice-dock-pulse' : undefined}
@@ -119,6 +137,7 @@ export default function VoiceDock({ right = 16, bottom = 16 }) {
                 ? <div className="md-prose" style={{ fontSize: 13.5, lineHeight: 1.55 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(reply.content) }} />
                 : reply?.error ? <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>{reply.error}</div>
                 : <div style={{ fontSize: 13, color: 'var(--faint)' }}>{busy ? 'Working on it…' : conversing ? 'Go ahead whenever you’re ready.' : '—'}</div>}
+            {approval && <ApprovalCard question={approval} runId={reply.runId} onAnswer={answer} compact />}
             {voice.error && <div style={{ marginTop: 6, fontSize: 12, color: 'var(--accent)' }}>{voice.error}</div>}
           </div>
         </div>

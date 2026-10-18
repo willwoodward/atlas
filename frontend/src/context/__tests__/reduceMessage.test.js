@@ -273,3 +273,26 @@ describe('readToolResult', () => {
     expect(out.undoId).toBe('u1')
   })
 })
+
+describe('asking first (Agents page)', () => {
+  it('an approval question carries the tool and its arguments', () => {
+    const m = fold([{ type: 'question', kind: 'approval', questionId: 'q1', question: 'Atlas wants to use delete_todo',
+                      options: ['Approve', 'Reject'], tool: 'delete_todo', input: { id: 't1' }, agent: 'Atlas' }])
+    expect(m.question).toMatchObject({ id: 'q1', kind: 'approval', tool: 'delete_todo', input: { id: 't1' }, status: 'open' })
+    const done = reduceMessage(m, { type: 'question_answered', questionId: 'q1', answer: 'Approve' })
+    expect(done.question).toMatchObject({ kind: 'approval', status: 'answered', answer: 'Approve' })
+  })
+
+  it('a plain question has no approval fields', () => {
+    const m = fold([{ type: 'question', questionId: 'q2', question: 'Which repo?' }])
+    expect(m.question.kind).toBeUndefined()
+  })
+
+  it("your own agents' steps are kept, newest last", () => {
+    const m = fold([
+      { type: 'agent_activity', agent: 'Analyst', tool: 'spending_trend', status: 'success' },
+      { type: 'agent_activity', agent: 'Analyst', tool: 'get_budgets', status: 'success' },
+    ])
+    expect(m.agentActivity.map(a => a.tool)).toEqual(['spending_trend', 'get_budgets'])
+  })
+})

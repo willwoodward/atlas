@@ -8,6 +8,7 @@ import { assistantPrompts } from '../data.js'
 import { SettingsButton, MemoryEditChip } from './AssistantMemory.jsx'
 import { KeepButton, PastChatsButton, KeepNote } from './PastChats.jsx'
 import { ToolCards, ActionUndoChip } from './ChatCards.jsx'
+import ApprovalCard from './ApprovalCard.jsx'
 import { voiceSupported } from '../hooks/useVoiceInput.js'
 import { useVoiceConversation } from '../hooks/useVoiceConversation.js'
 import { speech, useSpeaking, unlockAudio } from '../lib/speech.js'
@@ -31,7 +32,9 @@ export function ToolTrace({ tools = [], latestUndo }) {
       {tools.map((t, i) => {
         // Threads saved before tool details existed stored plain names.
         const tool = typeof t === 'string' ? { name: t } : t
-        const failed = tool.status === 'error'
+        // A tool you rejected (Agents page → ask first) was cancelled, not broken.
+        const declined = tool.status === 'error' && /said no/i.test(tool.output || '')
+        const failed = tool.status === 'error' && !declined
         const hasDetail = tool.input || tool.output
         const isOpen = open[i]
         return (
@@ -43,6 +46,7 @@ export function ToolTrace({ tools = [], latestUndo }) {
               <span style={{ width: 5, height: 5, borderRadius: '50%', background: failed ? 'var(--accent)' : 'var(--accent)', flexShrink: 0, opacity: failed ? 1 : .6 }} />
               {toolLabel(tool.name)}
               {failed && <span style={{ fontSize: 11 }}>· failed</span>}
+              {declined && <span style={{ fontSize: 11 }}>· declined</span>}
               {tool.memory && <MemoryEditChip edit={tool.memory} />}
               {tool.undoId && !tool.memory && <ActionUndoChip id={tool.undoId} isLatest={tool.undoId === latestUndo} />}
               {hasDetail && (
@@ -87,11 +91,25 @@ function CodeBlock({ label, body, tone }) {
  * Answering is optimistic-free — the agent echoes question_answered back down
  * the stream, so this shows the answered state only once it has really landed.
  */
-function QuestionPanel({ question, runId, onAnswer }) {
+/** One of your own agents at work: its latest step, and how many so far. */
+function AgentActivity({ activity }) {
+  if (!activity?.length) return null
+  const last = activity[activity.length - 1]
+  return (
+    <div style={{ margin: '6px 0', fontSize: 12.5, color: 'var(--muted)', display: 'flex', gap: 6, alignItems: 'baseline' }}>
+      <span style={{ fontWeight: 600, color: 'var(--mid)' }}>{last.agent}</span>
+      <span>{toolLabel(last.tool)}{last.status === 'error' ? ' (failed)' : ''}</span>
+      <span style={{ color: 'var(--faint)' }}>· {activity.length} step{activity.length === 1 ? '' : 's'}</span>
+    </div>
+  )
+}
+
+export function QuestionPanel({ question, runId, onAnswer }) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [failed, setFailed] = useState(null)
   if (!question) return null
+  if (question.kind === 'approval') return <ApprovalCard question={question} runId={runId} onAnswer={onAnswer} />
 
   const submit = async (value) => {
     const body = (value ?? text).trim()
@@ -537,6 +555,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
             <ToolCards tools={m.tools} onChoose={text => submit(text)} />
             <ResearchPanel research={m.research} />
             <CodingPanel coding={m.coding} />
+            <AgentActivity activity={m.agentActivity} />
             <QuestionPanel question={m.question} runId={m.runId} onAnswer={answer} />
             {m.content
               ? <div className="md-prose" style={{ fontSize: 14.5, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} />

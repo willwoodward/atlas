@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { SHORTCUTS, comboFromEvent } from '../lib/keybinds.js'
+import { ALL_SHORTCUTS, comboFromEvent } from '../lib/keybinds.js'
 
 // Holds the current bindings and listens for them. A matched shortcut is
 // announced as a window event — `atlas:shortcut` with the action id as
@@ -7,7 +7,7 @@ import { SHORTCUTS, comboFromEvent } from '../lib/keybinds.js'
 // handle it without this knowing about them.
 
 const STORE_KEY = 'atlas:keybinds'
-const defaults = () => Object.fromEntries(SHORTCUTS.map(s => [s.id, s.default]))
+const defaults = () => Object.fromEntries(ALL_SHORTCUTS.map(s => [s.id, s.default]))
 
 function load() {
   try {
@@ -40,7 +40,7 @@ export function KeybindsProvider({ children }) {
       if (capturing.current || e.repeat) return
       const combo = comboFromEvent(e)
       if (!combo) return
-      const action = Object.keys(bindings).find(id => bindings[id] === combo)
+      const action = Object.keys(bindings).find(id => bindings[id] && bindings[id] === combo)
       if (!action) return
       e.preventDefault()
       window.dispatchEvent(new CustomEvent('atlas:shortcut', { detail: action }))

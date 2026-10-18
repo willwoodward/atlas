@@ -19,6 +19,7 @@ import agent_tools
 import agent_cards
 from agent_cards import change_card, note_card
 import inbox
+import agent_config
 from agent_actions import snapshot, restore_rows, delete_rows
 from crypto import enc, dec
 from mcp.server import Server
@@ -305,6 +306,7 @@ async def list_tools() -> list[Tool]:
     tools += [t for t in agent_tools.TOOLS if MCP_TRANSACTIONS != "off" or t.name not in _TXN_TOOLS]
     tools += agent_cards.TOOLS
     tools += inbox.TOOLS
+    tools += agent_config.TOOLS
     return tools
 
 
@@ -323,10 +325,14 @@ async def run_tool(name: str, args: dict, db):
     can follow along as the assistant works."""
     # A background run set to "ask": changes wait in the inbox for approval.
     ctx = inbox.RUN_CONTEXT.get()
-    if ctx and ctx.get("approval") == "ask" and name in inbox.WRITE_TOOLS:
+    if ctx and name in ctx.get("off", ()):
+        return {"error": f"{name} is switched off for this agent (Agents page)."}
+    if ctx and ((ctx.get("approval") == "ask" and name in inbox.WRITE_TOOLS) or name in ctx.get("ask", ())):
         return await inbox.propose(db, name, args, ctx)
     if name in inbox.NAMES:
         result = await inbox.dispatch(name, args, db)
+    elif name in agent_config.NAMES:
+        result = await agent_config.dispatch(name, args, db)
     else:
         result = await _dispatch(name, args, db)
     if isinstance(result, dict) and result.get("undo_id") and "show" not in result:
@@ -840,7 +846,11 @@ async def handle_sse(request: Request) -> Response:
     # approval (see inbox.py). Tool calls on the connection inherit this.
     run_id = request.headers.get("x-atlas-run")
     if run_id:
-        inbox.RUN_CONTEXT.set({"run_id": run_id, "approval": request.headers.get("x-atlas-approval", "auto")})
+        # The agent's tool policies (Agents page): "ask" tools become suggestions
+        # in a background run, "off" ones are refused.
+        listed = lambda h: {t for t in request.headers.get(h, "").split(",") if t}
+        inbox.RUN_CONTEXT.set({"run_id": run_id, "approval": request.headers.get("x-atlas-approval", "auto"),
+                               "ask": listed("x-atlas-ask"), "off": listed("x-atlas-off")})
     async with sse_transport.connect_sse(request.scope, request.receive, request._send) as streams:
         await server.run(streams[0], streams[1], server.create_initialization_options())
     return Response()

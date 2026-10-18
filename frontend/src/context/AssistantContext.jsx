@@ -1,3 +1,4 @@
+import { approvalTitle } from '../components/ApprovalCard.jsx'
 import { createContext, useContext, useState, useRef, useEffect, useCallback } from 'react'
 import { useAuth } from './AuthContext.jsx'
 import { useRefresh } from './RefreshContext.jsx'
@@ -65,6 +66,14 @@ export function memoryEdit(name, output) {
  * implementation — a divergence between them would show as detail that looks
  * different after a reload than it did live.
  */
+/** A question as said aloud. An approval asks for an OK on screen. */
+function spokenQuestion(ev) {
+  if (ev.kind !== 'approval') return ev.question
+  if (ev.summary) return `I need your OK to ${ev.summary.replace(/^./, c => c.toLowerCase())}. Approve or reject it on screen.`
+  const what = approvalTitle({ tool: ev.tool }).replace(/^./, c => c.toLowerCase())
+  return `I need your OK before ${what}. Approve or reject it on screen.`
+}
+
 export function reduceMessage(msg, ev) {
   switch (ev.type) {
     case 'token':
@@ -83,8 +92,13 @@ export function reduceMessage(msg, ev) {
     case 'question':
       return {
         ...msg,
-        question: { id: ev.questionId, text: ev.question, options: ev.options || [], status: 'open' },
+        question: { id: ev.questionId, text: ev.question, options: ev.options || [], status: 'open',
+                    // An "ask first" tool (Agents page): drawn as an approve card.
+                    ...(ev.kind === 'approval' && { kind: 'approval', tool: ev.tool, input: ev.input || {}, agent: ev.agent, summary: ev.summary }) },
       }
+    case 'agent_activity':
+      // One of the user's own agents at work (Atlas handed it a task).
+      return { ...msg, agentActivity: [...(msg.agentActivity || []), { agent: ev.agent, tool: ev.tool, status: ev.status }].slice(-20) }
     case 'question_answered':
       return msg.question?.id === ev.questionId
         ? { ...msg, question: { ...msg.question, status: 'answered', answer: ev.answer } }
@@ -323,9 +337,9 @@ export function AssistantProvider({ children }) {
             if (ev.type === 'token') liveText += ev.text
             if (ev.type === 'tool') live.onTool?.(ev.name)
             if (ev.type === 'error') liveError = ev.message
-            if (ev.type === 'question') liveText += (liveText ? '\n\n' : '') + ev.question
+            if (ev.type === 'question') liveText += (liveText ? '\n\n' : '') + spokenQuestion(ev)
           }
-          if (speak && ev.type === 'question') { speech.end(runId); speech.say(ev.question) }
+          if (speak && ev.type === 'question') { speech.end(runId); speech.say(spokenQuestion(ev)) }
           if (ev.type === 'error') { setError(ev.message); continue }
           if (ev.type === 'tool' && MUTATING_TOOLS.has(ev.name)) { touchedData = true; writes.add(ev.toolUseId) }
           // Show each change as soon as it lands, not only when the reply ends.

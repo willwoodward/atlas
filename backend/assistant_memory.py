@@ -24,6 +24,14 @@ MAX_CHARS = 20_000
 SOURCES = ("user", "assistant", "restore")
 DEFAULTS = {"memory": "", "prompt": DEFAULT_PROMPT}
 KINDS = tuple(DEFAULTS)
+# The same versioned store also holds the Agents page's documents: another
+# agent's prompt ("agent:<id>", empty = its built-in prompt) and skills
+# ("skill:<id>", a SKILL.md). See agent_config.py.
+PREFIXES = ("agent:", "skill:")
+
+
+def default_of(kind: str) -> str:
+    return DEFAULTS.get(kind, "")
 
 
 class MemoryEditError(ValueError):
@@ -35,7 +43,7 @@ def _now() -> str:
 
 
 def _check_kind(kind: str) -> None:
-    if kind not in DEFAULTS:
+    if kind not in DEFAULTS and not (kind.startswith(PREFIXES) and len(kind) > 6):
         raise MemoryEditError(f"Unknown document {kind!r}")
 
 
@@ -52,16 +60,16 @@ async def current(db, kind: str = "memory") -> dict:
     ) as c:
         row = await c.fetchone()
     if not row:
-        return {"version": None, "content": DEFAULTS[kind], "created_at": None, "source": None}
+        return {"version": None, "content": default_of(kind), "created_at": None, "source": None}
     return _row(row)
 
 
 async def content_at(db, kind: str, number: int | None) -> str:
     """The text of a version; None or 0 means the default."""
     if not number:
-        return DEFAULTS[kind]
+        return default_of(kind)
     v = await version(db, number, kind)
-    return v["content"] if v else DEFAULTS[kind]
+    return v["content"] if v else default_of(kind)
 
 
 async def save(db, content: str, source: str, kind: str = "memory") -> dict:
@@ -125,7 +133,7 @@ async def restore(db, number: int, kind: str = "memory") -> dict:
     """
     _check_kind(kind)
     if number == 0:
-        return await save(db, DEFAULTS[kind], "restore", kind)
+        return await save(db, default_of(kind), "restore", kind)
     old = await version(db, number, kind)
     if not old:
         raise MemoryEditError(f"No {kind} version {number}.")

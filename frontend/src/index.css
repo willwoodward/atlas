@@ -210,6 +210,10 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 /* Chat cards: rows and slots you can tap. */
 .card-row { transition: background .12s; }
 .card-row:hover { background: var(--surface-2); }
+/* Sidebar items */
+.nav-btn { background: transparent; color: var(--mid); }
+.nav-btn:not([aria-current]):hover, .nav-btn:not([aria-current]):focus-visible { background: var(--bd-xs); color: var(--ink); }
+.nav-btn:active { transform: scale(.985); }
 .card-slot { transition: filter .12s; }
 .card-slot:not(:disabled):hover { filter: brightness(.94); }
 

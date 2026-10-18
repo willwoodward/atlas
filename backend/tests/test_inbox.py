@@ -422,3 +422,56 @@ class TestDelete:
         for t in assistant._tasks.values():
             t.cancel()
         assistant._tasks.clear()
+
+
+class TestAutoDelete:
+    """A routine can clear up its own threads: keep_hours after their last activity."""
+
+    async def test_keep_hours_is_saved_and_checked(self, client, auth):
+        r = await _routine(client, auth, keep_hours=24)
+        assert r["keep_hours"] == 24
+        assert (await _routine(client, auth))["keep_hours"] == 0   # default: keep
+        upd = (await client.put(f"/inbox/routines/{r['id']}", json={"keep_hours": 0}, headers=auth)).json()
+        assert upd["keep_hours"] == 0
+        bad = await client.put(f"/inbox/routines/{r['id']}", json={"keep_hours": -1}, headers=auth)
+        assert bad.status_code == 422
+        assert inbox.describe_keep(0) == "kept until you delete them"
+        assert inbox.describe_keep(24) == "deleted after 1 day" and inbox.describe_keep(168) == "deleted after 7 days"
+        assert inbox.describe_keep(12) == "deleted after 12 hours"
+
+    async def _run(self, client, auth, **kw):
+        r = await _routine(client, auth, **kw)
+        item = (await client.post(f"/inbox/routines/{r['id']}/run", headers=auth)).json()
+        await _settle()
+        return r, item
+
+    async def test_old_threads_go_once_their_time_is_up(self, client, auth, agent):
+        from datetime import timedelta
+        _, short = await self._run(client, auth, keep_hours=24)
+        _, kept = await self._run(client, auth, name="Keeper")
+        db = await inbox.connect()
+        try:
+            assert await inbox.purge_old(db) == []   # not a day old yet
+            later = datetime.now(timezone.utc) + timedelta(hours=25)
+            assert await inbox.purge_old(db, later) == [short["id"]]
+        finally:
+            await db.close()
+        ids = [i["id"] for i in (await client.get("/inbox", headers=auth)).json()["items"]]
+        assert ids == [kept["id"]]
+        # Its conversation went with it.
+        assert (await client.get(f"/inbox/{short['id']}", headers=auth)).status_code == 404
+
+    async def test_threads_waiting_for_an_answer_are_kept(self, client, auth, agent):
+        from datetime import timedelta
+        agent.tools = [("add_todo", {"text": "Renew passport", "bucket": "Today"})]
+        _, item = await self._run(client, auth, keep_hours=1)
+        view = (await client.get(f"/inbox/{item['id']}", headers=auth)).json()
+        assert [p["status"] for p in view["proposals"]] == ["pending"]
+        db = await inbox.connect()
+        try:
+            later = datetime.now(timezone.utc) + timedelta(hours=5)
+            assert await inbox.purge_old(db, later) == []
+            await inbox.decide(db, view["proposals"][0]["id"], False)
+            assert await inbox.purge_old(db, later) == [item["id"]]
+        finally:
+            await db.close()

@@ -11,6 +11,16 @@ export const SHORTCUTS = [
   { id: 'sidebar', label: 'Collapse / expand the sidebar', hint: 'Desktop', default: 'Mod+B' },
 ]
 
+// Jump to a page in the sidebar: Ctrl+1 to Ctrl+9 in sidebar order, Ctrl+0
+// for the Assistant. Their ids are "go:<page>"; the layout handles them.
+export const PAGE_SHORTCUTS = [
+  ['home', 'Home'], ['calendar', 'Calendar'], ['habits', 'Habits'], ['todos', 'To-do'], ['goals', 'Goals'],
+  ['notes', 'Notes'], ['finances', 'Finances'], ['fitness', 'Fitness'], ['inbox', 'Inbox'], ['assistant', 'Assistant'],
+  ['agents', 'Agents'],
+].map(([page, label], i) => ({ id: `go:${page}`, page, label: `Go to ${label}`, group: 'Pages', default: i < 9 ? `Mod+${i + 1}` : i === 9 ? 'Mod+0' : '' }))
+
+export const ALL_SHORTCUTS = [...SHORTCUTS, ...PAGE_SHORTCUTS]
+
 export const isMac = () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '')
 
 // Physical key → the character it names, so Shift doesn't turn "." into ">".

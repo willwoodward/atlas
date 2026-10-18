@@ -35,6 +35,7 @@ from strands.agent.conversation_manager import (
 from strands.models.openai_responses import OpenAIResponsesModel
 
 import workspace
+import agent_settings as agents_cfg
 from progress import emit as _emit
 from questions import ask_user
 from sandbox_client import build_sandbox
@@ -269,23 +270,17 @@ def _pr_title(subjects: list[str], task: str) -> str:
 
 
 def _coder_model() -> OpenAIResponsesModel:
-    client_args = {"api_key": os.environ["OPENAI_API_KEY"]}
-    if os.getenv("OPENAI_BASE_URL"):
-        client_args["base_url"] = os.environ["OPENAI_BASE_URL"]
-    return OpenAIResponsesModel(
-        client_args=client_args,
-        model_id=os.getenv("AGENT_MODEL_ID", "gpt-6-luna"),
-        params={
-            # Coding is where thinking time is worth paying for: the failures
-            # here have been reasoning failures, not knowledge ones — a change
-            # that compiles and passes tests while quietly breaking a layout.
-            # Verified accepted by the endpoint alongside "xhigh" and "high";
-            # override if a future model rejects it.
-            "reasoning": {"effort": os.getenv("AGENT_REASONING_EFFORT", "max")},
-            # Reasoning tokens are billed against this budget, so raising effort
-            # without raising the ceiling just buys truncation mid-task.
-            "max_output_tokens": int(os.getenv("CODING_MAX_TOKENS", "32768")),
-        },
+    return agents_cfg.build_model(
+        agents_cfg.settings("coder"),
+        # Coding is where thinking time is worth paying for: the failures
+        # here have been reasoning failures, not knowledge ones — a change
+        # that compiles and passes tests while quietly breaking a layout.
+        # Verified accepted by the endpoint alongside "xhigh" and "high";
+        # override if a future model rejects it.
+        effort=os.getenv("AGENT_REASONING_EFFORT", "max"),
+        # Reasoning tokens are billed against this budget, so raising effort
+        # without raising the ceiling just buys truncation mid-task.
+        max_tokens=int(os.getenv("CODING_MAX_TOKENS", "32768")),
     )
 
 
@@ -415,18 +410,22 @@ async def delegate_coding(repo: str, task: str, context: str = "", pr_number: in
             )
 
         sandbox = build_sandbox(working_dir=path)
+        cfg = agents_cfg.settings("coder")
+        # The Agents page may have its own prompt and tool choices for the coder.
+        prompt = agents_cfg.fill((cfg.get("prompt") or "").strip() or CODER_PROMPT, {
+            "repo": repo, "branch": branch, "path": path, "task": task,
+            "scratch": workspace.SCRATCH_DIR, "mode_note": mode_note,
+            "context": "\n\n".join(filter(None, [
+                f"Context you were given:\n{context}" if context else "",
+                feedback_block,
+            ])),
+        }, required=("repo", "branch", "path", "task", "mode_note", "context"))
+        tools = agents_cfg.allowed([*sandbox.get_tools(), _commit_tool(repo), ask_user], cfg)
+        prompt, tools = agents_cfg.with_skills(prompt, tools, cfg)
         agent = Agent(
             model=_coder_model(),
-            system_prompt=CODER_PROMPT.format(
-                repo=repo, branch=branch, path=path, task=task,
-                scratch=workspace.SCRATCH_DIR,
-                mode_note=mode_note,
-                context="\n\n".join(filter(None, [
-                    f"Context you were given:\n{context}" if context else "",
-                    feedback_block,
-                ])),
-            ),
-            tools=[*sandbox.get_tools(), _commit_tool(repo), ask_user],
+            system_prompt=prompt,
+            tools=tools,
             conversation_manager=SlidingWindowConversationManager(
                 window_size=CONTEXT_WINDOW_MESSAGES,
                 should_truncate_results=True,

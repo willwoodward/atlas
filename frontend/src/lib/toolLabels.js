@@ -1,5 +1,16 @@
 // MCP tool name → what to show while it runs
 const TOOL_LABELS = {
+  list_agents: 'Checking your agents',
+  read_agent: 'Reading an agent',
+  create_agent: 'Making an agent',
+  update_agent: 'Changing an agent',
+  delete_agent: 'Deleting an agent',
+  list_skills: 'Checking skills',
+  read_skill: 'Reading a skill',
+  write_skill: 'Writing a skill',
+  delete_skill: 'Deleting a skill',
+  load_skill: 'Loading a skill',
+  ask_agent: 'Handing it to an agent',
   list_routines: 'Checking your routines',
   create_routine: 'Setting up a routine',
   update_routine: 'Changing a routine',

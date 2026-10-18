@@ -420,6 +420,30 @@ async def init_db():
                 PRIMARY KEY (date, key)
             );
 
+            -- The Agents page (agent_config.py). Prompts and skill texts are
+            -- versioned in assistant_memory; these hold the rest.
+            CREATE TABLE IF NOT EXISTS agents (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                builtin INTEGER NOT NULL DEFAULT 0,
+                model TEXT NOT NULL DEFAULT '',          -- '' = the server's default
+                reasoning TEXT NOT NULL DEFAULT '',      -- '' = the agent's default
+                tools TEXT NOT NULL DEFAULT '{}',        -- JSON {tool: on|ask|off}
+                skills TEXT NOT NULL DEFAULT '[]',       -- JSON [skill id]
+                engine TEXT NOT NULL DEFAULT 'strands',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS skills (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             -- Browsers to send notifications to (Web Push).
             CREATE TABLE IF NOT EXISTS push_subscriptions (
                 endpoint TEXT PRIMARY KEY,
@@ -446,6 +470,9 @@ async def init_db():
             "ALTER TABLE agent_sessions ADD COLUMN kept INTEGER NOT NULL DEFAULT 0",
             # A routine's test run: suggestions only, no notification.
             "ALTER TABLE inbox_items ADD COLUMN test INTEGER NOT NULL DEFAULT 0",
+            # Delete a routine's threads this many hours after their last
+            # activity. 0: keep them until you delete them (inbox.purge_old).
+            "ALTER TABLE routines ADD COLUMN keep_hours INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE agent_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'",
             "ALTER TABLE todos ADD COLUMN parent_id TEXT",
             "ALTER TABLE todos ADD COLUMN completed_at TEXT",

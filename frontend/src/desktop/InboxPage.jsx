@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useRefresh } from '../context/RefreshContext.jsx'
 import { useInbox, inboxFetch, API } from '../context/InboxContext.jsx'
-import { reduceMessage } from '../context/AssistantContext.jsx'
+import { reduceMessage, useAssistant } from '../context/AssistantContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { useFocusRequest } from '../lib/focus.js'
 import { renderMarkdown } from '../lib/markdown.js'
-import { ToolTrace } from '../components/AssistantChat.jsx'
+import { ToolTrace, QuestionPanel } from '../components/AssistantChat.jsx'
 import { ToolCards, ActionUndoChip } from '../components/ChatCards.jsx'
 import RoutinesSheet from '../components/RoutinesSheet.jsx'
 import { Button, IconButton, BinButton, Input, Textarea, Switch, PageHeader, eyebrow } from '../components/ui.jsx'
@@ -190,6 +190,7 @@ function Detail({ id, onBack, onChanged, isMobile, onRunAgain, onDelete }) {
   const [item, setItem] = useState(null)
   const [detail, setDetail] = useState({})   // runId → { tools, research }
   const [live, setLive] = useState(null)     // the turn being written now
+  const { answer } = useAssistant()
   const [reply, setReply] = useState('')
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState(null)
@@ -331,6 +332,8 @@ function Detail({ id, onBack, onChanged, isMobile, onRunAgain, onDelete }) {
             <div key={i} style={{ marginBottom: 16 }}>
               <ToolTrace tools={d.tools || []} />
               <ToolCards tools={d.tools || []} onChoose={busy ? null : sendText} />
+              {/* Replying here is like a chat: Atlas can stop to ask, or to get an OK for an "ask first" tool. */}
+              <QuestionPanel question={d.question} runId={m.runId} onAnswer={answer} />
               {content
                 ? <div className="md-prose" style={{ fontSize: 14.5, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} />
                 : m.error ? <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>{m.error}</div>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { comboFromEvent, validCombo, displayCombo } from '../keybinds.js'
+import { comboFromEvent, validCombo, displayCombo, PAGE_SHORTCUTS, ALL_SHORTCUTS, SHORTCUTS } from '../keybinds.js'
 
 const key = (code, key, mods = {}) => ({ code, key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods })
 
@@ -32,5 +32,20 @@ describe('displayCombo', () => {
     expect(displayCombo('Mod+Shift+K', false)).toBe('Ctrl+Shift+K')
     expect(displayCombo('Mod+Shift+K', true)).toBe('⌘⇧K')
     expect(displayCombo('', false)).toBe('—')
+  })
+})
+
+describe('page shortcuts', () => {
+  it('Ctrl+1 to Ctrl+9 go down the sidebar, Ctrl+0 is the Assistant', () => {
+    const by = Object.fromEntries(PAGE_SHORTCUTS.map(s => [s.page, s.default]))
+    expect(by.home).toBe('Mod+1')
+    expect(by.inbox).toBe('Mod+9')
+    expect(by.assistant).toBe('Mod+0')
+    expect(by.agents).toBe('')   // no number left; set one in Settings
+  })
+  it('no two shortcuts share a default', () => {
+    const used = ALL_SHORTCUTS.map(s => s.default).filter(Boolean)
+    expect(new Set(used).size).toBe(used.length)
+    expect(ALL_SHORTCUTS.length).toBe(SHORTCUTS.length + PAGE_SHORTCUTS.length)
   })
 })
