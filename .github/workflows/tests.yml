@@ -28,10 +28,14 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
         working-directory: frontend
+      # The build doesn't notice a name that was never imported (that only
+      # fails when the screen using it opens), so the linter checks for it.
+      - run: npm run lint
+        working-directory: frontend
       - run: npm test
         working-directory: frontend
       # The build is a test in its own right here: vitest runs the reducers, but
-      # only a build type-checks the JSX across every file the agent touched.
+      # only a build compiles every file the agent touched.
       - run: npm run build
         working-directory: frontend
         env:

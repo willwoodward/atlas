@@ -444,6 +444,14 @@ async def init_db():
                 updated_at TEXT NOT NULL
             );
 
+            -- What event triggers have already seen (triggers.py): the calendar
+            -- as last checked, budgets already reported this month.
+            CREATE TABLE IF NOT EXISTS trigger_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             -- Browsers to send notifications to (Web Push).
             CREATE TABLE IF NOT EXISTS push_subscriptions (
                 endpoint TEXT PRIMARY KEY,
@@ -478,6 +486,9 @@ async def init_db():
             "ALTER TABLE routines ADD COLUMN agent_id TEXT",
             "ALTER TABLE agent_sessions ADD COLUMN agent_id TEXT",
             "ALTER TABLE agents ADD COLUMN subagents TEXT",
+            # What sets a routine off: its schedule, or an event (triggers.py).
+            "ALTER TABLE routines ADD COLUMN trigger TEXT NOT NULL DEFAULT 'schedule'",
+            "ALTER TABLE routines ADD COLUMN trigger_config TEXT",
             "ALTER TABLE agent_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat'",
             "ALTER TABLE todos ADD COLUMN parent_id TEXT",
             "ALTER TABLE todos ADD COLUMN completed_at TEXT",

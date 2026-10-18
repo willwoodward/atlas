@@ -14,15 +14,31 @@ const DAY_NAMES = { mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thurs
 
 // Starting points. Instructions only — what Atlas looks at is your own data.
 const STARTERS = [
-  { name: 'Morning plan', days: ['mon', 'tue', 'wed', 'thu', 'fri'], time: '07:30',
+  { name: 'Morning plan', trigger: 'schedule', trigger_config: {}, days: ['mon', 'tue', 'wed', 'thu', 'fri'], time: '07:30',
     prompt: 'Look at today: my calendar, to-dos for today and this week, and habits. Give me a short plan for the day — what matters most, where the free time is, and anything I should prepare. Suggest moving or adding to-dos where it would help.' },
-  { name: 'Weekly money check', days: ['sun'], time: '18:00',
+  { name: 'Weekly money check', trigger: 'schedule', trigger_config: {}, days: ['sun'], time: '18:00',
     prompt: 'Review my spending for the last 7 days against the week before and my budgets. Point out anything unusual or over budget, and tidy up uncategorised transactions.' },
-  { name: 'Week ahead', days: ['sun'], time: '19:00',
+  { name: 'Budget alert', trigger: 'budget', trigger_config: { percent: 80 },
+    prompt: 'A budget has passed its line. Show where the money went this month as cards, what is driving it, and one or two realistic ways to stay within it for the rest of the month.' },
+  { name: 'After an import', trigger: 'bank_import', trigger_config: {},
+    prompt: 'New transactions have come in. Categorise any without a category, flag anything unusual or that looks like a duplicate, and sum it up in two lines.' },
+  { name: 'Calendar changes', trigger: 'calendar', trigger_config: { days: 2 },
+    prompt: 'My calendar just changed. Check the next two days for clashes, tight gaps and travel time, say what I need to prepare, and suggest adjustments.' },
+  { name: 'Week ahead', trigger: 'schedule', trigger_config: {}, days: ['sun'], time: '19:00',
     prompt: 'Look at next week: calendar, to-dos and this week’s outcomes. Tell me what the week looks like, flag clashes or overloaded days, and suggest outcomes for the week if I haven’t set them.' },
 ]
 
-const EMPTY = { name: '', prompt: '', days: DAYS.map(d => d[0]), time: '08:00', approval: 'ask', notify: true, enabled: true, keep_hours: 0, agent_id: 'atlas' }
+// What sets a routine off (backend/triggers.py).
+const TRIGGERS = [['schedule', 'On a schedule'], ['bank_import', 'After a bank import'],
+                  ['budget', 'When a budget passes a line'], ['calendar', 'When my calendar changes']]
+const TRIGGER_DEFAULTS = { budget: { percent: 80 }, calendar: { days: 2 } }
+const TRIGGER_HINTS = {
+  bank_import: 'Runs after each import that brings in new transactions, and is told how many and from where.',
+  budget: 'Runs once per budget per month when its spending passes the line. Checked hourly and after imports.',
+  calendar: 'Runs when something in those days is added, moved or removed (checked every 30 minutes, at most once every 2 hours), and is told what changed.',
+}
+
+const EMPTY = { name: '', prompt: '', days: DAYS.map(d => d[0]), time: '08:00', approval: 'ask', notify: true, enabled: true, keep_hours: 0, agent_id: 'atlas', trigger: 'schedule', trigger_config: {} }
 
 // How long a routine's threads stay in the inbox. Counted from their last
 // activity; threads with suggestions waiting stay until answered.
@@ -69,6 +85,7 @@ function Notifications() {
 function Editor({ initial, onSave, onCancel, onDelete, onTest }) {
   const [f, setF] = useState(initial)
   const agents = useChatAgents()   // Atlas and your agents (Agents page)
+  const trigger = f.trigger || 'schedule'
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
   const set = patch => setF(x => ({ ...x, ...patch }))
@@ -102,7 +119,31 @@ function Editor({ initial, onSave, onCancel, onDelete, onTest }) {
         <Textarea value={f.prompt} onChange={e => set({ prompt: e.target.value })} rows={5} style={{ width: '100%', fontSize: 13.5 }}
           placeholder="Written as an instruction. Atlas starts fresh each time, so include everything it needs." />
       </label>
-      <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <label style={{ flex: '1 1 220px' }}><span style={label}>When</span>
+          <Select value={trigger} onChange={e => set({ trigger: e.target.value, trigger_config: TRIGGER_DEFAULTS[e.target.value] || {} })} aria-label="When it runs" style={{ width: '100%' }}>
+            {TRIGGERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </Select>
+        </label>
+        {trigger === 'budget' && (
+          <label><span style={label}>Past</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Input type="number" min={10} max={300} step={5} value={f.trigger_config?.percent ?? 80} aria-label="Budget share, percent"
+                onChange={e => set({ trigger_config: { percent: Number(e.target.value) } })} style={{ width: 80 }} />
+              <span style={{ fontSize: 13, color: 'var(--mid)' }}>% of a budget</span>
+            </span>
+          </label>
+        )}
+        {trigger === 'calendar' && (
+          <label><span style={label}>Looking ahead</span>
+            <Select value={f.trigger_config?.days ?? 2} onChange={e => set({ trigger_config: { days: Number(e.target.value) } })} aria-label="Days of calendar to watch" style={{ width: 130 }}>
+              {[1, 2, 3, 7, 14].map(d => <option key={d} value={d}>{d === 1 ? 'Today' : `${d} days`}</option>)}
+            </Select>
+          </label>
+        )}
+      </div>
+      {trigger !== 'schedule' && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: -8 }}>{TRIGGER_HINTS[trigger]}</div>}
+      {trigger === 'schedule' && <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <div>
           <span style={label}>Days</span>
           <div style={{ display: 'flex', gap: 4 }}>
@@ -119,7 +160,7 @@ function Editor({ initial, onSave, onCancel, onDelete, onTest }) {
         <label><span style={label}>Time</span>
           <Input type="time" value={f.time} onChange={e => set({ time: e.target.value })} style={{ width: 120 }} />
         </label>
-      </div>
+      </div>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ flex: 1 }}>
@@ -148,7 +189,7 @@ function Editor({ initial, onSave, onCancel, onDelete, onTest }) {
         {onTest && <Button variant="ghost" size="sm" onClick={onTest} title="Runs the saved version now: nothing changes unless you approve it, and no notification">Test run</Button>}
         <span style={{ flex: 1 }} />
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-        <Button variant="primary" onClick={save} disabled={busy || !f.name.trim() || !f.prompt.trim() || !f.days.length}>{initial.id ? 'Save' : 'Create routine'}</Button>
+        <Button variant="primary" onClick={save} disabled={busy || !f.name.trim() || !f.prompt.trim() || (trigger === 'schedule' && !f.days.length)}>{initial.id ? 'Save' : 'Create routine'}</Button>
       </div>
     </div>
   )
@@ -167,7 +208,8 @@ export default function RoutinesSheet({ onClose, onRan, openId = null }) {
   useEffect(() => { load().then(list => { const r = openId && list?.find(x => x.id === openId); if (r) setEditing({ ...r }) }) }, []) // eslint-disable-line
 
   const save = async f => {
-    const body = { name: f.name, prompt: f.prompt, days: f.days, time: f.time, approval: f.approval, notify: f.notify, keep_hours: f.keep_hours || 0, agent_id: f.agent_id || 'atlas' }
+    const body = { name: f.name, prompt: f.prompt, days: f.days, time: f.time, approval: f.approval, notify: f.notify, keep_hours: f.keep_hours || 0, agent_id: f.agent_id || 'atlas',
+                   trigger: f.trigger || 'schedule', trigger_config: f.trigger_config || {} }
     if (f.id) await inboxFetch(token, `/routines/${f.id}`, { method: 'PUT', body })
     else await inboxFetch(token, '/routines', { method: 'POST', body })
     setEditing(null); load()
@@ -207,7 +249,7 @@ export default function RoutinesSheet({ onClose, onRan, openId = null }) {
                   <button onClick={() => setEditing({ ...r })} style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{r.name}</div>
                     <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                      {agentName(r.agent_id) ? `${agentName(r.agent_id)} · ` : ''}{r.schedule} · {r.approval === 'ask' ? 'asks first' : 'acts itself'} ·{keepLabel(r.keep_hours) ? ` clears after ${keepLabel(r.keep_hours)} ·` : ''} {r.enabled ? nextLabel(r.next_run_at) : 'Paused'}
+                      {agentName(r.agent_id) ? `${agentName(r.agent_id)} · ` : ''}{r.schedule} · {r.approval === 'ask' ? 'asks first' : 'acts itself'} ·{keepLabel(r.keep_hours) ? ` clears after ${keepLabel(r.keep_hours)} ·` : ''} {r.enabled ? (r.trigger && r.trigger !== 'schedule' ? 'Watching' : nextLabel(r.next_run_at)) : 'Paused'}
                     </div>
                   </button>
                   <Button size="sm" variant="ghost" onClick={() => runNow(r, true)} title="See what it would do: nothing changes unless you approve it, and no notification">Test run</Button>

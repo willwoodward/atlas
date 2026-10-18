@@ -310,13 +310,24 @@ function Detail({ id, onBack, onChanged, isMobile, onRunAgain, onDelete }) {
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '14px 16px' : '18px 4px' }}>
-        {first && (
-          <button onClick={() => setShowPrompt(s => !s)}
-            style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 16, padding: '8px 12px', borderRadius: 'var(--radius)', border: '1px dashed var(--bd-xl)', background: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, color: 'var(--muted)' }}>
-            <span style={{ fontWeight: 600 }}>{item.routine_id ? 'Instruction' : 'You asked'}: </span>
-            <span style={showPrompt ? { whiteSpace: 'pre-wrap' } : { display: 'inline' }}>{showPrompt || first.content.length < 90 ? first.content : first.content.slice(0, 90) + '…'}</span>
-          </button>
-        )}
+        {first && (() => {
+          // A routine set off by an event says what happened after its instruction (backend/triggers.py).
+          const [instruction, event] = first.content.split('\n\nWhat set this off: ')
+          return (
+            <>
+              {event && (
+                <div style={{ marginBottom: 8, padding: '8px 12px', borderRadius: 'var(--radius)', background: 'var(--accent-soft)', fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--accent)' }}>What set it off: </span>{event}
+                </div>
+              )}
+              <button onClick={() => setShowPrompt(s => !s)}
+                style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 16, padding: '8px 12px', borderRadius: 'var(--radius)', border: '1px dashed var(--bd-xl)', background: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, color: 'var(--muted)' }}>
+                <span style={{ fontWeight: 600 }}>{item.routine_id ? 'Instruction' : 'You asked'}: </span>
+                <span style={showPrompt ? { whiteSpace: 'pre-wrap' } : { display: 'inline' }}>{showPrompt || instruction.length < 90 ? instruction : instruction.slice(0, 90) + '…'}</span>
+              </button>
+            </>
+          )
+        })()}
         {rest.map((m, i) => {
           if (m.role === 'user') {
             return (

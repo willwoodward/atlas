@@ -134,7 +134,7 @@ function GitHubCard() {
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 function MigrationCard() {
-  const { token, user, logout } = useAuth()
+  const { token } = useAuth()
   const [status, setStatus] = useState(null) // null | 'running' | 'done' | 'error'
   const [progress, setProgress] = useState([])
 

@@ -12,6 +12,9 @@ import finance_insights
 import finance_classify
 import fx
 
+import logging
+log = logging.getLogger("atlas.finances")
+
 router = APIRouter(prefix="/api/finances", tags=["finances"])
 
 
@@ -550,6 +553,13 @@ async def import_commit(body: ImportCommitIn, user=Depends(get_current_user), db
         except finance_classify.ClassifyError as exc:
             # The import itself has succeeded; categorising can be retried.
             auto["auto_error"] = str(exc)
+    # Routines set off by an import (or a budget it tips over) start now.
+    try:
+        import triggers
+        dates = [r.date for r in body.rows]
+        await triggers.after_import(db, account["name"], inserted, dates, auto["auto_categorised"])
+    except Exception:
+        log.exception("Import triggers failed")
     return {"inserted": inserted, "skipped": skipped,
             "balance_updated": closing if plan["will_update"] else None,
             "balance_reason": plan["reason"], **auto}

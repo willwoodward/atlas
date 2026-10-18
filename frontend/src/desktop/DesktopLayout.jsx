@@ -330,7 +330,7 @@ export default function DesktopLayout() {
             onMouseEnter={() => setUserHover(true)}
             onMouseLeave={() => setUserHover(false)}
             title={collapsed ? profile.name || 'Your profile' : undefined}
-            style={{ display: 'flex', alignItems: 'center', gap: 11, background: showAccountModal || userHover ? 'var(--surface-3)' : 'transparent', border: 'none', cursor: 'pointer', padding: collapsed ? '7px 6px' : '7px 8px', transition: `padding ${SLIDE}, background .12s`, borderRadius: 10, width: '100%', textAlign: 'left', fontFamily: 'inherit', transition: 'background .12s' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 11, background: showAccountModal || userHover ? 'var(--surface-3)' : 'transparent', border: 'none', cursor: 'pointer', padding: collapsed ? '7px 6px' : '7px 8px', transition: `padding ${SLIDE}, background .12s`, borderRadius: 10, width: '100%', textAlign: 'left', fontFamily: 'inherit' }}
           >
             <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,#c88a5f,#9a6d84)', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 14 }}>
               {initial}

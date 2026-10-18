@@ -108,11 +108,14 @@ async def _gcal_token(db) -> str | None:
     return token
 
 
-async def _gcal_events(db, day_from: _date, day_to: _date) -> list[dict]:
-    """Fetch GCal events for an inclusive local-time date range. [] if unavailable."""
+async def _gcal_events(db, day_from: _date, day_to: _date, strict: bool = False) -> list[dict] | None:
+    """Fetch GCal events for an inclusive local-time date range. [] if
+    unavailable, or None with strict=True (so "couldn't look" isn't mistaken
+    for "nothing there", e.g. by the calendar-change trigger)."""
+    fail = None if strict else []
     token = await _gcal_token(db)
     if not token:
-        return []
+        return fail
 
     tz = ZoneInfo(TIMEZONE)
     time_min = datetime.combine(day_from, _clock.min, tz)
@@ -132,9 +135,9 @@ async def _gcal_events(db, day_from: _date, day_to: _date) -> list[dict]:
                 },
             )
     except httpx.HTTPError:
-        return []
+        return fail
     if resp.status_code != 200:
-        return []
+        return fail
 
     events = []
     for e in resp.json().get("items", []):

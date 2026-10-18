@@ -234,7 +234,12 @@ any of them. Say what you changed in your message."""
 def _background_section(background: dict | None, name: str) -> str:
     if not background:
         return ""
-    trigger = "by hand from the inbox" if background.get("trigger") == "manual" else "on its schedule"
+    t = background.get("trigger") or ""
+    trigger = ("by hand from the inbox" if t == "manual"
+               # An event routine (bank import, budget, calendar change): what
+               # happened is at the end of the instruction. Start from that.
+               else "because something happened: what set it off is at the end of the instruction, so start from that"
+               if t.startswith("event") else "on its schedule")
     note = ASK_NOTE if background.get("approval", "ask") == "ask" else AUTO_NOTE.format(name=name)
     if background.get("test"):
         note = ("This is a test run: " + name + " is checking what the routine does before relying on it. "

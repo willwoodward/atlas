@@ -22,6 +22,8 @@ class RoutineIn(BaseModel):
     enabled: bool | None = None
     keep_hours: int | None = None   # 0: keep threads; else delete them this long after
     agent_id: str | None = Field(None, max_length=60)   # who does it: "atlas" or one of yours
+    trigger: str | None = None          # schedule | bank_import | budget | calendar (triggers.py)
+    trigger_config: dict | None = None  # budget: {percent}; calendar: {days}
 
 
 @router.get("/routines")

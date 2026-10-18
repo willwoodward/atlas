@@ -320,7 +320,7 @@ async def _busy(db, session_id: str) -> bool:
         return await c.fetchone() is not None
 
 
-async def start_routine(routine_id: str, trigger: str = "schedule", test: bool = False) -> dict | None:
+async def start_routine(routine_id: str, trigger: str = "schedule", test: bool = False, event: str | None = None) -> dict | None:
     """Run a routine now. Returns the new item, or None if it's already running.
 
     `test`: a test run, to see what it would do. Whatever the routine's
@@ -339,11 +339,13 @@ async def start_routine(routine_id: str, trigger: str = "schedule", test: bool =
             if await c.fetchone():
                 return None
         now = _now()
+        # An event (triggers.py) comes with what happened, after the instruction.
+        instruction = r["prompt"] + (f"\n\nWhat set this off: {event}" if event else "")
         session_id = await assistant.new_session_row(db, r["name"], kind="routine", agent_id=r["agent_id"])
         run_id, item_id = str(uuid.uuid4()), uuid.uuid4().hex[:12]
         await db.execute(
             "INSERT INTO agent_runs (id, created_at, updated_at, status, prompt, user_message, session_id) "
-            "VALUES (?,?,?, 'running', ?, ?, ?)", (run_id, now, now, r["prompt"][:500], r["prompt"], session_id),
+            "VALUES (?,?,?, 'running', ?, ?, ?)", (run_id, now, now, instruction[:500], instruction, session_id),
         )
         await db.execute(
             "INSERT INTO inbox_items (id, created_at, updated_at, title, routine_id, session_id, status, read, test) "
@@ -353,7 +355,7 @@ async def start_routine(routine_id: str, trigger: str = "schedule", test: bool =
             await db.execute("UPDATE routines SET last_run_at=? WHERE id=?", (now, routine_id))
         await db.commit()
         body = await assistant.run_body(
-            db, run_id, session_id, [{"role": "user", "content": r["prompt"]}],
+            db, run_id, session_id, [{"role": "user", "content": instruction}],
             background={"routine": r["name"], "approval": "ask" if test else r["approval"], "trigger": trigger, "test": test},
         )
         auth = await _service_auth_for(db)
@@ -489,7 +491,8 @@ async def counts(db) -> dict:
 
 # ── Routines ─────────────────────────────────────────────────────────────────
 
-ROUTINE_FIELDS = ("name", "prompt", "days", "time", "approval", "notify", "enabled", "keep_hours", "agent_id")
+ROUTINE_FIELDS = ("name", "prompt", "days", "time", "approval", "notify", "enabled", "keep_hours", "agent_id",
+                  "trigger", "trigger_config")
 # The longest a routine can be told to keep its threads for: a year.
 MAX_KEEP_HOURS = 24 * 365
 
@@ -516,6 +519,11 @@ def _clean(fields: dict) -> dict:
     for k in ("notify", "enabled"):
         if k in out:
             out[k] = 1 if out[k] else 0
+    if "trigger" in out or "trigger_config" in out:
+        import triggers
+        kind = out.get("trigger") or fields.get("_current_trigger") or "schedule"
+        out["trigger"] = kind
+        out["trigger_config"] = json.dumps(triggers.clean_config(kind, out.get("trigger_config")))
     if "keep_hours" in out:
         try:
             out["keep_hours"] = int(out["keep_hours"])
@@ -535,6 +543,14 @@ def describe_keep(hours: int) -> str:
     return f"deleted after {hours} hour{'s' if hours != 1 else ''}"
 
 
+def _when(row: dict) -> str:
+    """When a routine runs, in words, from its stored row."""
+    import triggers
+    kind = row.get("trigger") or "schedule"
+    return triggers.describe(kind, json.loads(row.get("trigger_config") or "{}") or triggers.DEFAULTS.get(kind, {})) \
+        or describe_schedule(row["days"], row["time"])
+
+
 def routine_row(r) -> dict:
     d = dict(r)
     d["notify"], d["enabled"] = bool(d["notify"]), bool(d["enabled"])
@@ -542,6 +558,11 @@ def routine_row(r) -> dict:
     d["schedule"] = describe_schedule(",".join(d["days"]), d["time"])
     d["keep_hours"] = d.get("keep_hours") or 0
     d["agent_id"] = d.get("agent_id") or "atlas"
+    import triggers
+    d["trigger"] = d.get("trigger") or "schedule"
+    d["trigger_config"] = json.loads(d.get("trigger_config") or "{}") or triggers.DEFAULTS.get(d["trigger"], {})
+    # A routine set off by an event says so where a schedule would be.
+    d["schedule"] = triggers.describe(d["trigger"], d["trigger_config"]) or d["schedule"]
     return d
 
 
@@ -557,7 +578,7 @@ async def get_routine(db, routine_id: str) -> dict | None:
 
 
 def _schedule_next(r: dict) -> str | None:
-    if not r.get("enabled", 1):
+    if not r.get("enabled", 1) or (r.get("trigger") or "schedule") != "schedule":
         return None
     nxt = next_run(r["days"] if isinstance(r["days"], str) else ",".join(r["days"]), r["time"], datetime.now(timezone.utc))
     return nxt.isoformat() if nxt else None
@@ -584,9 +605,10 @@ async def create_routine(db, fields: dict) -> dict:
         raise ValueError("A routine needs a name and what to do.")
     rid, now = uuid.uuid4().hex[:12], _now()
     await db.execute(
-        "INSERT INTO routines (id, name, prompt, days, time, approval, notify, enabled, keep_hours, agent_id, created_at, updated_at, next_run_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (rid, f["name"], f["prompt"], f["days"], f["time"], f["approval"], f["notify"], f["enabled"], f["keep_hours"], f["agent_id"], now, now, _schedule_next(f)),
+        "INSERT INTO routines (id, name, prompt, days, time, approval, notify, enabled, keep_hours, agent_id, trigger, trigger_config, "
+        "created_at, updated_at, next_run_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (rid, f["name"], f["prompt"], f["days"], f["time"], f["approval"], f["notify"], f["enabled"], f["keep_hours"], f["agent_id"],
+         f.get("trigger") or "schedule", f.get("trigger_config"), now, now, _schedule_next(f)),
     )
     await db.commit()
     return await get_routine(db, rid)
@@ -597,10 +619,12 @@ async def update_routine(db, routine_id: str, fields: dict) -> dict | None:
         row = await c.fetchone()
     if not row:
         return None
-    f = {**dict(row), **await _check_agent(db, _clean(fields))}
+    f = {**dict(row), **await _check_agent(db, _clean({**fields, "_current_trigger": row["trigger"]}))}
     await db.execute(
-        "UPDATE routines SET name=?, prompt=?, days=?, time=?, approval=?, notify=?, enabled=?, keep_hours=?, agent_id=?, updated_at=?, next_run_at=? WHERE id=?",
-        (f["name"], f["prompt"], f["days"], f["time"], f["approval"], f["notify"], f["enabled"], f.get("keep_hours") or 0, f.get("agent_id"), _now(), _schedule_next(f), routine_id),
+        "UPDATE routines SET name=?, prompt=?, days=?, time=?, approval=?, notify=?, enabled=?, keep_hours=?, agent_id=?, "
+        "trigger=?, trigger_config=?, updated_at=?, next_run_at=? WHERE id=?",
+        (f["name"], f["prompt"], f["days"], f["time"], f["approval"], f["notify"], f["enabled"], f.get("keep_hours") or 0, f.get("agent_id"),
+         f.get("trigger") or "schedule", f.get("trigger_config"), _now(), _schedule_next(f), routine_id),
     )
     await db.commit()
     return await get_routine(db, routine_id)
@@ -707,6 +731,11 @@ async def scheduler() -> None:
                 await db.close()
         except Exception:
             log.exception("Couldn't clear old inbox threads")
+        try:
+            import triggers
+            await triggers.tick()   # budgets passing their line, calendar changes
+        except Exception:
+            log.exception("Event triggers failed")
         await asyncio.sleep(TICK_SECONDS)
 
 
@@ -728,6 +757,12 @@ _ROUTINE_PROPS = {
                                 "auto: make them directly (still logged and undoable)"},
     "notify": {"type": "boolean", "description": "Send a notification when it's done (default true)"},
     "agent_id": {"type": "string", "description": "Who does it: 'atlas' (default) or one of the user's agents (list_agents)"},
+    "trigger": {"type": "string", "enum": ["schedule", "bank_import", "budget", "calendar"],
+                "description": "What sets it off: schedule (days and time, the default); bank_import (after transactions are "
+                               "imported); budget (when a budget passes trigger_config.percent of its month, default 80, once "
+                               "per budget per month); calendar (when the next trigger_config.days days of the calendar change, "
+                               "default 2). Event routines are told what happened."},
+    "trigger_config": {"type": "object", "description": "budget: {percent}; calendar: {days}"},
     "keep_hours": {"type": "integer", "description": "Delete each run's inbox thread this many hours after its last activity "
                                                     "(e.g. 24 for a daily brief, 168 for a week). 0 (default) keeps them. "
                                                     "Threads with suggestions still waiting are kept until answered."},
@@ -761,7 +796,7 @@ async def dispatch(name: str, args: dict, db) -> dict:
             return {"items": [{k: i.get(k) for k in ("id", "title", "created_at", "status", "pending", "read", "test", "preview", "routine_id")}
                               for i in out["items"]], "counts": out["counts"]}
         if name == "list_routines":
-            return {"routines": [{k: r[k] for k in ("id", "name", "prompt", "schedule", "approval", "notify", "enabled", "keep_hours", "agent_id", "next_run_at")}
+            return {"routines": [{k: r[k] for k in ("id", "name", "prompt", "schedule", "trigger", "trigger_config", "approval", "notify", "enabled", "keep_hours", "agent_id", "next_run_at")}
                                  for r in await list_routines(db)]}
         if name == "create_routine":
             r = await create_routine(db, args)
@@ -782,7 +817,7 @@ async def dispatch(name: str, args: dict, db) -> dict:
                 from agent_cards import change_card
                 b = before[0]
                 card = change_card(f"Routine · {r['name']}", [
-                    ("Name", b["name"], r["name"]), ("When", describe_schedule(b["days"], b["time"]), r["schedule"]),
+                    ("Name", b["name"], r["name"]), ("When", _when(b), r["schedule"]),
                     ("Instruction", b["prompt"], r["prompt"]), ("Asks first", "yes" if b["approval"] == "ask" else "no", "yes" if r["approval"] == "ask" else "no"),
                     ("On", "yes" if b["enabled"] else "no", "yes" if r["enabled"] else "no"),
                     ("Threads", describe_keep(b["keep_hours"] or 0), describe_keep(r["keep_hours"]))], show)

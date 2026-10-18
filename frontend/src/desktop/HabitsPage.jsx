@@ -9,7 +9,6 @@ import { useQuickAdd } from '../context/QuickAddContext.jsx'
 const DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 
 function AddForm({ onAdd, onCancel }) {
-  const isMobile = useIsMobile()
   const [name, setName] = useState('')
   const [color, setColor] = useState(HABIT_PERIODS[0].color)
   return (
@@ -68,7 +67,7 @@ export default function HabitsPage() {
     <div>
       <PageHeader title="Habits" subtitle="This week · consistency builds the compound." isMobile={isMobile} />
 
-      <div style={{ ...card, padding: 0, padding: isMobile ? '8px 16px' : '8px 24px', overflowX: 'auto' }}>
+      <div style={{ ...card, padding: isMobile ? '8px 16px' : '8px 24px', overflowX: 'auto' }}>
         <div style={{ minWidth: isMobile ? 620 : 'unset' }}>
         {/* Header */}
         <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 208px 90px 70px 26px', gap: 20, padding: '14px 0 12px', borderBottom: '1px solid var(--bd-sm)', ...eyebrow }}>
