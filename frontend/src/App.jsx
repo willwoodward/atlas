@@ -1,3 +1,4 @@
+import WakeWord from './components/WakeWord.jsx'
 import { useState, useEffect, useRef } from 'react'
 import { ThemeProvider }         from './context/ThemeContext.jsx'
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
@@ -84,6 +85,7 @@ function Dashboard() {
                       <KeybindsProvider>
                       <QuickAddProvider>
                       <SyncManager />
+                      <WakeWord />
                       {layout === 'desktop' ? <DesktopLayout /> : layout === 'tablet' ? <TabletLayout /> : <MobileLayout />}
                       </QuickAddProvider>
                       </KeybindsProvider>

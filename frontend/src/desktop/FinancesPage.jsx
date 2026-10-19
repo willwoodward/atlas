@@ -1,3 +1,4 @@
+import { BalancesHistory, CashflowHistory } from '../components/HistoryCharts.jsx'
 import { PageHeader, card, eyebrow } from '../components/ui.jsx'
 import { useFocusRequest, flash } from '../lib/focus.js'
 import { useState, useRef } from 'react'
@@ -765,6 +766,12 @@ export default function FinancesPage() {
       {/* Where the money goes — right under the headline figures */}
       <div ref={chartsRef} style={{ marginBottom: 16 }}>
         <CategoryCharts selected={txnFilter} onSelect={filterBy} />
+      </div>
+
+      {/* How it's changed: balances day by day, and money in vs out by month */}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.4fr 1fr', gap: 16, marginBottom: 16, alignItems: 'start' }}>
+        <BalancesHistory />
+        <CashflowHistory />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.2fr 1fr', gap: 16, alignItems: 'start' }}>

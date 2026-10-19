@@ -1,3 +1,4 @@
+import { useVoiceHold } from '../lib/voiceActivity.js'
 import { useEffect, useRef, useState } from 'react'
 import { useAssistant } from '../context/AssistantContext.jsx'
 import { useVoiceInput } from './useVoiceInput.js'
@@ -47,6 +48,7 @@ export function useVoiceConversation({ draft = '', onSend, onDraft, viaDock = fa
   const fast = useLiveVoice({ viaDock })
   const [live, setLive] = useState('')
   const [conversing, setConversing] = useState(false)
+  useVoiceHold(conversing, 'conversation')
   const listenAgain = useRef(false)
   const startedAt = useRef(0)
   const conversingRef = useRef(false)

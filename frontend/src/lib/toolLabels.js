@@ -1,5 +1,6 @@
 // MCP tool name → what to show while it runs
 const TOOL_LABELS = {
+  history_chart: 'Charting it over time',
   list_agents: 'Checking your agents',
   read_agent: 'Reading an agent',
   create_agent: 'Making an agent',

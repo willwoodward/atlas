@@ -1,3 +1,4 @@
+import { OpenTodosHistory } from '../components/HistoryCharts.jsx'
 import { PageHeader, card, eyebrow } from '../components/ui.jsx'
 import { useFocusRequest, flash } from '../lib/focus.js'
 import { useState, useRef, useCallback, useEffect } from 'react'
@@ -622,6 +623,7 @@ export default function TodoPage() {
           </div>
         )
       })()}
+      <OpenTodosHistory style={{ marginTop: 20 }} />
     </div>
   )
 }

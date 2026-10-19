@@ -120,7 +120,7 @@ inbox): a schedule → show_day (a timeline, up to 7 days; get_today_summary \
 draws today's too); to-dos → show_todos (a checklist they can tick); free \
 time → find_free_time (slots they tap to book); money → finance_breakdown, \
 compare_spending, search_transactions, get_budgets; over time → \
-spending_trend, net_worth_trend, goal_time, habit_streaks, lift_progress; a \
+spending_trend, history_chart (net worth, savings, an account, open to-dos, income vs spending or habit consistency over time), goal_time, habit_streaks, lift_progress; a \
 note → show_note. Edits show a before → after card by themselves. Whenever \
 you'd otherwise write out a schedule, a list of to-dos, figures or a \
 comparison, draw the card instead and write only what it doesn't show: the \

@@ -90,6 +90,19 @@ TOOLS = [
     Tool(name="net_worth_trend",
          description="Chart net worth month by month, estimated by walking today's account balances back through the imported transactions. Accurate only as far as transactions are imported for every account.",
          inputSchema={"type": "object", "properties": {"months": {"type": "integer", "description": "default 6, max 24"}}, "required": []}),
+    Tool(name="history_chart",
+         description="Chart how something has changed over time: net worth, savings in pots, an account's balance, open to-dos "
+                     "(daily values Atlas records, estimated before recording began and marked so), income vs spending by month, "
+                     "or habit consistency week by week. Prefer this over net_worth_trend for anything over time.",
+         inputSchema={"type": "object", "properties": {
+             "chart": {"type": "string", "enum": ["balances", "cashflow", "habits"],
+                       "description": "balances: one or more series as lines; cashflow: income vs spending per month; habits: weekly consistency"},
+             "series": {"type": "array", "items": {"type": "string"},
+                        "description": "balances only: net_worth (default), saved, open_todos, or account:<name> for one account's balance (e.g. account:Wise)"},
+             "range": {"type": "string", "enum": ["30d", "90d", "1y", "all"], "description": "balances only, default 90d"},
+             "months": {"type": "integer", "description": "cashflow only, default 6"},
+             "weeks": {"type": "integer", "description": "habits only, default 8"}},
+             "required": ["chart"]}),
     Tool(name="goal_time",
          description="Chart hours per week spent on each goal (calendar events matched by the goal's tags), for recent weeks.",
          inputSchema={"type": "object", "properties": {"weeks": {"type": "integer", "description": "default 8, max 16"}}, "required": []}),
@@ -231,6 +244,34 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
                 "card": {"type": "trend", "title": "Net worth · month end", "unit": "money", "currency": "EUR", "line": True,
                          "points": points, "note": note},
                 "show": {"kind": "page", "page": "finances"}}
+
+    if name == "history_chart":
+        import history
+        chart = args.get("chart") or "balances"
+        if chart == "cashflow":
+            data = await history.cashflow(db, int(args.get("months") or 6))
+            show = {"kind": "page", "page": "finances"}
+            return {**data, "card": {"type": "history", "chart": "cashflow", "title": "Income and spending", **data}, "show": show}
+        if chart == "habits":
+            data = await history.habits(db, int(args.get("weeks") or 8))
+            if not data["habits"]:
+                return {"error": "No habits yet."}
+            return {"weeks": data["weeks"], "habits": [{"name": h["name"], "values": h["values"]} for h in data["habits"]],
+                    "card": {"type": "history", "chart": "habits", "title": "Habit consistency · by week", **data},
+                    "show": {"kind": "page", "page": "habits"}}
+        keys = [k for k in (args.get("series") or ["net_worth"]) if isinstance(k, str)][:6]
+        rng = args.get("range") if args.get("range") in history.RANGES else "90d"
+        series = [x for x in [await history.series(db, k, rng) for k in keys] if x]
+        if not series:
+            return {"error": "Nothing to chart for those series."}
+        summary = [{"key": x["key"], "label": x["label"], "currency": x.get("currency"),
+                    "first": x["points"][0] if x["points"] else None, "last": x["points"][-1] if x["points"] else None,
+                    "recorded_since": x["recorded_since"]} for x in series]
+        page = "todos" if keys == ["open_todos"] else "finances"
+        title = series[0]["label"] if len(series) == 1 else " · ".join(x["label"] for x in series)
+        return {"series": summary,
+                "card": {"type": "history", "chart": "lines", "title": title, "range": rng, "series": series},
+                "show": {"kind": "page", "page": page}}
 
     if name == "goal_time":
         weeks = max(2, min(int(args.get("weeks") or 8), 16))

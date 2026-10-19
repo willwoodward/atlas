@@ -1,3 +1,4 @@
+import { useVoiceHold } from '../lib/voiceActivity.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useAssistant } from '../context/AssistantContext.jsx'
@@ -76,5 +77,7 @@ export function useLiveVoice({ viaDock = false } = {}) {
 
   useEffect(() => () => { conn.current?.close() }, [])
 
+  // A fast-voice session has the mic: the wake word waits.
+  useVoiceHold(ui.phase !== 'idle' && ui.phase !== 'closed', 'live')
   return { ...ui, error, clearError: () => setError(null), start, stop, active: ui.phase !== 'idle' && ui.phase !== 'closed' }
 }

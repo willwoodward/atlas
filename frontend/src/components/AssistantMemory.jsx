@@ -1,3 +1,4 @@
+import { useWakeStatus, wakeLog, clearWakeLog } from './WakeWord.jsx'
 import { useEffect, useState } from 'react'
 import Sheet from './Sheet.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -209,7 +210,7 @@ function SettingRow({ title, detail, children }) {
 const SPEAK_OPTIONS = [['dock', 'Corner mic only'], ['voice', 'Whenever I speak'], ['always', 'Always'], ['never', 'Never']]
 
 function VoiceSettings() {
-  const { silenceSeconds, autoSend, keepListening, speakReplies, ttsVoice, bargeIn, floatingMic, voiceOpensChat, engine } = useVoiceSettings()
+  const { silenceSeconds, autoSend, keepListening, speakReplies, ttsVoice, bargeIn, floatingMic, voiceOpensChat, engine, wakeWord, wakeSensitivity } = useVoiceSettings()
   const fast = engine === 'live'
   const { bindings } = useKeybinds() || { bindings: {} }
   return (
@@ -274,7 +275,58 @@ function VoiceSettings() {
         <Switch checked={voiceOpensChat || !floatingMic} onChange={v => setVoiceSettings({ voiceOpensChat: v })} label="Voice shortcut opens the chat" disabled={!floatingMic}
           title={!floatingMic ? 'Always, while the corner mic is off' : undefined} />
       </SettingRow>
+      <WakeWordSettings on={wakeWord} sensitivity={wakeSensitivity} />
     </div>
+  )
+}
+
+const WAKE_STATES = {
+  off: null, paused: 'Paused while this tab is in the background.', loading: 'Getting ready… (the first time, it downloads a 40 MB speech model)',
+  waiting: 'Tap or press any key on the page to start listening (browsers need that first).', listening: 'Listening for “Hey Atlas”.',
+}
+
+function WakeWordSettings({ on, sensitivity }) {
+  const status = useWakeStatus()
+  const [log, setLog] = useState(wakeLog)
+  useEffect(() => { setLog(wakeLog()) }, [status])
+  return (
+    <>
+      <SettingRow title="Listen for “Hey Atlas”"
+        detail="Say “Hey Atlas” (or just “Atlas”) and the mic starts, as if you’d tapped it. The listening happens on this device: nothing is sent anywhere until it hears the wake word, so it costs nothing. Only while Atlas is open and on screen; it ignores what it hears while you’re talking to Atlas. Your browser shows the mic as in use while it’s on.">
+        <Switch checked={on} onChange={v => { unlockAudio(); setVoiceSettings({ wakeWord: v }) }} label="Listen for Hey Atlas" />
+      </SettingRow>
+      {on && <>
+        {(status.error || WAKE_STATES[status.state]) && (
+          <div role="status" style={{ margin: '-4px 0 10px', fontSize: 12.5, color: status.error ? 'var(--accent)' : 'var(--mid)' }}>
+            {status.error || WAKE_STATES[status.state]}
+          </div>
+        )}
+        <SettingRow title="Wake word sensitivity"
+          detail="Higher wakes more easily, but also when you didn’t mean it. Lower if it wakes on its own; higher if it misses you.">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>Strict</span>
+            <input type="range" min={0} max={1} step={0.1} value={sensitivity} aria-label="Wake word sensitivity"
+              onChange={e => setVoiceSettings({ wakeSensitivity: Number(e.target.value) })} style={{ width: 120, accentColor: 'var(--accent)' }} />
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>Eager</span>
+          </div>
+        </SettingRow>
+        <div style={{ padding: '4px 0 8px' }}>
+          <div style={{ fontSize: 13, color: 'var(--ink)', fontWeight: 500, marginBottom: 4 }}>Recently woke on</div>
+          {log.length === 0
+            ? <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>—</div>
+            : <>
+                {log.slice(0, 6).map((h, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12.5, color: 'var(--mid)', padding: '2px 0' }}>
+                    <span style={{ width: 120, color: 'var(--muted)' }}>{new Date(h.at).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                    <span>“{h.text}”</span>
+                    <span style={{ color: 'var(--faint)' }}>{Math.round((h.confidence ?? 1) * 100)}% sure</span>
+                  </div>
+                ))}
+                <Button variant="link" onClick={() => { clearWakeLog(); setLog([]) }} style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 400, marginTop: 4 }}>Clear</Button>
+              </>}
+        </div>
+      </>}
+    </>
   )
 }
 

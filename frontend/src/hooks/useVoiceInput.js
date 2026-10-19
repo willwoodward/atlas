@@ -1,3 +1,4 @@
+import { useVoiceHold } from '../lib/voiceActivity.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { getVoiceSettings } from '../lib/voiceSettings.js'
@@ -104,6 +105,7 @@ function silenceWatch(stream, seconds, onSilence, onNothing, nothingSeconds = Ma
 export function useVoiceInput(onText, onPartial, { onNothingHeard } = {}) {
   const { token } = useAuth()
   const [state, setState] = useState('idle')
+  useVoiceHold(state !== 'idle', 'mic')   // the wake word waits while you're recorded
   const [seconds, setSeconds] = useState(0)
   const [error, setError] = useState(null)
   const rec = useRef(null)      // { recorder, stream, chunks, timer, cancelled }

@@ -1,3 +1,4 @@
+import { useWakeStatus } from './WakeWord.jsx'
 import { useEffect, useRef, useState } from 'react'
 import { useAssistant } from '../context/AssistantContext.jsx'
 import { useKeybinds } from '../context/KeybindsContext.jsx'
@@ -35,6 +36,7 @@ const CheckIcon = () => <svg width="17" height="17" viewBox="0 0 24 24" fill="no
 export default function VoiceDock({ right = 16, bottom = 16 }) {
   const { messages, busy, queued, registerVoiceDock, chatsOnScreen, answer } = useAssistant()
   const { floatingMic } = useVoiceSettings()
+  const wake = useWakeStatus()   // "Hey Atlas" (WakeWord.jsx)
   const { bindings } = useKeybinds() || {}
   const speaking = useSpeaking()
   // The thread position when this round began, so the card shows only the
@@ -143,12 +145,16 @@ export default function VoiceDock({ right = 16, bottom = 16 }) {
         </div>
       )}
       <button type="button" onClick={() => toggleRef.current()} disabled={voice.state === 'transcribing'}
-        aria-label={button.label} title={button.label + shortcut} className={listening ? 'voice-dock-live' : undefined}
-        style={{ pointerEvents: 'auto', width: 48, height: 48, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0,
+        aria-label={button.label} title={button.label + shortcut + (wake.state === 'listening' ? ' · or say “Hey Atlas”' : '')} className={listening ? 'voice-dock-live' : undefined}
+        style={{ pointerEvents: 'auto', position: 'relative', width: 48, height: 48, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0,
                  border: button.on ? 'none' : '1px solid var(--bd)', background: button.on ? 'var(--accent)' : 'var(--surface)', color: button.on ? '#fff' : 'var(--mid)',
                  boxShadow: button.on ? 'var(--shadow-accent)' : '0 4px 16px var(--bd-sm)', transition: 'background .15s, color .15s, transform .15s',
                  opacity: voice.state === 'transcribing' ? 0.7 : 1 }}>
         {button.icon}
+        {/* Listening for the wake word: a small dot on the mic. */}
+        {wake.state === 'listening' && !button.on && (
+          <span aria-hidden="true" style={{ position: 'absolute', top: 7, right: 7, width: 7, height: 7, borderRadius: '50%', background: 'var(--sage)', boxShadow: '0 0 0 2px var(--surface)' }} />
+        )}
       </button>
     </div>
   )

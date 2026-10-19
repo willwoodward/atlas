@@ -1,3 +1,4 @@
+import { HistoryCardBody } from './HistoryCharts.jsx'
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useRefresh } from '../context/RefreshContext.jsx'
@@ -557,10 +558,19 @@ function NoteCard({ card }) {
   )
 }
 
+/** Over time (history_chart): balances as lines, cashflow as bars, habits by week. */
+function HistoryCard({ card, show }) {
+  return (
+    <Frame title={card.title} action={<OpenButton show={show} />} note={card.note}>
+      <HistoryCardBody card={card} />
+    </Frame>
+  )
+}
+
 const CARDS = {
   breakdown: BreakdownCard, compare: CompareCard, transactions: TransactionsCard, budgets: BudgetsCard,
   day: DayCard, week: WeekCard, change: ChangeCard, choices: ChoicesCard,
-  todos: TodosCard, habits: HabitsCard, trend: TrendCard, note: NoteCard,
+  todos: TodosCard, habits: HabitsCard, trend: TrendCard, note: NoteCard, history: HistoryCard,
 }
 
 /** The cards a turn's tools produced, in the order they ran. */

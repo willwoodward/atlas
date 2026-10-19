@@ -16,6 +16,9 @@ import { useSyncExternalStore } from 'react'
 //                    using the corner mic
 //   engine         — 'classic' (the pipeline below) or 'live' (Fast: GPT-Live
 //                    listens and talks; Atlas does the work)
+//   wakeWord       — listen for "Hey Atlas" on this device (lib/wakeWord)
+//   wakeSensitivity — 0..1: higher wakes more easily, and wrongly more often
+//   wakeEngine     — which wake word engine ('vosk')
 
 const KEY = 'atlas:voice-settings'
 export const VOICE_DEFAULTS = {
@@ -23,6 +26,7 @@ export const VOICE_DEFAULTS = {
   speakReplies: 'dock', ttsVoice: 'marin', bargeIn: false,
   floatingMic: true, voiceOpensChat: false,
   engine: 'classic',
+  wakeWord: false, wakeSensitivity: 0.5, wakeEngine: 'vosk',
 }
 // The voices of OpenAI's realtime speech model; marin and cedar sound best.
 export const TTS_VOICES = ['marin', 'cedar', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'sage', 'shimmer', 'verse']

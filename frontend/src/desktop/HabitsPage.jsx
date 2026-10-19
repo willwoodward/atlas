@@ -1,3 +1,4 @@
+import { HabitConsistency } from '../components/HistoryCharts.jsx'
 import { PageHeader, card, eyebrow } from '../components/ui.jsx'
 import { useFocusRequest, flash } from '../lib/focus.js'
 import { useState } from 'react'
@@ -149,6 +150,8 @@ export default function HabitsPage() {
         ))}
         </div>
       </div>
+      {/* Week by week, how often each habit was done */}
+      <HabitConsistency style={{ marginTop: 16 }} />
     </div>
   )
 }
