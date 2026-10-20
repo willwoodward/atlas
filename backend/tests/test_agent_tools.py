@@ -240,6 +240,14 @@ class TestCalendar:
         await undo(client, auth, u)
         assert "colorId" not in events[e["id"]] and events[e["id"]]["summary"] == "Gym"
 
+    async def test_google_colour_names(self, db, client, auth, google):
+        events, _ = google
+        for name, cid in [("lavender", "1"), ("flamingo", "4"), ("grape", "3"), ("banana", "5"), ("blueberry", "9")]:
+            e = await call(db, "create_event", title=name, date="2026-11-05", start=9, end=10, color=name)
+            assert events[e["id"]]["colorId"] == cid
+        e = await call(db, "create_event", title="Lunch", date="2026-11-05", start=12, end=13, color="default")
+        assert events[e["id"]].get("colorId") is None
+
     async def test_deleted_event_is_recreated(self, db, client, auth, google):
         events, _ = google
         e = await call(db, "create_event", title="Dentist", date="2026-11-03", start=10, end=11, color="coral")

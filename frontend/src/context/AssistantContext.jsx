@@ -359,7 +359,12 @@ export function AssistantProvider({ children }) {
           if (ev.type === 'tool_result' && ev.status !== 'error' && sentHere.current.has(runId)) {
             const { show } = readToolResult(ev.output)
             if (show && (show.explicit || writes.has(ev.toolUseId))) {
-              window.dispatchEvent(new CustomEvent('atlas:show', { detail: show }))
+              // Following along an event change goes to its day; only an
+              // explicit "show me" opens the event itself.
+              const detail = show.kind === 'event' && !show.explicit && show.date
+                ? { kind: 'calendar', date: show.date }
+                : show
+              window.dispatchEvent(new CustomEvent('atlas:show', { detail }))
             }
           }
           patchLast(m => m.runId === runId || !m.runId ? reduceMessage(m, ev) : m)
