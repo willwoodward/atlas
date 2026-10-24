@@ -25,6 +25,8 @@ const EMPTY = {
   '/api/finances': { pots: [], transactions: [], accounts: [] },
   // Absent `github` and `gcal` keys read as "not connected".
   '/api/integrations': {},
+  '/api/calendar/color-rules': { rules: [], fallback: 'default', choices: [] },
+  '/api/employment': { employments: [], components: [], grants: [], prices: [], fx: [], projection: [], summary: {} },
   '/assistant/runs': { runs: [] },
   '/assistant/sessions/current': { session: null, messages: [], active_run: null },
   '/assistant/memory': { version: null, content: '', max_chars: 20000 },
@@ -33,8 +35,8 @@ const EMPTY = {
 
 export function bodyFor(pathname) {
   if (pathname in EMPTY) return EMPTY[pathname]
-  // /api/todos/outcomes/2026-W32 — the context reads `.text` off this.
-  if (pathname.startsWith('/api/todos/outcomes/')) return { text: '' }
+  // /api/todos/outcomes/2026-10-05 (or /reviews/…) — the context reads `.text` off this.
+  if (pathname.startsWith('/api/todos/outcomes/') || pathname.startsWith('/api/todos/reviews/')) return { text: '' }
   // Sub-resources of a known collection (/api/finances/pots, …).
   const parent = Object.keys(EMPTY).find(p => pathname.startsWith(p + '/'))
   if (parent) return Array.isArray(EMPTY[parent]) ? [] : {}

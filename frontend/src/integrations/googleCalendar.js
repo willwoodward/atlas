@@ -1,3 +1,5 @@
+import { atlasHex } from '../lib/calendarColors.js'
+
 const SCOPE = 'https://www.googleapis.com/auth/calendar.events'
 const CAL_BASE = 'https://www.googleapis.com/calendar/v3'
 
@@ -28,7 +30,9 @@ export async function fetchEvents(token, timeMin, timeMax) {
   return res.json()
 }
 
-export async function insertGcalEvent(token, { title, date, startH, endH, notes = '' }) {
+// colorId: Google's colour (null = the calendar's own). atlasColor: the colour
+// Atlas draws it in, kept privately on the event so Google ignores it.
+export async function insertGcalEvent(token, { title, date, startH, endH, notes = '', colorId, atlasColor }) {
   const pad = n => String(Math.floor(n)).padStart(2, '0')
   const toTime = h => `${pad(h)}:${pad((h % 1) * 60)}:00`
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -38,12 +42,51 @@ export async function insertGcalEvent(token, { title, date, startH, endH, notes 
     start: { dateTime: `${date}T${toTime(startH)}`, timeZone: tz },
     end:   { dateTime: `${date}T${toTime(endH)}`,   timeZone: tz },
   }
+  if (colorId) body.colorId = colorId
+  if (atlasColor) body.extendedProperties = { private: { atlasColor } }
   const res = await fetch(`${CAL_BASE}/calendars/primary/events`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`GCal insert ${res.status}`)
+  return res.json()
+}
+
+// Wall-clock shift: "Tue 09:00 + 1 day + 2h" is Wed 11:00 local, even across
+// a clock change. Returns a local "YYYY-MM-DDTHH:MM:SS" (sent with a timeZone).
+export function shiftDateTime(dateTime, days, hours) {
+  const d = new Date(dateTime)
+  d.setDate(d.getDate() + days)
+  d.setMinutes(d.getMinutes() + Math.round(hours * 60))
+  const p = n => String(n).padStart(2, '0')
+  return `${localDateStr(d)}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+const shiftDate = (date, days) => {
+  const [y, m, d] = date.split('-').map(Number)
+  return localDateStr(new Date(y, m - 1, d + days))
+}
+
+/**
+ * Shift an event's start and end: by whole days, plus hours on each end
+ * (equal hours = move, different = resize). All-day events move by days only.
+ */
+export async function shiftGcalEvent(token, eventId, { days = 0, startHours = 0, endHours = 0 }) {
+  const url = `${CAL_BASE}/calendars/primary/events/${encodeURIComponent(eventId)}`
+  const got = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!got.ok) throw new Error(`GCal get ${got.status}`)
+  const ev = await got.json()
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const move = (t, hours) => t.dateTime
+    ? { dateTime: shiftDateTime(t.dateTime, days, hours), timeZone: t.timeZone || tz }
+    : { date: shiftDate(t.date, days) }
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ start: move(ev.start, startHours), end: move(ev.end, endHours) }),
+  })
+  if (!res.ok) throw new Error(`GCal move ${res.status}`)
   return res.json()
 }
 
@@ -71,6 +114,14 @@ const COLOR_MAP = {
   '11': { c: '#c15f3c', t: 'rgba(193,95,60,.13)'  },
 }
 const DEFAULT_COL = { c: '#5f7591', t: 'rgba(95,117,145,.16)' }
+
+// An event's own Atlas colour if it has one, else the one its Google colour maps to.
+function paletteFor(e) {
+  const hex = atlasHex(e.extendedProperties?.private?.atlasColor)
+  if (!hex) return COLOR_MAP[e.colorId] || DEFAULT_COL
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16))
+  return { c: hex, t: `rgba(${r},${g},${b},.16)` }
+}
 const SLEEP_COL   = { c: '#9a9488', t: 'rgba(154,148,136,.16)' }
 
 // Use local date parts to avoid UTC offset shifting the date
@@ -96,7 +147,7 @@ export function toCalendarEvents(items = []) {
 
     // ── All-day events (start.date, no dateTime) ──────────────────────────
     if (!e.start.dateTime) {
-      const pal = COLOR_MAP[e.colorId] || DEFAULT_COL
+      const pal = paletteFor(e)
       result.push({
         id:          e.id,
         title:       e.summary || '(No title)',
@@ -122,7 +173,7 @@ export function toCalendarEvents(items = []) {
     const end   = parsedt(e.end)
     if (!start || !end) continue
 
-    const pal       = COLOR_MAP[e.colorId] || DEFAULT_COL
+    const pal       = paletteFor(e)
     const startH    = toH(start)
     const startDate = localDateStr(start)
     const endDate   = localDateStr(end)

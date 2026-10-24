@@ -1,9 +1,10 @@
-import { PageHeader, card, eyebrow } from '../components/ui.jsx'
+import { PageHeader, Button, card, eyebrow } from '../components/ui.jsx'
 import { useFocusRequest } from '../lib/focus.js'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import { useLocalCalendar } from '../context/LocalCalendarContext.jsx'
 import { getWeekRange, localDateStr } from '../integrations/googleCalendar.js'
+import { ATLAS_COLORS, atlasHex } from '../lib/calendarColors.js'
 import { layoutOverlaps, eventBox, floorToSlot, SLOT } from '../lib/calendarLayout.js'
 import EventLabel from '../components/EventLabel.jsx'
 import { mondayOf, parseLocalDate, addDays } from '../lib/week.js'
@@ -21,12 +22,12 @@ const HOUR_H = 64
 const DAY_START = 0
 const HOURS = Array.from({ length: 24 }, (_, i) => i)
 const DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
-const PALETTE = ['#5f7591','#6f8168','#c15f3c','#b08a3e','#9a6d84','#9a9488']
 
 function toTimeStr(h) {
   return `${String(Math.floor(h)).padStart(2,'0')}:${String(Math.round((h % 1) * 60)).padStart(2,'0')}`
 }
 function snapTo(h, step) { return Math.round(h / step) * step }
+const edgeHandle = { position: 'absolute', left: 0, right: 0, height: 6, cursor: 'ns-resize' }
 
 const inputStyle = {
   width: '100%', padding: '8px 12px', borderRadius: 9, fontSize: 13.5,
@@ -103,7 +104,7 @@ export function EventDetailModal({ event, onClose, onDelete }) {
 function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00', defaultEndTime = '10:00' }) {
   const [form, setForm] = useState({
     title: '', date: defaultDate, startTime: defaultStartTime, endTime: defaultEndTime,
-    color: PALETTE[0], notes: '',
+    atlasColor: '', notes: '',
   })
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -111,7 +112,9 @@ function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00'
     if (!form.title.trim()) return
     const [sh, sm] = form.startTime.split(':').map(Number)
     const [eh, em] = form.endTime.split(':').map(Number)
-    onAdd({ title: form.title.trim(), date: form.date, startH: sh + sm/60, endH: eh + em/60, color: form.color, notes: form.notes })
+    // atlasColor '' = Auto: drawn in the colour its Google colour maps to. A
+    // local event (no Google) needs a colour of its own, so Auto is blue there.
+    onAdd({ title: form.title.trim(), date: form.date, startH: sh + sm/60, endH: eh + em/60, atlasColor: form.atlasColor, color: atlasHex(form.atlasColor) ?? ATLAS_COLORS[0].hex, notes: form.notes })
     onClose()
   }
 
@@ -138,11 +141,15 @@ function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00'
             </div>
             <div>
               <label style={labelStyle}>Colour</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {PALETTE.map(c => (
-                  <div key={c} onClick={() => set('color', c)} style={{ width: 24, height: 24, borderRadius: '50%', background: c, cursor: 'pointer', outline: form.color === c ? `3px solid ${c}` : 'none', outlineOffset: 2 }} />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                {[{ name: '', hex: null }, ...ATLAS_COLORS].map(c => (
+                  <button key={c.name} type="button" onClick={() => set('atlasColor', c.name)} title={c.name || 'Auto'} aria-label={c.name || 'Auto'} aria-pressed={form.atlasColor === c.name}
+                    style={{ width: 22, height: 22, padding: 0, borderRadius: '50%', cursor: 'pointer',
+                             background: c.hex || 'transparent', border: c.hex ? 'none' : '1.5px dashed var(--faint)',
+                             outline: form.atlasColor === c.name ? `2px solid ${c.hex || 'var(--mid)'}` : 'none', outlineOffset: 2 }} />
                 ))}
               </div>
+              <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 6 }}>{form.atlasColor ? form.atlasColor[0].toUpperCase() + form.atlasColor.slice(1) : 'Auto — matches its Google Calendar colour'}</div>
             </div>
             <div>
               <label style={labelStyle}>Notes (optional)</label>
@@ -160,8 +167,8 @@ function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00'
 // ─── Calendar page ────────────────────────────────────────────────────────
 export default function CalendarPage() {
   const isMobile = useIsMobile()
-  const { gcal, connectGoogle, refetchEvents, createGcalEvent, removeGcalEvent } = useIntegrations()
-  const { addEvent, removeEvent } = useLocalCalendar()
+  const { gcal, connectGoogle, refetchEvents, createGcalEvent, removeGcalEvent, shiftGcalEvents } = useIntegrations()
+  const { addEvent, removeEvent, moveEvent } = useLocalCalendar()
   const allEvents = useCalendarEvents()
   const { goals } = useGoals()
   useShineSync()
@@ -241,6 +248,108 @@ export default function CalendarPage() {
 
   const handleDeleteEvent = (ev) => ev.isLocal ? removeEvent(ev.id) : removeGcalEvent(ev.id)
 
+  // ─── Multi-select (Ctrl/⌘-click), drag-to-move, bulk delete ─────────────
+  const [selected, setSelected] = useState(() => new Set())
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [movePreview, setMovePreview] = useState(null) // { ids, mode, days, hours }
+  const moveRef = useRef(null)
+  const clearSelection = useCallback(() => { setSelected(new Set()); setConfirmingDelete(false) }, [])
+  const toggleSelected = (ev) => {
+    setConfirmingDelete(false)
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(ev.id) ? next.delete(ev.id) : next.add(ev.id)
+      return next
+    })
+  }
+  // One entry per event (an id can show on more than one day).
+  const eventsByIds = (ids) => {
+    const seen = new Set()
+    return allEvents.filter(e => ids.has(e.id) && !e.isSleepWakeUp && !seen.has(e.id) && seen.add(e.id))
+  }
+  useEffect(() => { clearSelection() }, [activeOffset, clearSelection])
+
+  const flashStatus = (status) => { setSyncStatus(status); setTimeout(() => setSyncStatus(null), 3000) }
+
+  const deleteSelected = async () => {
+    const evs = eventsByIds(selected)
+    clearSelection()
+    const results = await Promise.allSettled(evs.map(handleDeleteEvent))
+    flashStatus(results.some(r => r.status === 'rejected') ? 'delete-failed' : `deleted:${evs.length}`)
+  }
+
+  // Where a dragged event lands. mode 'move' shifts it (kept within the day);
+  // 'top'/'bottom' drag one edge, never shorter than 15 minutes.
+  const landing = (ev, { mode, days, hours }) => {
+    const end = ev.start + ev.dur
+    if (mode === 'top') return { date: ev.date, startH: Math.max(0, Math.min(end - 0.25, ev.start + hours)), endH: end }
+    if (mode === 'bottom') return { date: ev.date, startH: ev.start, endH: Math.min(24, Math.max(ev.start + 0.25, end + hours)) }
+    const startH = Math.max(0, Math.min(24 - ev.dur, ev.start + hours))
+    return { date: localDateStr(addDays(parseLocalDate(ev.date), days)), startH, endH: startH + ev.dur }
+  }
+
+  const applyDrag = async (evs, drag) => {
+    // Every event shifts by the same amount, so the first one sets it.
+    const to = landing(evs[0], drag)
+    const shift = { days: drag.mode === 'move' ? drag.days : 0, startHours: to.startH - evs[0].start, endHours: to.endH - (evs[0].start + evs[0].dur) }
+    if (drag.mode === 'move') shift.startHours = shift.endHours = drag.hours
+    const gcalIds = evs.filter(e => !e.isLocal).map(e => e.id)
+    const local = evs.filter(e => e.isLocal).map(e => moveEvent(e.id, landing(e, drag)))
+    const results = await Promise.allSettled([...(gcalIds.length ? [shiftGcalEvents(gcalIds, shift)] : []), ...local])
+    if (results.some(r => r.status === 'rejected')) flashStatus('move-failed')
+  }
+
+  // A press on an event is a click (open it, or Ctrl/⌘ to select it) unless it
+  // moves, in which case it drags: the selection if the event is in it, else
+  // just that event. Up/down shifts time in 15-minute steps; across shifts days.
+  // Pressing on the top or bottom edge resizes that one event instead.
+  const onEventPointerDown = (e, ev) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    const ctrl = e.ctrlKey || e.metaKey
+    const mode = e.target.dataset?.edge || 'move'
+    const ids = mode !== 'move' ? new Set([ev.id])
+      : selected.has(ev.id) ? selected : ctrl ? new Set([...selected, ev.id]) : new Set([ev.id])
+    moveRef.current = { ev, ctrl, ids, mode, x: e.clientX, y: e.clientY, days: 0, hours: 0, moved: false }
+  }
+  const onEventPointerMove = (e) => {
+    const m = moveRef.current
+    if (!m) return
+    if (!m.moved && Math.hypot(e.clientX - m.x, e.clientY - m.y) < 5) return
+    m.moved = true
+    m.hours = snapTo((e.clientY - m.y) / HOUR_H, 0.25)
+    const col = m.mode === 'move' && document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-date]')
+    if (col) m.days = Math.round((parseLocalDate(col.dataset.date) - parseLocalDate(m.ev.date)) / 864e5)
+    setMovePreview({ ids: m.ids, mode: m.mode, days: m.days, hours: m.hours })
+  }
+  const onEventPointerUp = () => {
+    const m = moveRef.current
+    moveRef.current = null
+    setMovePreview(null)
+    if (!m) return
+    if (!m.moved) {
+      if (m.ctrl && m.mode === 'move') toggleSelected(m.ev)
+      else { clearSelection(); setSelectedEvent(m.ev) }
+      return
+    }
+    if (m.days || m.hours) applyDrag(eventsByIds(m.ids), m)
+  }
+  const onEventPointerCancel = () => { moveRef.current = null; setMovePreview(null) }
+
+  // Escape clears the selection; Delete/Backspace asks, then deletes.
+  useEffect(() => {
+    if (!selected.size) return
+    const onKey = (e) => {
+      if (e.target.closest?.('input, textarea, select, [contenteditable="true"]')) return
+      if (e.key === 'Escape') clearSelection()
+      else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); confirmingDelete ? deleteSelected() : setConfirmingDelete(true) }
+      else if (e.key === 'Enter' && confirmingDelete) { e.preventDefault(); deleteSelected() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }) // re-binds each render so deleteSelected sees the current selection
+
   // ─── Drag-to-create helpers ─────────────────────────────────────────────
   const hourFromEl = (el, clientY) => {
     const rect = el.getBoundingClientRect()
@@ -267,6 +376,7 @@ export default function CalendarPage() {
     if (!d) return
     dragRef.current = null
     const moved = Math.abs(e.clientY - d.startY)
+    if (moved < 8 && selected.size) { clearSelection(); return }
     if (moved < 8) {
       const snapped = floorToSlot(hourFromEl(d.el, e.clientY))
       setAddDraft({ date: d.date, startH: snapped, endH: snapped + 1 })
@@ -361,8 +471,9 @@ export default function CalendarPage() {
                   <div style={{ ...eyebrow }}>{d.dow}</div>
                   <div style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', fontFamily: 'var(--font-serif)', fontSize: 16, fontWeight: 600, color: d.today ? '#fff' : 'var(--ink)', background: d.today ? 'var(--accent)' : 'transparent' }}>{d.num}</div>
                   {allDayEvs.map(ev => (
-                    <div key={ev.id} onClick={() => setSelectedEvent(ev)}
-                      style={{ marginTop: 3, padding: '2px 5px', borderRadius: 4, fontSize: 10.5, fontWeight: 500, background: ev.tint, color: ev.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer', textAlign: 'left' }}>
+                    <div key={ev.id} onClick={e => { if (e.ctrlKey || e.metaKey) toggleSelected(ev); else { clearSelection(); setSelectedEvent(ev) } }}
+                      style={{ marginTop: 3, padding: '2px 5px', borderRadius: 4, fontSize: 10.5, fontWeight: 500, background: ev.tint, color: ev.color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer', textAlign: 'left',
+                               outline: selected.has(ev.id) ? `2px solid ${ev.color}` : 'none', outlineOffset: 1 }}>
                       {ev.title}
                     </div>
                   ))}
@@ -386,7 +497,7 @@ export default function CalendarPage() {
 
             {/* Day columns */}
             {weekDays.map(d => (
-              <div key={d.dow}
+              <div key={d.dow} data-date={d.dateStr}
                 style={{ position: 'relative', borderLeft: '1px solid var(--bd-xs)', background: d.today ? 'rgba(193,95,60,.025)' : 'transparent', userSelect: 'none', cursor: 'crosshair' }}
                 onPointerDown={e => handleColDown(e, d.dateStr)}
                 onPointerMove={handleColMove}
@@ -402,10 +513,18 @@ export default function CalendarPage() {
                     const { top, height, compact } = eventBox({ ...ev, start: ev.start - DAY_START }, HOUR_H)
                     const { left, width } = layout.get(ev)
                     const shine = wave.get(ev) || {}
+                    const isSel = selected.has(ev.id)
+                    const isMoving = movePreview?.ids.has(ev.id)
                     return (
                       <div key={ev.id || i} data-event="true" className={shine.className}
-                        onClick={e => { e.stopPropagation(); setSelectedEvent(ev) }}
+                        onPointerDown={e => onEventPointerDown(e, ev)}
+                        onPointerMove={onEventPointerMove}
+                        onPointerUp={onEventPointerUp}
+                        onPointerCancel={onEventPointerCancel}
                         style={{
+                          opacity: isMoving ? 0.35 : 1,
+                          outline: isSel ? `2px solid ${ev.color}` : 'none', outlineOffset: 1,
+                          touchAction: 'none',
                           position: 'absolute', top, height, '--shine-delay': shine.shineDelay,
                           left: `calc(${left * 100}% + 4px)`,
                           width: `calc(${width * 100}% - ${left + width >= 1 ? 8 : 6}px)`,
@@ -413,12 +532,15 @@ export default function CalendarPage() {
                           boxShadow: left > 0 ? '0 0 0 1px var(--surface)' : 'none',
                           background: ev.tint,
                           borderLeft: `3px solid ${ev.color}`,
-                          borderRadius: compact ? 5 : 8, padding: compact ? '0 6px' : '5px 8px', overflow: 'hidden', cursor: 'pointer', transition: 'filter .1s',
+                          borderRadius: compact ? 5 : 8, padding: compact ? '0 6px' : '5px 8px', overflow: 'hidden', cursor: movePreview ? 'grabbing' : 'pointer', transition: 'filter .1s',
                         }}
                         onMouseEnter={e => e.currentTarget.style.filter = 'brightness(.94)'}
                         onMouseLeave={e => e.currentTarget.style.filter = ''}
                       >
                         <EventLabel ev={ev} height={height} compact={compact} size={11.5} />
+                        {/* Resize handles; short events keep the middle free for moving */}
+                        {height >= 24 && <div data-edge="top" style={{ ...edgeHandle, top: 0 }} />}
+                        <div data-edge="bottom" style={{ ...edgeHandle, bottom: 0, height: height >= 24 ? 6 : 4 }} />
                       </div>
                     )
                   })
@@ -430,6 +552,17 @@ export default function CalendarPage() {
                     <div style={{ position: 'absolute', left: 0, top: -3, width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }} />
                   </div>
                 )}
+
+                {/* Where the events being dragged will land */}
+                {movePreview && eventsByIds(movePreview.ids)
+                  .filter(ev => !ev.isAllDay)
+                  .map(ev => ({ ev, to: landing(ev, movePreview) }))
+                  .filter(({ to }) => to.date === d.dateStr)
+                  .map(({ ev, to }) => (
+                    <div key={`move-${ev.id}`} style={{ position: 'absolute', left: 4, right: 4, top: to.startH * HOUR_H, height: Math.max((to.endH - to.startH) * HOUR_H, 16), background: ev.tint, borderLeft: `3px solid ${ev.color}`, borderRadius: 8, padding: '3px 8px', pointerEvents: 'none', zIndex: 4, boxShadow: 'var(--shadow-pop)', overflow: 'hidden' }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 600, color: ev.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fmtH(to.startH)} – {fmtH(to.endH)} · {ev.title}</div>
+                    </div>
+                  ))}
 
                 {/* Drag ghost */}
                 {ghost && ghost.date === d.dateStr && (
@@ -456,11 +589,32 @@ export default function CalendarPage() {
           defaultEndTime={addDraft ? toTimeStr(addDraft.endH) : '10:00'}
         />
       )}
+      {!isMobile && selected.size > 0 && !movePreview && (
+        <div role="toolbar" aria-label="Selected events"
+          style={{ position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)', zIndex: 55, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 8px 8px 16px', borderRadius: 12, background: 'var(--surface)', border: '1px solid var(--bd)', boxShadow: 'var(--shadow-pop)', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{selected.size} selected</span>
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>Drag to move</span>
+          {confirmingDelete ? (
+            <>
+              <Button size="sm" variant="danger" onClick={deleteSelected}>Delete {selected.size}?</Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmingDelete(false)}>Cancel</Button>
+            </>
+          ) : (
+            <>
+              <Button size="sm" variant="secondary" onClick={() => setConfirmingDelete(true)}>Delete</Button>
+              <Button size="sm" variant="ghost" onClick={clearSelection}>Clear</Button>
+            </>
+          )}
+        </div>
+      )}
       {syncStatus && (
         <div style={{ position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)', zIndex: 60, padding: '10px 18px', borderRadius: 10, background: 'var(--ink)', color: 'var(--surface)', fontSize: 13, fontWeight: 500, boxShadow: '0 4px 16px rgba(0,0,0,.2)', whiteSpace: 'nowrap' }}>
           {syncStatus === 'syncing' && '⏳ Adding to Google Calendar…'}
           {syncStatus === 'synced'  && '✓ Added to Google Calendar'}
           {syncStatus === 'local'   && '⚠ Saved locally — reconnect Google Calendar for write access'}
+          {syncStatus === 'move-failed'   && '⚠ Some events couldn\u2019t be moved'}
+          {syncStatus === 'delete-failed' && '⚠ Some events couldn\u2019t be deleted'}
+          {syncStatus?.startsWith('deleted:') && `✓ Deleted ${syncStatus.slice(8)} event${syncStatus.slice(8) === '1' ? '' : 's'}`}
         </div>
       )}
     </div>

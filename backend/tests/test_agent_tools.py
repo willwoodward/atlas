@@ -235,18 +235,26 @@ class TestCalendar:
     async def test_recolour_and_undo(self, db, client, auth, google):
         events, _ = google
         e = await call(db, "create_event", title="Gym", date="2026-11-02", start=7, end=8)
-        u = await call(db, "update_event", id=e["id"], color="sage", title="Gym (legs)")
-        assert events[e["id"]]["colorId"] == "2" and events[e["id"]]["summary"] == "Gym (legs)"
+        assert events[e["id"]]["colorId"] == "9"  # sport → blueberry, from the title
+        u = await call(db, "update_event", id=e["id"], color="sage", title="Coffee with Sam")
+        ev = events[e["id"]]
+        assert ev["extendedProperties"]["private"]["atlasColor"] == "sage"
+        assert ev["colorId"] == "4" and ev["summary"] == "Coffee with Sam"  # retitled → flamingo
         await undo(client, auth, u)
-        assert "colorId" not in events[e["id"]] and events[e["id"]]["summary"] == "Gym"
+        ev = events[e["id"]]
+        assert ev["colorId"] == "9" and ev["summary"] == "Gym"
+        assert ev["extendedProperties"]["private"]["atlasColor"] == ""
 
-    async def test_google_colour_names(self, db, client, auth, google):
+    async def test_google_colour_comes_from_the_title(self, db, client, auth, google):
         events, _ = google
-        for name, cid in [("lavender", "1"), ("flamingo", "4"), ("grape", "3"), ("banana", "5"), ("blueberry", "9")]:
-            e = await call(db, "create_event", title=name, date="2026-11-05", start=9, end=10, color=name)
-            assert events[e["id"]]["colorId"] == cid
-        e = await call(db, "create_event", title="Lunch", date="2026-11-05", start=12, end=13, color="default")
-        assert events[e["id"]].get("colorId") is None
+        for title, cid in [("Work", "2"), ("Sleep", "5"), ("Dinner with Jo", "4"), ("Church", "3"),
+                           ("Football", "9"), ("Masters project", "1")]:
+            e = await call(db, "create_event", title=title, date="2026-11-05", start=9, end=10)
+            assert events[e["id"]]["colorId"] == cid, title
+            assert "extendedProperties" not in events[e["id"]]
+        e = await call(db, "create_event", title="Lunch", date="2026-11-05", start=12, end=13, color="gold")
+        assert "colorId" not in events[e["id"]]  # on my own → the calendar's colour
+        assert events[e["id"]]["extendedProperties"]["private"]["atlasColor"] == "gold"
 
     async def test_deleted_event_is_recreated(self, db, client, auth, google):
         events, _ = google
@@ -254,7 +262,8 @@ class TestCalendar:
         d = await call(db, "delete_event", id=e["id"])
         assert e["id"] not in events
         await undo(client, auth, d)
-        assert [(v["summary"], v.get("colorId")) for v in events.values()] == [("Dentist", "6")]
+        [ev] = events.values()
+        assert (ev["summary"], ev.get("colorId"), ev["extendedProperties"]["private"]["atlasColor"]) == ("Dentist", "5", "coral")
 
     async def test_created_event_undo_deletes_it(self, db, client, auth, google):
         events, _ = google

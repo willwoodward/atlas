@@ -23,6 +23,7 @@ const TOOL_LABELS = {
   move_todo: 'Moving a to-do',
   delete_todo: 'Deleting a to-do',
   get_week_outcomes: 'Reading your weekly outcomes',
+  get_week_reviews: 'Reading your weekly reviews',
   set_week_outcomes: 'Updating your weekly outcomes',
   list_habits: 'Checking your habits',
   log_habit: 'Logging a habit',

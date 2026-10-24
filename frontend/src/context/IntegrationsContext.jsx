@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { localDateStr, parseLocalDate, addDays } from '../lib/week.js'
-import { buildAuthUrl, fetchEvents, toCalendarEvents, insertGcalEvent, deleteGcalEvent } from '../integrations/googleCalendar.js'
+import { buildAuthUrl, fetchEvents, toCalendarEvents, insertGcalEvent, deleteGcalEvent, shiftGcalEvent } from '../integrations/googleCalendar.js'
+import { gcalColorIdFor, atlasNameForHex } from '../lib/calendarColors.js'
 import { useAuth } from './AuthContext.jsx'
 import { useRefresh } from './RefreshContext.jsx'
 
@@ -76,13 +77,41 @@ export function IntegrationsProvider({ children }) {
     return () => window.removeEventListener('message', handler)
   }, [])
 
+  // Rules that pick an event's Google Calendar colour from its title.
+  const [colorRules, setColorRules] = useState(null)
+  const rulesRef = useRef(null)
+  const loadColorRules = useCallback(async () => {
+    const r = await fetch(`${API}/api/calendar/color-rules`, { headers: authHeaders() })
+    if (!r.ok) throw new Error(`Colour rules ${r.status}`)
+    const cfg = await r.json()
+    rulesRef.current = cfg
+    setColorRules(cfg)
+    return cfg
+  }, [authHeaders])
+  useEffect(() => { if (token) loadColorRules().catch(() => {}) }, [token, loadColorRules])
+  const saveColorRules = useCallback(async ({ rules, fallback }) => {
+    const r = await fetch(`${API}/api/calendar/color-rules`, {
+      method: 'PUT', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ rules, fallback }),
+    })
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `Save failed (${r.status})`)
+    rulesRef.current = { ...rulesRef.current, rules, fallback }
+    setColorRules(rulesRef.current)
+  }, [authHeaders])
+
+  // Google's colour comes from the title rules; the Atlas colour (picked, or
+  // from a local event being moved over) is kept on the event for Atlas only.
   const createGcalEvent = useCallback(async (eventData) => {
     if (!gcalConnected) throw new Error('Not connected')
     const accessToken = await getAccessToken()
-    const result = await insertGcalEvent(accessToken, eventData)
+    const rules = rulesRef.current ?? await loadColorRules().catch(() => null)
+    const result = await insertGcalEvent(accessToken, {
+      ...eventData,
+      colorId: rules ? gcalColorIdFor(eventData.title, rules) : null,
+      atlasColor: eventData.atlasColor ?? atlasNameForHex(eventData.color),
+    })
     setGcalMutatedAt(Date.now())
     return result
-  }, [gcalConnected, getAccessToken])
+  }, [gcalConnected, getAccessToken, loadColorRules])
 
   const removeGcalEvent = useCallback(async (eventId) => {
     if (!gcalConnected) throw new Error('Not connected')
@@ -92,6 +121,26 @@ export function IntegrationsProvider({ children }) {
     const keep = e => e.id !== eventId && e.id !== `${eventId}_wakeup`
     setGcalWeeks(prev => Object.fromEntries(Object.entries(prev).map(([k, evs]) => [k, evs.filter(keep)])))
     setGcalMutatedAt(Date.now())
+  }, [gcalConnected, getAccessToken])
+
+  // Moves or resizes events by the same amount ({ days, startHours, endHours }).
+  // The grid updates at once and the refetch that follows brings back Google's
+  // own times and labels.
+  const shiftGcalEvents = useCallback(async (ids, shift) => {
+    const { days = 0, startHours = 0, endHours = 0 } = shift
+    if (!gcalConnected) throw new Error('Not connected')
+    const accessToken = await getAccessToken()
+    const moving = new Set(ids.flatMap(id => [id, `${id}_wakeup`]))
+    const shiftDay = date => localDateStr(addDays(parseLocalDate(date), days))
+    setGcalWeeks(prev => Object.fromEntries(Object.entries(prev).map(([k, evs]) => [k, evs.map(e => moving.has(e.id)
+      ? (e.isAllDay ? { ...e, date: shiftDay(e.date) }
+        : { ...e, date: shiftDay(e.date), start: e.start + startHours, dur: Math.max(e.dur + endHours - startHours, 0.25) })
+      : e)])))
+    try {
+      await Promise.all(ids.map(id => shiftGcalEvent(accessToken, id, shift)))
+    } finally {
+      setGcalMutatedAt(Date.now())
+    }
   }, [gcalConnected, getAccessToken])
 
   const weeksRef = useRef(gcalWeeks)
@@ -192,6 +241,9 @@ export function IntegrationsProvider({ children }) {
       loadWeeks,
       createGcalEvent,
       removeGcalEvent,
+      shiftGcalEvents,
+      colorRules,
+      saveColorRules,
     }}>
       {children}
     </Ctx.Provider>

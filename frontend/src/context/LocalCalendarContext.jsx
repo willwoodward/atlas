@@ -35,7 +35,12 @@ export function LocalCalendarProvider({ children }) {
     await call(`/api/calendar/${id}`, { method: 'DELETE' })
   }, [call])
 
-  return <Ctx.Provider value={{ events, addEvent, removeEvent }}>{children}</Ctx.Provider>
+  const moveEvent = useCallback(async (id, { date, startH, endH }) => {
+    setEvents(prev => prev.map(e => e.id === id ? { ...e, date, startH, endH } : e))
+    await call(`/api/calendar/${id}`, { method: 'PATCH', body: JSON.stringify({ date, start_h: startH, end_h: endH }) })
+  }, [call])
+
+  return <Ctx.Provider value={{ events, addEvent, removeEvent, moveEvent }}>{children}</Ctx.Provider>
 }
 
 export const useLocalCalendar = () => useContext(Ctx)

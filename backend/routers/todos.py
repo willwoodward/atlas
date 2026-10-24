@@ -110,27 +110,58 @@ async def reorder_todo(body: ReorderIn, user=Depends(get_current_user), db=Depen
     return {"ok": True}
 
 
-@router.get("/outcomes")
-async def list_outcomes(user=Depends(get_current_user), db=Depends(get_db)):
-    """Every week with outcomes written, newest first — for the history view."""
-    async with db.execute(
-        "SELECT week_str, text FROM week_outcomes WHERE TRIM(text) != '' ORDER BY week_str DESC"
-    ) as cur:
+# Weekly outcomes (what would make the week a win) and the week's review
+# (how it went) are both one free-text entry per Mon–Sun week.
+WEEKLY_TABLES = {"outcomes": "week_outcomes", "reviews": "week_reviews"}
+
+
+async def _weekly_history(db, table):
+    async with db.execute(f"SELECT week_str, text FROM {table} WHERE TRIM(text) != '' ORDER BY week_str DESC") as cur:
         return [dict(r) for r in await cur.fetchall()]
 
 
-@router.get("/outcomes/{week_str}")
-async def get_outcomes(week_str: str, user=Depends(get_current_user), db=Depends(get_db)):
-    async with db.execute("SELECT text FROM week_outcomes WHERE week_str = ?", (week_str,)) as cur:
+async def _weekly_get(db, table, week_str):
+    async with db.execute(f"SELECT text FROM {table} WHERE week_str = ?", (week_str,)) as cur:
         row = await cur.fetchone()
     return {"text": row["text"] if row else ""}
 
 
-@router.put("/outcomes")
-async def set_outcomes(body: OutcomesIn, user=Depends(get_current_user), db=Depends(get_db)):
+async def _weekly_set(db, table, body):
     await db.execute(
-        "INSERT INTO week_outcomes (week_str, text) VALUES (?, ?) ON CONFLICT(week_str) DO UPDATE SET text = excluded.text",
+        f"INSERT INTO {table} (week_str, text) VALUES (?, ?) ON CONFLICT(week_str) DO UPDATE SET text = excluded.text",
         (body.week_str, body.text),
     )
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/outcomes")
+async def list_outcomes(user=Depends(get_current_user), db=Depends(get_db)):
+    """Every week with outcomes written, newest first — for the history view."""
+    return await _weekly_history(db, "week_outcomes")
+
+
+@router.get("/outcomes/{week_str}")
+async def get_outcomes(week_str: str, user=Depends(get_current_user), db=Depends(get_db)):
+    return await _weekly_get(db, "week_outcomes", week_str)
+
+
+@router.put("/outcomes")
+async def set_outcomes(body: OutcomesIn, user=Depends(get_current_user), db=Depends(get_db)):
+    return await _weekly_set(db, "week_outcomes", body)
+
+
+@router.get("/reviews")
+async def list_reviews(user=Depends(get_current_user), db=Depends(get_db)):
+    """Every week with a review written, newest first."""
+    return await _weekly_history(db, "week_reviews")
+
+
+@router.get("/reviews/{week_str}")
+async def get_review(week_str: str, user=Depends(get_current_user), db=Depends(get_db)):
+    return await _weekly_get(db, "week_reviews", week_str)
+
+
+@router.put("/reviews")
+async def set_review(body: OutcomesIn, user=Depends(get_current_user), db=Depends(get_db)):
+    return await _weekly_set(db, "week_reviews", body)

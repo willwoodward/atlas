@@ -1,5 +1,6 @@
 import { Button, PageHeader, card, eyebrow, groupTitle } from '../components/ui.jsx'
 import KeybindsSettings from '../components/KeybindsSettings.jsx'
+import ColorRulesCard from '../components/ColorRulesCard.jsx'
 import { useState, useCallback } from 'react'
 import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import { useGitHub } from '../context/GitHubContext.jsx'
@@ -288,6 +289,8 @@ export default function AccountsPage() {
           onDisconnect={disconnectGoogle}
           warning={!hasClientId && !gcal.connected ? 'VITE_GOOGLE_CLIENT_ID not set — see setup guide below.' : null}
         />
+
+        <ColorRulesCard />
 
         {gcal.error && (
           <div style={{ padding: '12px 16px', borderRadius: 10, background: 'rgba(193,95,60,.08)', border: '1px solid rgba(193,95,60,.2)', fontSize: 13, color: 'var(--accent)' }}>

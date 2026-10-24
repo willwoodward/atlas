@@ -42,6 +42,12 @@ async def init_db():
                 text TEXT NOT NULL DEFAULT ''
             );
 
+            -- A short free-text journal on how each week went.
+            CREATE TABLE IF NOT EXISTS week_reviews (
+                week_str TEXT PRIMARY KEY,
+                text TEXT NOT NULL DEFAULT ''
+            );
+
             CREATE TABLE IF NOT EXISTS goals (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,

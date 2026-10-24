@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useAuth } from './AuthContext.jsx'
 import { useRefresh } from './RefreshContext.jsx'
 import { weekKey } from '../lib/week.js'
@@ -7,16 +7,58 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 const Ctx = createContext(null)
 
+/**
+ * One free-text entry per Mon–Sun week, kept at /api/todos/<kind>. `byWeek` maps
+ * week key → text ({ '2026-10-05': '…' }); a key that's present has been loaded,
+ * even if empty. `history` lists the non-empty weeks, newest first.
+ */
+function useWeeklyText(call, tick, kind) {
+  const [byWeek, setByWeek] = useState({})
+  const [history, setHistory] = useState([])
+  const timers = useRef({})
+
+  useEffect(() => {
+    call(`/api/todos/${kind}`).then(r => r.ok ? r.json() : []).then(rows => {
+      setHistory(rows)
+      // Merge rather than replace (keeps weeks loaded as empty), and never
+      // clobber a week with an edit still waiting to be saved.
+      setByWeek(prev => {
+        const next = { ...prev }
+        for (const r of rows) if (!(r.week_str in timers.current)) next[r.week_str] = r.text
+        return next
+      })
+    })
+  }, [call, tick, kind])
+
+  const load = useCallback(async (week) => {
+    const r = await call(`/api/todos/${kind}/${week}`)
+    const d = await r.json()
+    setByWeek(prev => week in prev ? prev : { ...prev, [week]: d.text })
+  }, [call, kind])
+
+  // The week is explicit, so switching weeks mid-typing can't save into the wrong one.
+  const set = useCallback((week, text) => {
+    setByWeek(prev => ({ ...prev, [week]: text }))
+    setHistory(prev => {
+      const rest = prev.filter(r => r.week_str !== week)
+      const next = text.trim() ? [...rest, { week_str: week, text }] : rest
+      return next.sort((a, b) => b.week_str.localeCompare(a.week_str))
+    })
+    clearTimeout(timers.current[week])
+    timers.current[week] = setTimeout(() => {
+      delete timers.current[week]
+      call(`/api/todos/${kind}`, { method: 'PUT', body: JSON.stringify({ week_str: week, text }) })
+    }, 400)
+  }, [call, kind])
+
+  return useMemo(() => ({ byWeek, history, load, set }), [byWeek, history, load, set])
+}
+
 export function TodosProvider({ children }) {
   const { token } = useAuth()
   // Bumped when the assistant mutates data via MCP, forcing a refetch.
   const { tick } = useRefresh()
   const [todos, setTodos] = useState([])
-  // Weekly outcomes by week key ({ '2026-10-05': 'text' }); a key that's
-  // present has been loaded, even if empty.
-  const [outcomesByWeek, setOutcomesByWeek] = useState({})
-  const [outcomesHistory, setOutcomesHistory] = useState([])
-  const outcomeTimers = useRef({})
   const todosRef = useRef(todos)
   useEffect(() => { todosRef.current = todos }, [todos])
 
@@ -34,23 +76,11 @@ export function TodosProvider({ children }) {
 
   useEffect(() => {
     call('/api/todos').then(r => r.json()).then(rows => setTodos(rows.map(toInternal)))
-    call('/api/todos/outcomes').then(r => r.ok ? r.json() : []).then(rows => {
-      setOutcomesHistory(rows)
-      // Merge rather than replace (keeps weeks loaded as empty), and never
-      // clobber a week with an edit still waiting to be saved.
-      setOutcomesByWeek(prev => {
-        const next = { ...prev }
-        for (const r of rows) if (!(r.week_str in outcomeTimers.current)) next[r.week_str] = r.text
-        return next
-      })
-    })
   }, [token, tick])
 
-  const loadOutcomes = useCallback(async (week) => {
-    const r = await call(`/api/todos/outcomes/${week}`)
-    const d = await r.json()
-    setOutcomesByWeek(prev => week in prev ? prev : { ...prev, [week]: d.text })
-  }, [call])
+  // Outcomes (what would make the week a win) and the review (how it went).
+  const outcomesStore = useWeeklyText(call, tick, 'outcomes')
+  const reviewStore = useWeeklyText(call, tick, 'reviews')
 
   const addTodo = useCallback(async (text, bucket = 'today', goalId = null, parentId = null) => {
     const id = crypto.randomUUID()
@@ -108,21 +138,6 @@ export function TodosProvider({ children }) {
     await call('/api/todos/done/clear', { method: 'DELETE' })
   }, [call])
 
-  // The week is explicit, so switching weeks mid-typing can't save into the wrong one.
-  const setOutcomes = useCallback((week, text) => {
-    setOutcomesByWeek(prev => ({ ...prev, [week]: text }))
-    setOutcomesHistory(prev => {
-      const rest = prev.filter(r => r.week_str !== week)
-      const next = text.trim() ? [...rest, { week_str: week, text }] : rest
-      return next.sort((a, b) => b.week_str.localeCompare(a.week_str))
-    })
-    clearTimeout(outcomeTimers.current[week])
-    outcomeTimers.current[week] = setTimeout(() => {
-      delete outcomeTimers.current[week]
-      call('/api/todos/outcomes', { method: 'PUT', body: JSON.stringify({ week_str: week, text }) })
-    }, 400)
-  }, [call])
-
   const reorderTodo = useCallback(async (dragId, targetId, above, targetBucket) => {
     setTodos(prev => {
       const list = [...prev]
@@ -148,7 +163,13 @@ export function TodosProvider({ children }) {
   const addSubTodo = useCallback((parentId, text) => addTodo(text, todos.find(t => t.id === parentId)?.bucket ?? 'today', null, parentId), [addTodo, todos])
 
   return (
-    <Ctx.Provider value={{ todos, outcomes: outcomesByWeek[weekKey()] ?? '', outcomesByWeek, outcomesHistory, loadOutcomes, addTodo, addSubTodo, toggleTodo, moveTodo, removeTodo, clearDone, setOutcomes, reorderTodo }}>
+    <Ctx.Provider value={{
+      todos, addTodo, addSubTodo, toggleTodo, moveTodo, removeTodo, clearDone, reorderTodo,
+      outcomes: outcomesStore.byWeek[weekKey()] ?? '',
+      outcomesByWeek: outcomesStore.byWeek, outcomesHistory: outcomesStore.history,
+      loadOutcomes: outcomesStore.load, setOutcomes: outcomesStore.set,
+      reviews: reviewStore,
+    }}>
       {children}
     </Ctx.Provider>
   )

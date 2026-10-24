@@ -276,27 +276,39 @@ const navBtn = { width: 26, height: 26, display: 'flex', alignItems: 'center', j
 
 // "What would make this week a success" — one entry per Mon–Sun week. Arrows
 // or a horizontal swipe move between weeks, so on a Sunday you can look back
-// at this week and write next week's.
+// at this week and write next week's. The Review switch turns the card into
+// that week's journal: how it went, with the outcomes kept above for reference.
 function WeeklyOutcomes() {
-  const { outcomesByWeek, outcomesHistory, loadOutcomes, setOutcomes } = useTodos()
+  const { outcomesByWeek, outcomesHistory, loadOutcomes, setOutcomes, reviews } = useTodos()
   const current = weekKey()
   const [week, setWeek] = useState(current)
+  const [reviewing, setReviewing] = useState(false)
+  const isMobile = useIsMobile()
   const [showHistory, setShowHistory] = useState(false)
   const swipe = useRef(null)
   const taRef = useRef(null)
 
-  const loaded = week in outcomesByWeek
-  const text = outcomesByWeek[week] ?? ''
-  useEffect(() => { if (!loaded) loadOutcomes(week) }, [week, loaded, loadOutcomes])
+  const outcomesLoaded = week in outcomesByWeek
+  const outcomesText = outcomesByWeek[week] ?? ''
+  const reviewLoaded = week in reviews.byWeek
+  useEffect(() => { if (!outcomesLoaded) loadOutcomes(week) }, [week, outcomesLoaded, loadOutcomes])
+  useEffect(() => { if (reviewing && !reviewLoaded) reviews.load(week) }, [week, reviewing, reviewLoaded, reviews])
+
+  const loaded = reviewing ? reviewLoaded : outcomesLoaded
+  const text = reviewing ? (reviews.byWeek[week] ?? '') : outcomesText
+  const save = reviewing ? reviews.set : setOutcomes
+  const history = reviewing ? reviews.history : outcomesHistory
   useEffect(() => {
     const el = taRef.current
     if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px' }
-  }, [text, week])
+  }, [text, week, reviewing])
 
   const isPast = week < current
   const isSunday = new Date().getDay() === 0
   const rel = relativeWeekLabel(week)
   const go = (n) => { setWeek(w => shiftWeek(w, n)); setShowHistory(false) }
+  const toggleReview = () => { setReviewing(r => !r); setShowHistory(false) }
+  const noun = reviewing ? 'review' : 'outcomes'
 
   const onTouchStart = (e) => { const t = e.touches[0]; swipe.current = { x: t.clientX, y: t.clientY } }
   const onTouchEnd = (e) => {
@@ -306,19 +318,30 @@ function WeeklyOutcomes() {
     if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) go(dx < 0 ? 1 : -1)
   }
 
+  const placeholder = !loaded ? 'Loading…'
+    : reviewing ? 'How did the week go?'
+    : isPast ? 'Nothing written for this week.'
+    : 'What would make this week a win? Write 1–3 outcomes…'
+
   return (
     <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}
       style={{ background: 'var(--surface)', border: '1px solid var(--bd)', borderRadius: 14, padding: '14px 16px 14px 20px', marginBottom: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ ...eyebrow }}>
-            {week === current ? "This week's outcomes" : rel ? `${rel}'s outcomes` : 'Outcomes'}
+            {week === current ? `This week's ${noun}` : rel ? `${rel}'s ${noun}` : reviewing ? 'Review' : 'Outcomes'}
           </div>
           <div style={{ fontSize: 12, color: week === current ? 'var(--mid)' : 'var(--blue)', marginTop: 2 }}>{formatWeekRange(week)}</div>
         </div>
         {week !== current && (
           <button onClick={() => { setWeek(current); setShowHistory(false) }} style={{ ...navBtn, width: 'auto', padding: '0 8px', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', border: '1px solid var(--bd)' }}>This week</button>
         )}
+        <button onClick={toggleReview} aria-pressed={reviewing} aria-label="Review" title={reviewing ? 'Back to outcomes' : 'Review the week'}
+          style={{ ...navBtn, width: isMobile ? 26 : 'auto', gap: 5, padding: isMobile ? 0 : '0 8px', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
+                   border: '1px solid var(--bd)', background: reviewing ? 'var(--surface-3)' : 'transparent', color: reviewing ? 'var(--ink)' : 'var(--muted)' }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          {!isMobile && 'Review'}
+        </button>
         <button onClick={() => go(-1)} aria-label="Previous week" style={navBtn}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
@@ -333,8 +356,8 @@ function WeeklyOutcomes() {
 
       {showHistory ? (
         <div style={{ maxHeight: 260, overflowY: 'auto', marginTop: 8 }}>
-          {outcomesHistory.length === 0 && <div style={{ fontSize: 13, color: 'var(--faint)', padding: '6px 0' }}>No past weeks written yet.</div>}
-          {outcomesHistory.map(r => (
+          {history.length === 0 && <div style={{ fontSize: 13, color: 'var(--faint)', padding: '6px 0' }}>{reviewing ? 'No reviews written yet.' : 'No past weeks written yet.'}</div>}
+          {history.map(r => (
             <button key={r.week_str} onClick={() => { setWeek(r.week_str); setShowHistory(false) }}
               style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 0', border: 'none', borderTop: '1px solid var(--bd-xs)', background: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: r.week_str === week ? 'var(--blue)' : 'var(--mid)' }}>
@@ -345,25 +368,35 @@ function WeeklyOutcomes() {
           ))}
         </div>
       ) : (
-        <textarea
-          ref={taRef}
-          value={text}
-          disabled={!loaded}
-          onChange={e => setOutcomes(week, e.target.value)}
-          placeholder={!loaded ? 'Loading…' : isPast ? 'Nothing written for this week.' : 'What would make this week a win? Write 1–3 outcomes…'}
-          rows={2}
-          style={{ width: '100%', border: 'none', outline: 'none', resize: 'none', overflow: 'hidden', fontFamily: 'inherit', fontSize: 14, lineHeight: 1.65, color: 'var(--ink)', background: 'transparent', padding: 0 }}
-        />
+        <>
+          {reviewing && outcomesText.trim() && (
+            <div style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--mid)', whiteSpace: 'pre-wrap', borderLeft: '2px solid var(--bd)', paddingLeft: 10, margin: '4px 0 10px' }}>
+              {outcomesText}
+            </div>
+          )}
+          <textarea
+            ref={taRef}
+            value={text}
+            disabled={!loaded}
+            onChange={e => save(week, e.target.value)}
+            placeholder={placeholder}
+            rows={reviewing ? 4 : 2}
+            style={{ width: '100%', border: 'none', outline: 'none', resize: 'none', overflow: 'hidden', fontFamily: 'inherit', fontSize: 14, lineHeight: 1.65, color: 'var(--ink)', background: 'transparent', padding: 0 }}
+          />
+        </>
       )}
 
-      {isSunday && week === current && !showHistory && (
-        <button onClick={() => go(1)} style={{ marginTop: 4, fontSize: 12.5, fontWeight: 600, color: 'var(--blue)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }}>
-          Plan next week →
-        </button>
+      {isSunday && week === current && !showHistory && !reviewing && (
+        <div style={{ display: 'flex', gap: 14, marginTop: 4 }}>
+          <button onClick={toggleReview} style={sundayLink}>Review this week</button>
+          <button onClick={() => go(1)} style={sundayLink}>Plan next week →</button>
+        </div>
       )}
     </div>
   )
 }
+
+const sundayLink = { fontSize: 12.5, fontWeight: 600, color: 'var(--blue)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit' }
 
 export default function TodoPage() {
   const isMobile = useIsMobile()

@@ -20,6 +20,7 @@ import agent_cards
 from agent_cards import change_card, note_card
 import inbox
 import agent_config
+import calendar_colors
 from agent_actions import snapshot, restore_rows, delete_rows
 from crypto import enc, dec
 from mcp.server import Server
@@ -155,7 +156,7 @@ async def _gcal_events(db, day_from: _date, day_to: _date, strict: bool = False)
             "all_day": all_day,
             "location": e.get("location", ""),
             "description": e.get("description", ""),
-            "color": _GCAL_COLOR_NAMES.get(e.get("colorId"), "default"),
+            "color": _atlas_color(e),
         })
     return events
 
@@ -194,37 +195,33 @@ async def _gcal_get(db, event_id: str) -> dict | None:
 
 
 # Fields that can be put back on a Google event to undo an edit.
-_GCAL_FIELDS = ("summary", "description", "location", "start", "end", "colorId")
+_GCAL_FIELDS = ("summary", "description", "location", "start", "end", "colorId", "extendedProperties")
 
 
 def _gcal_recreate_body(ev: dict) -> dict:
     return {k: ev[k] for k in _GCAL_FIELDS if k in ev}
 
 
-# Atlas shows Google's 11 event colours as six of its own (see
-# frontend/src/integrations/googleCalendar.js COLOR_MAP). Either name works.
-_GCAL_COLORS = {
-    "coral": "6", "sage": "2", "blue": "9", "gold": "5", "mauve": "3", "grey": "8", "gray": "8", "stone": "8",
-    "lavender": "1", "grape": "3", "flamingo": "4", "banana": "5", "tangerine": "6", "peacock": "7",
-    "graphite": "8", "blueberry": "9", "basil": "10", "tomato": "11",
-}
-ATLAS_COLOR_NAMES = ["coral", "sage", "blue", "gold", "mauve", "grey", "default"]
-# What create_event / update_event accept: Google's names first, then Atlas's.
-GCAL_COLOR_ENUM = ["lavender", "sage", "grape", "flamingo", "banana", "tangerine", "peacock", "graphite",
-                   "blueberry", "basil", "tomato", "coral", "blue", "gold", "mauve", "grey", "default"]
-# colorId → the Atlas colour it's shown as.
+# Atlas draws events in six colours of its own. An event's Atlas colour lives
+# on the Google event as a private extended property, so it never changes what
+# Google Calendar shows; Google's colour is set from the title by the rules in
+# calendar_colors.py.
+ATLAS_COLOR_NAMES = ["coral", "sage", "blue", "gold", "mauve", "grey"]
+# A Google colorId → the Atlas colour it's drawn in when the event has none of
+# its own (matches frontend/src/integrations/googleCalendar.js COLOR_MAP).
 _GCAL_COLOR_NAMES = {"1": "mauve", "2": "sage", "3": "mauve", "4": "coral", "5": "gold", "6": "coral",
                      "7": "blue", "8": "grey", "9": "blue", "10": "sage", "11": "coral"}
+_NO_ATLAS_COLOR = {"private": {"atlasColor": ""}}
 
 
-def _gcal_color_id(name: str) -> str | None:
-    """A colour name (or Google colorId) → colorId; "default" → None (calendar colour)."""
-    n = str(name).strip().lower()
-    if n in ("default", "none", ""):
-        return None
-    if n.isdigit() and 1 <= int(n) <= 11:
-        return n
-    return _GCAL_COLORS.get(n, "9")
+def _atlas_color(ev: dict) -> str:
+    own = ((ev.get("extendedProperties") or {}).get("private") or {}).get("atlasColor")
+    return own if own in ATLAS_COLOR_NAMES else _GCAL_COLOR_NAMES.get(ev.get("colorId"), "default")
+
+
+def _atlas_color_prop(name: str) -> dict:
+    """extendedProperties for an Atlas colour; "default" clears it (follow Google's colour)."""
+    return {"private": {"atlasColor": name if name in ATLAS_COLOR_NAMES else ""}}
 
 
 def _gcal_when(ev: dict | None) -> str | None:
@@ -271,6 +268,7 @@ async def list_tools() -> list[Tool]:
         Tool(name="complete_todo", description="Mark a todo as done", inputSchema={"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}),
         Tool(name="move_todo", description="Move a todo to a different bucket", inputSchema={"type":"object","properties":{"id":{"type":"string"},"bucket":{"type":"string","enum":["today","week","someday"]}},"required":["id","bucket"]}),
         Tool(name="get_week_outcomes", description="Get the weekly outcomes / intentions text", inputSchema={"type":"object","properties":{},"required":[]}),
+        Tool(name="get_week_reviews", description="The user's weekly reviews: a short journal they write on how each week went, alongside that week's outcomes (what they aimed for). Newest first. Use for reflecting on recent weeks, spotting patterns, or planning the next one.", inputSchema={"type":"object","properties":{"limit":{"type":"integer","description":"How many recent weeks (default 4)"}},"required":[]}),
         Tool(name="list_habits", description="List all habits with today's completion status", inputSchema={"type":"object","properties":{},"required":[]}),
         Tool(name="log_habit", description="Toggle a habit completion for a date (defaults to today)", inputSchema={"type":"object","properties":{"id":{"type":"string"},"date":{"type":"string"}},"required":["id"]}),
         Tool(name="list_goals", description="List all annual goals with quarterly focus text", inputSchema={"type":"object","properties":{},"required":[]}),
@@ -280,8 +278,8 @@ async def list_tools() -> list[Tool]:
         Tool(name="create_note", description="Create a new quick note", inputSchema={"type":"object","properties":{"body":{"type":"string"}},"required":["body"]}),
         Tool(name="update_note", description="Update an existing note body", inputSchema={"type":"object","properties":{"id":{"type":"string"},"body":{"type":"string"}},"required":["id","body"]}),
         Tool(name="list_events", description="List calendar events — both the user's Google Calendar and local Atlas events. Pass a date (YYYY-MM-DD) for a single day; without one you get local events plus the next 7 days of Google Calendar. Each event has a 'source' of 'google' or 'local'.", inputSchema={"type":"object","properties":{"date":{"type":"string"}},"required":[]}),
-        Tool(name="create_event", description="Create a calendar event in the user's Google Calendar. Times are local (Europe/London) decimal hours: 14.5 = 2:30pm. For an all-day event pass all_day=true and omit start/end.", inputSchema={"type":"object","properties":{"title":{"type":"string"},"date":{"type":"string","description":"YYYY-MM-DD"},"start":{"type":"number","description":"Start hour, e.g. 9.25 for 9:15am"},"end":{"type":"number","description":"End hour, e.g. 10.5 for 10:30am"},"description":{"type":"string"},"location":{"type":"string"},"all_day":{"type":"boolean"},"color":{"type":"string","enum":GCAL_COLOR_ENUM,"description":"Google Calendar event colour (lavender, sage, grape, flamingo, banana, tangerine, peacock, graphite, blueberry, basil, tomato). Atlas names (coral, blue, gold, mauve, grey) also work. default = the calendar colour"}},"required":["title","date"]}),
-        Tool(name="update_event", description="Update, reschedule or recolour an existing Google Calendar event. Use the event 'id' from list_events. Only pass the fields you want to change.", inputSchema={"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"date":{"type":"string","description":"YYYY-MM-DD — required if changing start/end"},"start":{"type":"number"},"end":{"type":"number"},"description":{"type":"string"},"location":{"type":"string"},"color":{"type":"string","enum":GCAL_COLOR_ENUM,"description":"Google Calendar event colour (lavender, sage, grape, flamingo, banana, tangerine, peacock, graphite, blueberry, basil, tomato). Atlas names (coral, blue, gold, mauve, grey) also work. default = the calendar colour"}},"required":["id"]}),
+        Tool(name="create_event", description="Create a calendar event in the user's Google Calendar. Times are local (Europe/London) decimal hours: 14.5 = 2:30pm. For an all-day event pass all_day=true and omit start/end.", inputSchema={"type":"object","properties":{"title":{"type":"string"},"date":{"type":"string","description":"YYYY-MM-DD"},"start":{"type":"number","description":"Start hour, e.g. 9.25 for 9:15am"},"end":{"type":"number","description":"End hour, e.g. 10.5 for 10:30am"},"description":{"type":"string"},"location":{"type":"string"},"all_day":{"type":"boolean"},"color":{"type":"string","enum":[*ATLAS_COLOR_NAMES,"default"],"description":"The colour Atlas shows the event in; default = follow its Google colour. Google Calendar\'s own colour is set automatically from the title, so don\'t use this for that"}},"required":["title","date"]}),
+        Tool(name="update_event", description="Update, reschedule or recolour an existing Google Calendar event. Use the event 'id' from list_events. Only pass the fields you want to change.", inputSchema={"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"date":{"type":"string","description":"YYYY-MM-DD — required if changing start/end"},"start":{"type":"number"},"end":{"type":"number"},"description":{"type":"string"},"location":{"type":"string"},"color":{"type":"string","enum":[*ATLAS_COLOR_NAMES,"default"],"description":"The colour Atlas shows the event in; default = follow its Google colour. Google Calendar\'s own colour is set automatically from the title, so don\'t use this for that"}},"required":["id"]}),
         Tool(name="delete_event", description="Delete a Google Calendar event by its 'id' from list_events", inputSchema={"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}),
         Tool(name="delete_todo", description="Delete a todo permanently", inputSchema={"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}),
         Tool(name="set_week_outcomes", description="Set the weekly outcomes / intentions text", inputSchema={"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}),
@@ -407,6 +405,18 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         async with db.execute("SELECT text FROM week_outcomes WHERE week_str = ?", (monday,)) as c:
             row = await c.fetchone()
         return {"week": monday, "text": row["text"] if row else ""}
+
+    if name == "get_week_reviews":
+        limit = max(1, min(int(args.get("limit") or 4), 52))
+        async with db.execute(
+            "SELECT w.week_str, COALESCE(o.text, '') AS outcomes, COALESCE(r.text, '') AS review FROM "
+            "(SELECT week_str FROM week_reviews WHERE TRIM(text) != '' UNION "
+            " SELECT week_str FROM week_outcomes WHERE TRIM(text) != '') w "
+            "LEFT JOIN week_outcomes o ON o.week_str = w.week_str "
+            "LEFT JOIN week_reviews r ON r.week_str = w.week_str "
+            "ORDER BY w.week_str DESC LIMIT ?", (limit,),
+        ) as c:
+            return [{"week": r["week_str"], "outcomes": r["outcomes"], "review": r["review"]} for r in await c.fetchall()]
 
     if name == "list_habits":
         async with db.execute("SELECT * FROM habits ORDER BY created_at") as c:
@@ -550,8 +560,11 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
             body["start"] = {"dateTime": _rfc3339(date_str, start_h), "timeZone": TIMEZONE}
             body["end"] = {"dateTime": _rfc3339(date_str, end_h), "timeZone": TIMEZONE}
 
-        if args.get("color"):
-            body["colorId"] = _gcal_color_id(args["color"])
+        color_id = calendar_colors.color_id_for(title, await calendar_colors.get_rules(db))
+        if color_id:
+            body["colorId"] = color_id
+        if args.get("color") and args["color"] != "default":
+            body["extendedProperties"] = _atlas_color_prop(args["color"])
         ok, data = await _gcal_write(db, "POST", "", body)
         if not ok:
             return {"error": data}
@@ -564,6 +577,8 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
         body = {}
         if args.get("title"):
             body["summary"] = args["title"]
+            # A new title can mean a new Google colour.
+            body["colorId"] = calendar_colors.color_id_for(args["title"], await calendar_colors.get_rules(db))
         if args.get("description") is not None:
             body["description"] = args["description"]
         if args.get("location") is not None:
@@ -579,7 +594,7 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
                 body["end"] = {"dateTime": _rfc3339(date_str, args["end"]), "timeZone": TIMEZONE}
 
         if args.get("color"):
-            body["colorId"] = _gcal_color_id(args["color"])
+            body["extendedProperties"] = _atlas_color_prop(args["color"])
         if not body:
             return {"error": "Nothing to update — pass at least one field to change"}
 
@@ -589,8 +604,8 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
             return {"error": data}
         # Put back every field this edit touched; one that was unset before is
         # cleared (null for colour, empty text for the rest).
-        restore = ({k: before.get(k, None if k in ("colorId", "start", "end") else "") for k in body}
-                   if before else None)
+        unset = {"colorId": None, "start": None, "end": None, "extendedProperties": _NO_ATLAS_COLOR}
+        restore = ({k: before.get(k, unset.get(k, "")) for k in body} if before else None)
         ev_date = ((data.get("start") or {}).get("dateTime") or (data.get("start") or {}).get("date") or "")[:10]
         undo_id = await actions.record(db, name, f"Changed “{(before or data).get('summary', 'event')}”",
                                        {"gcal": [{"method": "PATCH", "path": f"/{args['id']}", "body": restore}]} if restore else None,
@@ -600,7 +615,7 @@ async def _dispatch(name: str, args: dict, db: aiosqlite.Connection):
             ("Title", (before or {}).get("summary"), after.get("summary")),
             ("When", _gcal_when(before), _gcal_when(after)),
             ("Where", (before or {}).get("location"), after.get("location")),
-            ("Colour", _GCAL_COLOR_NAMES.get((before or {}).get("colorId")) or "default", _GCAL_COLOR_NAMES.get(after.get("colorId")) or "default"),
+            ("Colour", _atlas_color(before or {}), _atlas_color(after)),
         ], {"kind": "event", "id": args["id"], "date": ev_date})
         return {"ok": True, "id": data.get("id"), "title": data.get("summary"), "date": ev_date, "undo_id": undo_id, "card": card}
 
