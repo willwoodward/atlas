@@ -1,0 +1,55 @@
+// The rules the helper enforces whatever Atlas asks. They live here, on the
+// laptop, so they hold even if the server or the model is compromised, and
+// even if a web page talks the model into something.
+//
+// - Only the sites the user listed in the helper's config open.
+// - Card, bank and password fields are never typed into (logins and paying
+//   are the user's).
+// - Pay / place-order buttons are never pressed.
+
+/** The allowed site a URL belongs to ("irishrail.ie" for booking.cf.irishrail.ie), or null. */
+export function siteFor(url, sites, { allowHttpLocal = false } = {}) {
+  let u
+  try { u = new URL(url) } catch { return null }
+  const host = u.hostname.toLowerCase().replace(/\.$/, '')
+  const local = host === 'localhost' || host === '127.0.0.1'
+  if (u.protocol !== 'https:' && !(allowHttpLocal && local && u.protocol === 'http:')) return null
+  for (const raw of sites) {
+    const site = String(raw).toLowerCase().trim().replace(/^\*\./, '').replace(/^www\./, '')
+    if (site && (host === site || host.endsWith('.' + site))) return site
+  }
+  return null
+}
+
+// Words in a field's name, label or hints that mean card, bank or login details.
+const SENSITIVE_TEXT = /card.?(number|no\b|num)|cc.?(num|number|csc|exp)|\bcvv|\bcvc|\bcsc\b|security.?code|expir|exp.?(date|month|year)|name.?on.?card|card.?holder|\biban\b|\bbic\b|swift|sort.?code|account.?(number|no\b)|\bpin\b|password|passcode/i
+
+/**
+ * Is this a field Atlas must not type into? `field` describes the element:
+ * { tag, type, autocomplete, name, id, label, placeholder, aria }.
+ */
+export function sensitiveField(field) {
+  if (!field) return null
+  const type = String(field.type || '').toLowerCase()
+  if (type === 'password') return 'a password field'
+  const ac = String(field.autocomplete || '').toLowerCase()
+  if (/\bcc-|\bcard|csc|current-password|new-password|one-time-code/.test(ac)) return 'a card or login field'
+  const words = [field.name, field.id, field.label, field.placeholder, field.aria].filter(Boolean).join(' ')
+  if (SENSITIVE_TEXT.test(words)) return 'a card, bank or login field'
+  return null
+}
+
+// Button wording that completes a purchase. Deliberately broad: a false
+// "no" just means handing over a step early.
+const PAYMENT_TEXT = /\bpay\b|\bpay now\b|\bpayment\b|place (my |your |the )?order|\bpurchase\b|\bbuy now\b|complete (my |your |the )?(booking|purchase|order|payment)|confirm (and|&) pay|confirm (booking and |and )?payment|submit (order|payment)|\bcheckout and pay\b/i
+
+/** Is this a button that pays? `el` = { text, aria, value, title }. */
+export function paymentAction(el) {
+  if (!el) return false
+  const words = [el.text, el.aria, el.value, el.title].filter(Boolean).join(' ').replace(/\s+/g, ' ')
+  return PAYMENT_TEXT.test(words)
+}
+
+export const KEYS = new Set(['Enter', 'Tab', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Space', 'Backspace'])
+
+export const SENSITIVE_SOURCE = SENSITIVE_TEXT.source

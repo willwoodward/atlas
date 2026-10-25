@@ -1,6 +1,7 @@
 import { Button, PageHeader, card, eyebrow, groupTitle } from '../components/ui.jsx'
 import KeybindsSettings from '../components/KeybindsSettings.jsx'
 import ColorRulesCard from '../components/ColorRulesCard.jsx'
+import BrowserHelperCard from '../components/BrowserHelperCard.jsx'
 import { useState, useCallback } from 'react'
 import { useIntegrations } from '../context/IntegrationsContext.jsx'
 import { useGitHub } from '../context/GitHubContext.jsx'
@@ -297,6 +298,9 @@ export default function AccountsPage() {
             ⚠ {gcal.error}
           </div>
         )}
+
+        <h2 style={groupTitle}>Assistant</h2>
+        <BrowserHelperCard />
 
         <h2 style={groupTitle}>Finance</h2>
         <ComingSoonCard icon="🏦" name="Plaid" description="Connect bank accounts, savings, and credit cards to track net worth and spending automatically." />

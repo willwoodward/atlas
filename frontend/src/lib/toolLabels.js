@@ -74,6 +74,18 @@ const TOOL_LABELS = {
   append_to_note: 'Added to a note',
   delete_note: 'Deleted a note',
   show: 'Opening it for you',
+  browser_open: 'Opening a website',
+  browser_snapshot: 'Reading the page',
+  browser_click: 'Clicking on the page',
+  browser_type: 'Filling in the page',
+  browser_select: 'Choosing an option',
+  browser_press: 'Pressing a key',
+  browser_scroll: 'Scrolling the page',
+  browser_back: 'Going back a page',
+  browser_screenshot: 'Looking at the page',
+  browser_handoff: 'Handing the page to you',
+  browser_close: 'Closing the page',
+  save_site_notes: 'Saving notes on the site',
 }
 
 export const toolLabel = name => TOOL_LABELS[name] || name.replace(/_/g, ' ')

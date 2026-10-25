@@ -14,6 +14,7 @@ import { voiceSupported } from '../hooks/useVoiceInput.js'
 import { useVoiceConversation } from '../hooks/useVoiceConversation.js'
 import { speech, useSpeaking, unlockAudio } from '../lib/speech.js'
 import { useKeybinds } from '../context/KeybindsContext.jsx'
+import { useFocusRequest } from '../lib/focus.js'
 import { displayCombo } from '../lib/keybinds.js'
 
 import { toolLabel } from '../lib/toolLabels.js'
@@ -417,6 +418,14 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
   const speaking = useSpeaking()
   const clock = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
+  // Ctrl+. (the assistant shortcut) puts the cursor here, at the end of any draft.
+  useFocusRequest(['chat'], () => {
+    const el = taRef.current
+    if (!el) return
+    el.focus({ preventScroll: true })
+    el.setSelectionRange(el.value.length, el.value.length)
+  })
+
   const onKeyDown = e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(input) }
   }
@@ -434,6 +443,7 @@ export default function AssistantChat({ orbSize = 200, ring1 = 300, ring2 = 240,
       )}
       <textarea
         ref={taRef}
+        data-chat-input
         rows={1}
         // While listening, the box shows what you've typed plus the live preview.
         value={voice.state === 'idle' ? input : joinText(input, live)}

@@ -231,9 +231,19 @@ export default function DesktopLayout() {
   // on the Assistant page itself, which is the same chat full width.
   const [panelOpen, setPanelOpen] = useState(() => { try { return localStorage.getItem(PANEL_KEY) === '1' } catch { return false } })
   useEffect(() => { try { localStorage.setItem(PANEL_KEY, panelOpen ? '1' : '0') } catch { /* not kept */ } }, [panelOpen])
-  // Its shortcut (Ctrl+. by default) toggles it from anywhere, and the voice
-  // shortcut opens it when no chat is on screen.
-  useEffect(() => onShortcut('assistantPanel', () => setPanelOpen(o => !o)), [])
+  // Its shortcut (Ctrl+. by default) opens it with the cursor in the chat box;
+  // pressed again while you're in the box, it closes it. On the Assistant page
+  // it just puts the cursor in the box. The voice shortcut opens it when no
+  // chat is on screen.
+  const panelOpenRef = useRef(panelOpen)
+  panelOpenRef.current = panelOpen
+  useEffect(() => onShortcut('assistantPanel', () => {
+    const inChat = document.activeElement?.closest?.('[data-chat-input]')
+    if (activeRef.current === 'assistant') { requestFocus({ kind: 'chat' }); return }
+    if (panelOpenRef.current && inChat) { inChat.blur(); setPanelOpen(false); return }
+    setPanelOpen(true)
+    requestFocus({ kind: 'chat' })
+  }), [])
   // The sidebar folds down to an icon rail (Ctrl+B by default). Remembered.
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(SIDEBAR_KEY) === '1' } catch { return false } })
   useEffect(() => { try { localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0') } catch { /* not kept */ } }, [collapsed])

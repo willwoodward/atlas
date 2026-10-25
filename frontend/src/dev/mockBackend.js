@@ -26,6 +26,8 @@ const EMPTY = {
   // Absent `github` and `gcal` keys read as "not connected".
   '/api/integrations': {},
   '/api/calendar/color-rules': { rules: [], fallback: 'default', choices: [] },
+  '/api/browser/status': { connected: true, since: null, sites: ['irishrail.ie', 'thetrainline.com', 'lner.co.uk'], version: '0.1.0' },
+  '/api/browser/notes': [{ site: 'irishrail.ie', notes: "Search with time 'All day' or later trains are missing.\nExtras step: press Skip." }],
   '/api/employment': { employments: [], components: [], grants: [], prices: [], fx: [], projection: [], summary: {} },
   '/assistant/runs': { runs: [] },
   '/assistant/sessions/current': { session: null, messages: [], active_run: null },

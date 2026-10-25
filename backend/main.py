@@ -17,6 +17,7 @@ from routers import inbox as inbox_router
 from routers import agents as agents_router
 from routers import history as history_router
 from routers import wake as wake_router
+import browser_helper
 
 ALLOWED_ORIGINS = [
     o.strip()
@@ -58,6 +59,7 @@ async def lifespan(app: FastAPI):
 
 # The interactive API docs list every endpoint to anyone; off unless asked for.
 _DOCS = os.getenv("ATLAS_API_DOCS", "").strip().lower() in ("1", "true", "on")
+
 app = FastAPI(title="Atlas API", lifespan=lifespan,
               docs_url="/docs" if _DOCS else None, redoc_url="/redoc" if _DOCS else None,
               openapi_url="/openapi.json" if _DOCS else None)
@@ -87,6 +89,7 @@ app.include_router(history_router.router)
 app.include_router(wake_router.router)
 app.include_router(github_drafts_router)
 app.include_router(mcp_auth_router)
+app.include_router(browser_helper.router)
 
 app.mount("/mcp", mcp_app)
 

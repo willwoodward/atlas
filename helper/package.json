@@ -1,0 +1,17 @@
+{
+  "name": "atlas-browser-helper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lets Atlas drive a separate browser on this laptop and hand pages over to you to pay.",
+  "type": "module",
+  "bin": { "atlas-helper": "src/main.js" },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test test/"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "playwright": "1.64.0",
+    "ws": "8.18.3"
+  }
+}

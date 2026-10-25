@@ -4,6 +4,9 @@ frontend/dist/
 frontend/.env.local
 frontend/.env.*.local
 
+# Browser helper (runs on the laptop)
+helper/node_modules/
+
 # Backend
 **/__pycache__/
 **/*.pyc

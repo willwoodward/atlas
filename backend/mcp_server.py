@@ -21,11 +21,12 @@ from agent_cards import change_card, note_card
 import inbox
 import agent_config
 import calendar_colors
+import browser_helper
 from agent_actions import snapshot, restore_rows, delete_rows
 from crypto import enc, dec
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
-from mcp.types import Tool, TextContent
+from mcp.types import Tool, TextContent, ImageContent
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import Response
@@ -311,6 +312,7 @@ async def list_tools() -> list[Tool]:
     tools += agent_cards.TOOLS
     tools += inbox.TOOLS
     tools += agent_config.TOOLS
+    tools += browser_helper.TOOLS
     return tools
 
 
@@ -321,7 +323,12 @@ async def call_tool(name: str, arguments: dict):
         result = await run_tool(name, arguments, db)
     finally:
         await db.close()
-    return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
+    # A screenshot from the browser helper goes to the model as an image.
+    image = result.pop("_image", None) if isinstance(result, dict) else None
+    content = [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
+    if image:
+        content.append(ImageContent(type="image", data=image["data"], mimeType=image["mime"]))
+    return content
 
 
 async def run_tool(name: str, args: dict, db):
@@ -337,6 +344,8 @@ async def run_tool(name: str, args: dict, db):
         result = await inbox.dispatch(name, args, db)
     elif name in agent_config.NAMES:
         result = await agent_config.dispatch(name, args, db)
+    elif name in browser_helper.NAMES:
+        result = await browser_helper.dispatch(name, args, db)
     else:
         result = await _dispatch(name, args, db)
     if isinstance(result, dict) and result.get("undo_id") and "show" not in result:

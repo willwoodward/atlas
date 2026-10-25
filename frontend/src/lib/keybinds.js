@@ -7,7 +7,7 @@
 export const SHORTCUTS = [
   { id: 'search', label: 'Search', hint: 'Notes, to-dos, events, goals, transactions', default: 'Mod+/' },
   { id: 'voice', label: 'Start / stop voice input', hint: 'Opens the assistant if it isn’t on screen', default: 'Mod+K' },
-  { id: 'assistantPanel', label: 'Open / close the assistant panel', hint: 'Desktop', default: 'Mod+.' },
+  { id: 'assistantPanel', label: 'Type to the assistant', hint: 'Desktop: opens the panel with the cursor in the chat box; press again to close it', default: 'Mod+.' },
   { id: 'sidebar', label: 'Collapse / expand the sidebar', hint: 'Desktop', default: 'Mod+B' },
 ]
 
