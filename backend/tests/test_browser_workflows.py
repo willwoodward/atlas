@@ -35,6 +35,8 @@ def test_validation_accepts_a_good_workflow():
     ([{"do": "type", "target": {"name": "From"}, "text": "{{origin}}"}], [{"name": "from"}], "no param called 'origin'"),
     ([], [], "non-empty"),
     ([{"do": "handoff"}], [{"name": "From Station"}], "Bad param"),
+    ([{"do": "type", "target": {"name": "From"}, "text": "{{ from station }}"}], [{"name": "from"}], "unreadable placeholder"),
+    ([{"do": "type", "target": {"name": "From"}, "text": "{{params.origin}}"}], [{"name": "from"}], "no param called 'origin'"),
 ])
 def test_validation_says_what_is_wrong(steps, params, message):
     if message is None:
@@ -91,3 +93,10 @@ async def test_tools_are_listed_and_routes_work(client, auth):
     assert (await client.delete("/api/browser/workflows/Book%20a%20train", headers=auth)).json() == {"ok": True}
     assert (await client.get("/api/browser/workflows", headers=auth)).json() == []
     assert (await client.get("/api/browser/workflows")).status_code in (401, 403)
+
+
+def test_params_prefix_is_accepted_and_empty_fields_are_dropped():
+    steps = [{"do": "type", "url": "", "target": {"role": "textbox", "name": "From", "match": "exact", "nth": 0},
+              "text": "{{params.from}}", "submit": False, "option": "", "max_actions": 0, "optional": False, "expect": ""}]
+    _, clean = bw.validate([{"name": "from"}], steps)
+    assert clean == [{"do": "type", "target": {"role": "textbox", "name": "From", "match": "exact", "nth": 0}, "text": "{{params.from}}"}]

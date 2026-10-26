@@ -34,7 +34,7 @@ log = logging.getLogger("atlas.agent.workflows")
 # Tools only the runner calls (the API also lists them).
 RUNNER_ONLY = {"log_workflow_run"}
 
-PLACEHOLDER = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
+PLACEHOLDER = re.compile(r"\{\{\s*(?:params\.)?([a-zA-Z0-9_]+)\s*\}\}")  # {{from}} or {{params.from}}
 DEFAULT_DECIDE_ACTIONS = 6
 MAX_DECIDE_ACTIONS = 15
 PAGE_CHARS = 9000

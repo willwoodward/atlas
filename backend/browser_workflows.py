@@ -22,7 +22,8 @@ from database import get_db
 
 MAX_STEPS = 60
 PARAM_NAME = re.compile(r"^[a-z][a-z0-9_]{0,30}$")
-PLACEHOLDER = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
+# {{from}}; {{params.from}} means the same.
+PLACEHOLDER = re.compile(r"\{\{\s*(?:params\.)?([a-zA-Z0-9_]+)\s*\}\}")
 KEYS = {"Enter", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Space", "Backspace"}
 
 # What each kind of step needs (besides "do"). Every step may also have
@@ -95,8 +96,12 @@ def validate(params, steps) -> tuple[list[dict], list[dict]]:
             for used in PLACEHOLDER.findall(text):
                 if used not in names:
                     raise ValueError(f"Step {i} uses {{{{{used}}}}} but there's no param called '{used}'")
+            # Anything else in double braces would be typed in literally.
+            if "{{" in PLACEHOLDER.sub("", text):
+                raise ValueError(f"Step {i}: unreadable placeholder in {text[:60]!r}. Write {{{{name}}}} with a param's name.")
         keep = {k: step[k] for k in ("do", "url", "target", "text", "submit", "option", "key", "goal",
-                                      "max_actions", "optional", "expect", "timeout", "note") if k in step}
+                                      "max_actions", "optional", "expect", "timeout", "note")
+                if k in step and step[k] not in ("", None, 0, False)}
         clean.append(keep)
     return clean_params, clean
 

@@ -116,3 +116,9 @@ def test_budget_counts_actions_not_looking():
     for e in events:
         b._before(e)
     assert [bool(e.cancel_tool) for e in events] == [False, False, False, False, True]
+
+
+def test_fill_accepts_the_params_prefix():
+    assert wf.fill("{{params.from}} to {{ to }}", {"from": "Dublin Connolly", "to": "Belfast"}) == "Dublin Connolly to Belfast"
+    assert wf.fill_step({"do": "click", "target": {"name": "{{params.from}}"}}, {"from": "Cork"})["target"]["name"] == "Cork"
+    assert wf.fill("https://x/?a={{params.q}}", {"q": "a b/c"}, url=True) == "https://x/?a=a%20b%2Fc"

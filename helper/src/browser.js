@@ -36,7 +36,27 @@ export class Browser {
   async ensure() {
     if (this.context) return
     const { headless = false, visible = false, executablePath, channel, profileDir } = this.opts
-    this.context = await chromium.launchPersistentContext(profileDir, {
+    this.context = await this.launch(profileDir, { headless, visible, executablePath, channel })
+    this.context.on('close', () => { this.context = null; this.page = null })
+    await this.guard()
+  }
+
+  async launch(profileDir, { headless, visible, executablePath, channel }) {
+    try {
+      return await this.launchWith(profileDir, { headless, visible, executablePath, channel })
+    } catch (e) {
+      // A browser that can't open a window dies at once with this vague error.
+      // On WSL that's usually its graphics needing a restart.
+      if (!headless && /has been closed/.test(e.message)) {
+        this.log('The browser crashed opening its window. On WSL, run "wsl --shutdown" in Windows PowerShell, then start the helper again.')
+        throw new Error("The browser on the user's laptop can't open a window right now (on WSL the fix is restarting it: wsl --shutdown). Tell the user; nothing was done.")
+      }
+      throw e
+    }
+  }
+
+  launchWith(profileDir, { headless, visible, executablePath, channel }) {
+    return chromium.launchPersistentContext(profileDir, {
       headless,
       executablePath: executablePath || undefined,
       channel: channel || undefined,
@@ -45,7 +65,9 @@ export class Browser {
       acceptDownloads: false,
       locale: 'en-GB',
     })
-    this.context.on('close', () => { this.context = null; this.page = null })
+  }
+
+  async guard() {
     // Leaving the allowed sites: the page itself (main frame) may only go to
     // them while Atlas has it. Embedded frames (a payment provider's card
     // form) still load — Atlas can't see or use them, the user can.
