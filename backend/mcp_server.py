@@ -22,6 +22,7 @@ import inbox
 import agent_config
 import calendar_colors
 import browser_helper
+import browser_workflows
 from agent_actions import snapshot, restore_rows, delete_rows
 from crypto import enc, dec
 from mcp.server import Server
@@ -313,6 +314,7 @@ async def list_tools() -> list[Tool]:
     tools += inbox.TOOLS
     tools += agent_config.TOOLS
     tools += browser_helper.TOOLS
+    tools += browser_workflows.TOOLS
     return tools
 
 
@@ -346,6 +348,8 @@ async def run_tool(name: str, args: dict, db):
         result = await agent_config.dispatch(name, args, db)
     elif name in browser_helper.NAMES:
         result = await browser_helper.dispatch(name, args, db)
+    elif name in browser_workflows.NAMES:
+        result = await browser_workflows.dispatch(name, args, db)
     else:
         result = await _dispatch(name, args, db)
     if isinstance(result, dict) and result.get("undo_id") and "show" not in result:

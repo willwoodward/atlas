@@ -27,6 +27,13 @@ const EMPTY = {
   '/api/integrations': {},
   '/api/calendar/color-rules': { rules: [], fallback: 'default', choices: [] },
   '/api/browser/status': { connected: true, since: null, sites: ['irishrail.ie', 'thetrainline.com', 'lner.co.uk'], version: '0.1.0' },
+  '/api/browser/workflows': [{ name: 'Book an Irish Rail train', site: 'irishrail.ie', description: 'Any Irish Rail journey starting in the Republic', params: [{ name: 'from' }, { name: 'to' }, { name: 'date' }, { name: 'time' }], steps: [
+    { do: 'open', url: 'https://journeyplanner.irishrail.ie/webapp/?…{{from}}…{{to}}…{{date}}' },
+    { do: 'click', target: { role: 'button', name: 'Reject All' }, optional: true },
+    { do: 'decide', goal: 'Pick the fare for the train nearest {{time}}' },
+    { do: 'click', target: { role: 'button', name: 'Book Tickets' }, expect: 'Seat Selection' },
+    { do: 'handoff' },
+  ], runs: 2, last_result: 'handed over', updated_at: '2026-10-26T10:00:00+00:00' }],
   '/api/browser/notes': [{ site: 'irishrail.ie', notes: "Search with time 'All day' or later trains are missing.\nExtras step: press Skip." }],
   '/api/employment': { employments: [], components: [], grants: [], prices: [], fx: [], projection: [], summary: {} },
   '/assistant/runs': { runs: [] },

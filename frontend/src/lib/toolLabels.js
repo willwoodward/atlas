@@ -86,6 +86,11 @@ const TOOL_LABELS = {
   browser_handoff: 'Handing the page to you',
   browser_close: 'Closing the page',
   save_site_notes: 'Saving notes on the site',
+  browser_expect: 'Checking the page',
+  list_workflows: 'Checking saved workflows',
+  run_workflow: 'Running a saved workflow',
+  save_workflow: 'Saving the steps as a workflow',
+  delete_workflow: 'Deleting a workflow',
 }
 
 export const toolLabel = name => TOOL_LABELS[name] || name.replace(/_/g, ' ')

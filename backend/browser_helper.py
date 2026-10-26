@@ -171,6 +171,10 @@ async def all_notes(db) -> list[dict]:
 # ── Tools for Atlas ──────────────────────────────────────────────────────────
 
 _REF = {"type": "string", "description": "An element ref from the latest page snapshot, e.g. e12"}
+# Workflows find elements by what they are instead (see browser_workflows).
+_TARGET = {"type": "object", "description": "Instead of ref: the element by role and name, e.g. {\"role\": \"button\", \"name\": \"Book Tickets\"}",
+           "properties": {"role": {"type": "string"}, "name": {"type": "string"},
+                          "match": {"type": "string", "enum": ["exact", "contains", "regex"]}, "nth": {"type": "integer"}}}
 _obj = lambda props, req=(): {"type": "object", "properties": props, "required": list(req)}
 
 TOOLS = [
@@ -183,19 +187,21 @@ TOOLS = [
     Tool(name="browser_snapshot", description="The current page again: its text and usable elements with refs.",
          inputSchema=_obj({})),
     Tool(name="browser_click", description="Click an element by ref. Pay / place-order buttons are refused: the user pays themselves after browser_handoff.",
-         inputSchema=_obj({"ref": _REF}, ["ref"])),
+         inputSchema=_obj({"ref": _REF, "target": _TARGET})),
     Tool(name="browser_type",
          description=("Type into a field by ref (replaces what's there). Typing letter by letter, so search-as-you-type "
                       "boxes show their suggestions; pick one with browser_click or press ArrowDown + Enter. "
                       "Card, password and bank fields are refused."),
-         inputSchema=_obj({"ref": _REF, "text": {"type": "string"}, "submit": {"type": "boolean", "description": "Press Enter afterwards"}}, ["ref", "text"])),
+         inputSchema=_obj({"ref": _REF, "target": _TARGET, "text": {"type": "string"}, "submit": {"type": "boolean", "description": "Press Enter afterwards"}}, ["text"])),
     Tool(name="browser_select", description="Choose an option in a dropdown (<select>) by its visible label.",
-         inputSchema=_obj({"ref": _REF, "option": {"type": "string"}}, ["ref", "option"])),
+         inputSchema=_obj({"ref": _REF, "target": _TARGET, "option": {"type": "string"}}, ["option"])),
     Tool(name="browser_press", description="Press a key: Enter, Tab, Escape, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, PageUp, PageDown, Space, Backspace.",
          inputSchema=_obj({"key": {"type": "string"}}, ["key"])),
     Tool(name="browser_scroll", description="Scroll the page, or bring an element into view by ref.",
          inputSchema=_obj({"direction": {"type": "string", "enum": ["down", "up"]}, "ref": _REF})),
     Tool(name="browser_back", description="Go back a page.", inputSchema=_obj({})),
+    Tool(name="browser_expect", description="Wait (up to `timeout` seconds, default 15) for some text to appear on the page; fails if it never does.",
+         inputSchema=_obj({"text": {"type": "string"}, "timeout": {"type": "integer"}}, ["text"])),
     Tool(name="browser_screenshot",
          description=("See the page as an image: for things the snapshot can't tell you, like a seat map (which seats "
                       "face the direction of travel, which are at tables). Pass a ref to look at that part."),

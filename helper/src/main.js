@@ -23,7 +23,9 @@ function describe(cmd, a = {}) {
   if (cmd === 'open') return `open ${a.url}`
   if (cmd === 'type') return `type ${String(a.text ?? '').length} characters into ${a.ref}${a.submit ? ' + Enter' : ''}`
   if (cmd === 'handoff') return 'hand over to you'
-  return [cmd, a.ref, a.key, a.option, a.direction].filter(Boolean).join(' ')
+  const target = a.target ? `${a.target.role || ''} "${a.target.name}"`.trim() : ''
+  if (cmd === 'expect') return `expect "${a.text}"`
+  return [cmd, a.ref, target, a.key, a.option, a.direction].filter(Boolean).join(' ')
 }
 
 const { cfg, problems, created } = loadConfig()

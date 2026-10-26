@@ -208,6 +208,19 @@ async def init_db():
                 value TEXT NOT NULL
             );
 
+            -- Website steps Atlas saved to run again (browser_workflows.py).
+            CREATE TABLE IF NOT EXISTS browser_workflows (
+                name TEXT PRIMARY KEY,               -- lower-case, unique
+                title TEXT NOT NULL,
+                site TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                params TEXT NOT NULL DEFAULT '[]',   -- JSON [{name, description}]
+                steps TEXT NOT NULL DEFAULT '[]',    -- JSON, see browser_workflows.STEP_KINDS
+                runs INTEGER NOT NULL DEFAULT 0,
+                last_result TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL
+            );
+
             -- ECB daily reference rates, "1 EUR = rate CUR" (see fx.py).
             CREATE TABLE IF NOT EXISTS fx_daily (
                 date TEXT NOT NULL,

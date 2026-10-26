@@ -39,6 +39,11 @@ const PAGES = {
       <button type="submit">Pay now</button>
     </form>
     <iframe src="FRAME/card" width="300" height="80"></iframe>`, 'Checkout'),
+  '/covered': page(`
+    <button id="b" onclick="this.textContent='done'">Book Tickets</button>
+    <div role="dialog" class="ni-notice" style="position:fixed;inset:0;background:rgba(0,0,0,.4)">
+      Your booking originates in Northern Ireland. <button onclick="this.parentElement.remove()">CLOSE</button>
+    </div>`),
   '/card': page('<label>Card number <input name="pan" value="SECRET-IN-FRAME"></label>'),
 }
 
@@ -136,4 +141,28 @@ test('stale refs and unknown commands are explained', async () => {
   await assert.rejects(browser.run('click', { ref: 'body' }), /isn't a ref/)
   await assert.rejects(browser.run('press', { key: 'Control+A' }), /Can't press/)
   await assert.rejects(browser.run('evaluate', {}), /Unknown command/)
+})
+
+test('a click blocked by a pop-up says so, and works once it is closed', async () => {
+  let s = await browser.run('open', { url: `${base}/covered` })
+  await assert.rejects(browser.run('click', { ref: ref(s, /button "Book Tickets"/) }), /something is covering it \(ni-notice\)/)
+  s = await browser.run('click', { ref: ref(s, /button "CLOSE"/) })
+  s = await browser.run('click', { ref: ref(s, /button "Book Tickets"/) })
+  assert.match(s.snapshot, /button "done"/)
+})
+
+test('steps can target elements by what they are, and say what they acted on', async () => {
+  let s = await browser.run('open', { url: `${base}/search` })
+  s = await browser.run('type', { target: { role: 'textbox', name: 'From' }, text: 'Dub' })
+  assert.deepEqual(s.acted, { role: 'textbox', name: 'From' })
+  s = await browser.run('click', { target: { role: 'option', name: 'dublin heuston' } })
+  assert.deepEqual(s.acted, { role: 'option', name: 'Dublin Heuston' })
+  s = await browser.run('select', { target: { role: 'select', name: 'Time' }, option: 'All day' })
+  assert.match(s.snapshot, /selected "All day"/)
+  await assert.rejects(browser.run('click', { target: { role: 'button', name: 'Teleport' } }), /^Error: Not found: no button "Teleport"/)
+  s = await browser.run('click', { target: { role: 'button', name: 'Sea', match: 'contains' } })
+  assert.match(s.url, /\/results/)
+  s = await browser.run('expect', { text: '09:25 → 11:50' })
+  assert.equal(s.site, '127.0.0.1')
+  await assert.rejects(browser.run('expect', { text: 'Never on this page', timeout: 1 }), /Not found: the page never showed/)
 })

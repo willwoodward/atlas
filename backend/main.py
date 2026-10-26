@@ -18,6 +18,7 @@ from routers import agents as agents_router
 from routers import history as history_router
 from routers import wake as wake_router
 import browser_helper
+import browser_workflows
 
 ALLOWED_ORIGINS = [
     o.strip()
@@ -90,6 +91,7 @@ app.include_router(wake_router.router)
 app.include_router(github_drafts_router)
 app.include_router(mcp_auth_router)
 app.include_router(browser_helper.router)
+app.include_router(browser_workflows.router)
 
 app.mount("/mcp", mcp_app)
 

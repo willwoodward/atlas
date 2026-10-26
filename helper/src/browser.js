@@ -117,6 +117,7 @@ export class Browser {
         parts.push(i === 0 ? r.text : `[frame ${f.url().slice(0, 80)}]\n${r.text}`)
       } catch { /* a frame navigating away mid-read */ }
     }
+    this.lastRefs = parseRefs(parts.join('\n'))
     const notices = this.notices.splice(0)
     return {
       url: p.url(),
@@ -134,6 +135,22 @@ export class Browser {
     const frame = this.frames(p)[m[1] ? Number(m[1]) : 0]
     if (!frame) throw new Refused(`No element ${ref}: the page changed. Take a new snapshot.`)
     return { p, el: frame.locator(`[data-atlas-ref="${ref}"]`).first() }
+  }
+
+  // An element by ref, or by what it is: { role, name, match, nth } — how
+  // workflows find things again on a fresh page.
+  async pick(args) {
+    let ref = args.ref
+    if (!ref && args.target) {
+      await this.snapshot()
+      ref = findTarget(this.lastRefs, args.target)
+      if (!ref) {
+        const t = args.target
+        throw new Refused(`Not found: no ${t.role || 'element'} ${t.name ? `"${t.name}"` : ''} on the page.`.replace(/\s+/g, ' '))
+      }
+    }
+    const { p, el } = this.locate(ref)
+    return { p, el, ref, acted: this.lastRefs?.get(ref) || null }
   }
 
   async describe(el, ref) {
@@ -163,20 +180,25 @@ export class Browser {
     return this.snapshot()
   }
 
-  async click({ ref }) {
+  async click(args) {
     this.touch()
-    const { p, el } = this.locate(ref)
+    const { p, el, ref, acted } = await this.pick(args)
     const d = await this.describe(el, ref)
     if (paymentAction(d)) throw new Refused(`Refused: "${d.text || d.aria || d.value}" looks like it pays. Hand the page to the user with browser_handoff instead.`)
     if (d.submits && d.formFields.some(sensitiveField)) throw new Refused('Refused: that submits a form with card or login details. Hand the page to the user.')
-    await el.click({ timeout: 10000 })
+    try {
+      await el.click({ timeout: 6000 })
+    } catch (e) {
+      throw new Refused(clickTrouble(e))
+    }
     await this.settle(this.page || p)
-    return this.snapshot()
+    return { acted, ...(await this.snapshot()) }
   }
 
-  async type({ ref, text, submit }) {
+  async type(args) {
+    const { text, submit } = args
     this.touch()
-    const { p, el } = this.locate(ref)
+    const { p, el, ref, acted } = await this.pick(args)
     const d = await this.describe(el, ref)
     const why = sensitiveField(d)
     if (why) throw new Refused(`Refused: that's ${why}. The user fills those in themselves after browser_handoff.`)
@@ -187,12 +209,13 @@ export class Browser {
     await el.pressSequentially(String(text ?? ''), { delay: 35 })
     if (submit) await el.press('Enter')
     await this.settle(p)
-    return this.snapshot()
+    return { acted, ...(await this.snapshot()) }
   }
 
-  async select({ ref, option }) {
+  async select(args) {
+    const { option } = args
     this.touch()
-    const { p, el } = this.locate(ref)
+    const { p, el, ref, acted } = await this.pick(args)
     const d = await this.describe(el, ref)
     if (sensitiveField(d)) throw new Refused('Refused: that is a card or bank field.')
     try {
@@ -203,6 +226,20 @@ export class Browser {
       }
     }
     await this.settle(p)
+    return { acted, ...(await this.snapshot()) }
+  }
+
+  // Wait for text to appear on the page (a workflow checking it got where it
+  // meant to). Case doesn't matter.
+  async expect({ text, timeout = 15 }) {
+    this.touch()
+    const p = this.current()
+    const want = String(text || '').toLowerCase()
+    try {
+      await p.waitForFunction(t => (document.body?.innerText || '').toLowerCase().includes(t), want, { timeout: Math.min(Number(timeout) || 15, 60) * 1000 })
+    } catch {
+      throw new Refused(`Not found: the page never showed "${text}".`)
+    }
     return this.snapshot()
   }
 
@@ -316,6 +353,7 @@ export class Browser {
       back: () => this.back(),
       screenshot: () => this.screenshot(args),
       handoff: () => this.handoff(args),
+      expect: () => this.expect(args),
       close: () => this.close(),
       status: async () => this.status(),
     }
@@ -323,6 +361,58 @@ export class Browser {
     if (!fn) throw new Refused(`Unknown command "${cmd}".`)
     return fn()
   }
+}
+
+// The refs in a snapshot and what each one is: `[e12] button "Book Tickets" (…)`.
+export function parseRefs(text) {
+  const refs = new Map()
+  for (const line of String(text).split('\n')) {
+    const m = /^\[(\w+)\] (\S+) "(.*?)"(?: \((?:[^()]|\([^)]*\))*\))?$/.exec(line.trim())
+    if (m) refs.set(m[1], { role: m[2], name: m[3] })
+  }
+  return refs
+}
+
+const ROLE_ALIASES = { select: ['select', 'combobox', 'listbox'], combobox: ['select', 'combobox'], textbox: ['textbox', 'searchbox'] }
+
+/**
+ * The ref of the element a workflow step means. Name matching: exact (case
+ * aside) beats "contains"; match "regex" for a pattern. nth picks among
+ * several matches (0 = first).
+ */
+export function findTarget(refs, target) {
+  if (!refs) return null
+  const roles = target.role ? (ROLE_ALIASES[target.role] || [target.role]) : null
+  const want = String(target.name ?? '').toLowerCase().replace(/\s+/g, ' ').trim()
+  const all = [...refs.entries()].filter(([, r]) => !roles || roles.includes(r.role))
+  let hits
+  if (target.match === 'regex') {
+    let re
+    try { re = new RegExp(target.name, 'i') } catch { return null }
+    hits = all.filter(([, r]) => re.test(r.name))
+  } else {
+    const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim()
+    const exact = all.filter(([, r]) => norm(r.name) === want)
+    hits = exact.length || target.match === 'exact' ? exact : all.filter(([, r]) => norm(r.name).includes(want))
+  }
+  const hit = hits[Number(target.nth) || 0]
+  return hit ? hit[0] : null
+}
+
+// Why a click didn't happen, in words Atlas can act on (Playwright's log
+// says what was in the way; "timeout" alone just makes it retry blindly).
+export function clickTrouble(e) {
+  const log = String(e?.message || '')
+  const line = log.split('\n').find(l => /intercepts pointer events/.test(l)) || ''
+  const what = line ? (/class="([^"]{1,60})"/.exec(line)?.[1] || /<([a-z0-9-]+)/i.exec(line)?.[1] || 'another element') : null
+  if (what || /intercepts pointer events/.test(log)) {
+    return `Couldn't click it: something is covering it (${what || 'another element'}), probably a pop-up, banner or message. ` +
+      'Take a snapshot: look for a [dialog] or a message and close or deal with it first.'
+  }
+  if (/not visible/.test(log)) return "Couldn't click it: it isn't visible. Scroll to it (browser_scroll with its ref) or open the section it's in."
+  if (/not enabled|disabled/.test(log)) return "Couldn't click it: it's disabled. Something on the form probably still needs filling in or choosing."
+  if (/not stable/.test(log)) return "Couldn't click it: it kept moving (still animating). Try again, or take a snapshot."
+  return `Couldn't click it within 6 seconds (${log.split('\n')[0].slice(0, 120)}). Take a snapshot to see what the page is showing.`
 }
 
 // Shown at the top of a handed-over page (runs in the page).
