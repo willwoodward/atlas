@@ -21,9 +21,9 @@ function log(line) {
 // What each command looks like in the log (typed text is left out).
 function describe(cmd, a = {}) {
   if (cmd === 'open') return `open ${a.url}`
-  if (cmd === 'type') return `type ${String(a.text ?? '').length} characters into ${a.ref}${a.submit ? ' + Enter' : ''}`
-  if (cmd === 'handoff') return 'hand over to you'
   const target = a.target ? `${a.target.role || ''} "${a.target.name}"`.trim() : ''
+  if (cmd === 'type') return `type ${String(a.text ?? '').length} characters into ${a.ref || target}${a.submit ? ' + Enter' : ''}`
+  if (cmd === 'handoff') return 'hand over to you'
   if (cmd === 'expect') return `expect "${a.text}"`
   return [cmd, a.ref, target, a.key, a.option, a.direction].filter(Boolean).join(' ')
 }

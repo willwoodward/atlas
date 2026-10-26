@@ -164,8 +164,15 @@ export class Browser {
   async pick(args) {
     let ref = args.ref
     if (!ref && args.target) {
-      await this.snapshot()
-      ref = findTarget(this.lastRefs, args.target)
+      // Things often appear a moment after the step before (a suggestions list
+      // after typing), so look again for a few seconds before giving up.
+      const deadline = Date.now() + Math.min(Math.max(Number(args.wait ?? 5), 0), 15) * 1000
+      for (;;) {
+        await this.snapshot()
+        ref = findTarget(this.lastRefs, args.target)
+        if (ref || Date.now() >= deadline) break
+        await this.current().waitForTimeout(500)
+      }
       if (!ref) {
         const t = args.target
         throw new Refused(`Not found: no ${t.role || 'element'} ${t.name ? `"${t.name}"` : ''} on the page.`.replace(/\s+/g, ' '))
@@ -225,7 +232,11 @@ export class Browser {
     const why = sensitiveField(d)
     if (why) throw new Refused(`Refused: that's ${why}. The user fills those in themselves after browser_handoff.`)
     if (submit && d.formFields.some(sensitiveField)) throw new Refused('Refused: pressing Enter there would submit card or login details.')
-    await el.click({ timeout: 10000 })
+    try {
+      await el.click({ timeout: 6000 })
+    } catch (e) {
+      throw new Refused(clickTrouble(e))
+    }
     await el.fill('').catch(() => {})
     // Letter by letter so search-as-you-type boxes react as they would to a person.
     await el.pressSequentially(String(text ?? ''), { delay: 35 })

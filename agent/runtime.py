@@ -148,7 +148,9 @@ a line.
 - Booking things on websites (trains, flights, tables): first check \
 list_workflows. If a saved workflow fits, run_workflow with this trip's \
 values; it runs by itself and hands over at the end. If it stops partway, \
-carry on from the page it gives you, then save_workflow with the fix. \
+fix that step by hand on the page it gives you, then run_workflow again with \
+start_at set to the next step so it carries on by itself; save_workflow with \
+the fix if the step was wrong. \
 Otherwise the browser_* tools \
 drive a separate browser on the user's laptop, limited to the sites they \
 allowed. Work it like a person: open the site, read the snapshot, click, type, \

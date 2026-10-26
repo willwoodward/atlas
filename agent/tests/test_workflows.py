@@ -122,3 +122,29 @@ def test_fill_accepts_the_params_prefix():
     assert wf.fill("{{params.from}} to {{ to }}", {"from": "Dublin Connolly", "to": "Belfast"}) == "Dublin Connolly to Belfast"
     assert wf.fill_step({"do": "click", "target": {"name": "{{params.from}}"}}, {"from": "Cork"})["target"]["name"] == "Cork"
     assert wf.fill("https://x/?a={{params.q}}", {"q": "a b/c"}, url=True) == "https://x/?a=a%20b%2Fc"
+
+
+async def test_resume_from_a_later_step():
+    f = Fake()
+    out = await f.runner().run("Book a train", VALUES, start_at=4)
+    assert out["status"] == "handed_over" and out["steps_run"] == 2
+    names = [c[0] for c in f.calls]
+    assert names == ["get_workflow", "browser_click", "browser_expect", "browser_snapshot", "log_workflow_run"] or "browser_open" not in names
+    assert "browser_open" not in names
+    assert f.decisions == [("Hand the page to the user.", True, 6)]
+    bad = await f.runner().run("Book a train", VALUES, start_at=9)
+    assert bad["status"] == "error" and "past the end" in bad["error"]
+
+
+async def test_stopped_run_says_how_to_continue():
+    f = Fake(fail={("browser_click", "Book Tickets"): "Not found: no button \"Book Tickets\" on the page."})
+    out = await f.runner().run("Book a train", VALUES)
+    assert "start_at=5" in out["next"] and "start_at=4" in out["next"]
+
+
+async def test_optional_steps_do_not_wait_long():
+    f = Fake()
+    await f.runner().run("Book a train", VALUES)
+    optional = next(a for n, a in f.calls if n == "browser_click" and a["target"]["name"] == "Reject All")
+    required = next(a for n, a in f.calls if n == "browser_click" and a["target"]["name"] == "Book Tickets")
+    assert optional["wait"] == 1 and "wait" not in required

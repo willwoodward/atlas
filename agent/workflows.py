@@ -94,7 +94,7 @@ class Runner:
         self.call, self.decide = call, decide
         self.report = report or (lambda **kw: None)
 
-    async def run(self, name: str, values: dict) -> dict:
+    async def run(self, name: str, values: dict, start_at: int = 1) -> dict:
         wf = await self.call("get_workflow", {"name": name})
         if wf.get("error"):
             return {"status": "error", "error": wf["error"]}
@@ -105,10 +105,15 @@ class Runner:
                     "params": wf["params"]}
 
         steps = wf["steps"]
+        start_at = max(int(start_at or 1), 1)
+        if start_at > len(steps):
+            return {"status": "error", "error": f"The workflow has {len(steps)} steps; start_at {start_at} is past the end."}
         page: dict = {}
         notes: list[str] = []
         handed_over = False
         for i, raw in enumerate(steps):
+            if i + 1 < start_at:
+                continue  # resuming: these were done already
             step = fill_step(raw, values)
             kind = step["do"]
             self.report(step=i + 1, of=len(steps), text=describe(step), status="running")
@@ -128,7 +133,10 @@ class Runner:
                     break
                 page = {}  # it changed the page; read it again when needed
             else:
-                result = await self.call(*self._tool_call(step))
+                tool_name, tool_args = self._tool_call(step)
+                if step.get("optional") and "target" in step:
+                    tool_args["wait"] = 1  # a banner that's usually there shows at once
+                result = await self.call(tool_name, tool_args)
                 if result.get("error"):
                     if step.get("optional") and str(result["error"]).startswith("Not found"):
                         self.report(step=i + 1, of=len(steps), text=describe(step) + " (not there, skipped)", status="success")
@@ -145,7 +153,7 @@ class Runner:
 
         result = "handed over" if handed_over else "finished"
         await self.call("log_workflow_run", {"name": name, "result": result})
-        out = {"status": "handed_over" if handed_over else "done", "steps_run": len(steps), "notes": notes}
+        out = {"status": "handed_over" if handed_over else "done", "steps_run": len(steps) - start_at + 1, "notes": notes}
         if not handed_over and page:
             out["page"] = _page(page)
         return out
@@ -177,8 +185,9 @@ class Runner:
             "error": error,
             "notes": notes,
             "page": _page(page),
-            "next": ("Carry on from this page with the browser_* tools to finish the job, then save_workflow "
-                     "with the fixed steps so this works next time."),
+            "next": (f"Sort out step {index + 1} on this page (with the browser_* tools), then carry on with "
+                     f"run_workflow(name, values, start_at={index + 2}) to run the remaining steps, or start_at={index + 1} to retry "
+                     "that one. If the step itself is wrong, save_workflow with the fix so it works next time."),
         }
 
 
@@ -318,7 +327,7 @@ def workflow_tool(client, tools: list, memory: str | None, user: str):
     runner = Runner(call, model_decider(browser, memory or "", user), report)
 
     @tool(name="run_workflow")
-    async def run_workflow(name: str, values: dict) -> dict:
+    async def run_workflow(name: str, values: dict, start_at: int = 1) -> dict:
         """Run a saved browser workflow (list_workflows shows them) by itself, with this trip's values.
 
         Plain steps run automatically; steps that need judgement (which train fits the
@@ -331,7 +340,9 @@ def workflow_tool(client, tools: list, memory: str | None, user: str):
         Args:
             name: The workflow's name.
             values: A value for each of its params, e.g. {"from": "Dublin Connolly", "date": "30/10/2026"}.
+            start_at: Step number to start from (default 1). To continue a run that stopped, once the page is
+                where the next step expects it, pass the next step's number.
         """
-        return await runner.run(name, values or {})
+        return await runner.run(name, values or {}, start_at)
 
     return run_workflow

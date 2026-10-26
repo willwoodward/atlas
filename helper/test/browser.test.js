@@ -44,6 +44,9 @@ const PAGES = {
     <div role="dialog" class="ni-notice" style="position:fixed;inset:0;background:rgba(0,0,0,.4)">
       Your booking originates in Northern Ireland. <button onclick="this.parentElement.remove()">CLOSE</button>
     </div>`),
+  '/late': page(`
+    <label>From <input id="q"></label><div id="out"></div>
+    <script>q.addEventListener('input', () => setTimeout(() => { out.innerHTML = '<button>Dublin Connolly</button>' }, 1200))</script>`),
   '/card': page('<label>Card number <input name="pan" value="SECRET-IN-FRAME"></label>'),
 }
 
@@ -165,4 +168,17 @@ test('steps can target elements by what they are, and say what they acted on', a
   s = await browser.run('expect', { text: '09:25 → 11:50' })
   assert.equal(s.site, '127.0.0.1')
   await assert.rejects(browser.run('expect', { text: 'Never on this page', timeout: 1 }), /Not found: the page never showed/)
+})
+
+test('a target that appears a moment later is waited for', async () => {
+  let s = await browser.run('open', { url: `${base}/late` })
+  await browser.run('type', { target: { role: 'textbox', name: 'From' }, text: 'Dub' })
+  s = await browser.run('click', { target: { role: 'button', name: 'Dublin Connolly' } })
+  assert.equal(s.acted.name, 'Dublin Connolly')
+
+  s = await browser.run('open', { url: `${base}/late` })
+  await browser.run('type', { target: { role: 'textbox', name: 'From' }, text: 'Dub' })
+  const t0 = Date.now()
+  await assert.rejects(browser.run('click', { target: { role: 'button', name: 'Dublin Connolly' }, wait: 0 }), /Not found/)
+  assert.ok(Date.now() - t0 < 1000, 'wait: 0 fails straight away')
 })
