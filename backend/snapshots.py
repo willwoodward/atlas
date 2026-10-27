@@ -10,7 +10,7 @@ row ends up as that day's last value — and charts read them back.
   net_worth          EUR, accounts (credit cards count against)
   saved              EUR, total in pots
   account:<id>       that account's balance, in its own currency
-  open_todos         to-dos not done (today + this week + someday)
+  open_todos         to-dos not done (today + this week + someday), not counting sub-tasks
 """
 import logging
 import time
@@ -33,8 +33,11 @@ async def take(db, day: date | None = None) -> dict:
     async with db.execute("SELECT id, balance FROM finances_accounts") as c:
         for r in await c.fetchall():
             values[f"account:{r['id']}"] = float(r["balance"] or 0)
-    async with db.execute("SELECT COUNT(*) FROM todos WHERE done = 0") as c:
+    async with db.execute("SELECT COUNT(*) FROM todos WHERE done = 0 AND parent_id IS NULL") as c:
         values["open_todos"] = (await c.fetchone())[0]
+    # Earlier recordings also counted sub-tasks left behind by finished or
+    # deleted to-dos; the history chart only trusts them from here on.
+    await db.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('history.open_todos_from', ?)", (day,))
     for key, value in values.items():
         await db.execute("INSERT OR REPLACE INTO daily_snapshots (date, key, value) VALUES (?,?,?)", (day, key, float(value)))
     await db.commit()

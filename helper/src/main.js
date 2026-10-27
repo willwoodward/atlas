@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import WebSocket from 'ws'
 import { Browser, Refused } from './browser.js'
-import { loadConfig, CONFIG_PATH, DIR } from './config.js'
+import { loadConfig, grantSite, CONFIG_PATH, DIR } from './config.js'
 
 const VERSION = '0.1.0'
 const logFile = path.join(DIR, 'helper.log')
@@ -25,6 +25,7 @@ function describe(cmd, a = {}) {
   if (cmd === 'type') return `type ${String(a.text ?? '').length} characters into ${a.ref || target}${a.submit ? ' + Enter' : ''}`
   if (cmd === 'handoff') return 'hand over to you'
   if (cmd === 'expect') return `expect "${a.text}"`
+  if (cmd === 'request_site') return `ask to allow ${a.site}`
   return [cmd, a.ref, target, a.key, a.option, a.direction].filter(Boolean).join(' ')
 }
 
@@ -44,6 +45,7 @@ const browser = new Browser({
   visible: !!cfg.browser.visible,
   // No window at all (servers, tests). Handing over then can't show the page.
   headless: !!cfg.browser.headless,
+  keep: grantSite,
   channel: cfg.browser.channel,
   executablePath: cfg.browser.executablePath,
   log,
@@ -81,7 +83,11 @@ function connect() {
         log(`  ${refused ? 'refused' : 'failed'}: ${e.message.split('\n')[0]}`)
         reply = { id: msg.id, ok: false, error: refused ? e.message : `The browser hit an error: ${e.message.split('\n')[0]}` }
       }
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(reply))
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(reply))
+        // A site was just allowed: tell Atlas's settings page about the new list.
+        if (msg.cmd === 'request_site' && reply.ok) ws.send(JSON.stringify({ type: 'hello', version: VERSION, sites: cfg.sites }))
+      }
     })
   })
 

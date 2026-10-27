@@ -231,3 +231,36 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
   .inbox-row .inbox-row-bin { opacity: 0; transition: opacity .15s, color .15s, background .15s; }
   .inbox-row:hover .inbox-row-bin, .inbox-row .inbox-row-bin:focus-visible { opacity: 1; }
 }
+
+/* ── Note editor (components/NoteEditor.jsx) ─────────────────────────────── */
+.ne { min-height: 100%; display: flex; flex-direction: column; }
+.ne-title {
+  display: block; width: 100%; border: 0; outline: 0; resize: none; overflow: hidden; padding: 0; margin: 0 0 10px;
+  background: transparent; color: var(--ink); font-family: var(--font-serif); font-weight: 600; line-height: 1.25;
+}
+.ne-title::placeholder { color: var(--faint); }
+.ne-body { position: relative; flex: 1; min-height: 360px; }
+/* The visible text is the copy behind; the textarea in front only takes input, so both must wrap identically. */
+.ne-mirror, .ne-input {
+  box-sizing: border-box; width: 100%; margin: 0; padding: 0; border: 0;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal; letter-spacing: normal; tab-size: 4;
+  font-variant-ligatures: none;
+}
+.ne-mirror { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: var(--ink); }
+.ne-input {
+  position: relative; display: block; min-height: 360px; outline: 0; resize: none; overflow: hidden;
+  background: transparent; color: transparent; -webkit-text-fill-color: transparent; caret-color: var(--ink);
+}
+.ne-input::placeholder { color: var(--faint); -webkit-text-fill-color: var(--faint); }
+.ne-input::selection { background: rgba(95,117,145,.25); -webkit-text-fill-color: transparent; }
+/* Bullets and circles: the real character is an invisible space of a known width, and the mark is drawn over it. */
+.ne-mark { position: relative; }
+.ne-mark::before { content: ''; position: absolute; left: 50%; top: 50%; box-sizing: border-box; border-radius: 50%; transform: translate(-50%, -50%); }
+.ne-dot::before { width: .34em; height: .34em; background: var(--mid); }
+.ne-open::before, .ne-done::before { width: .95em; height: .95em; border: 1.6px solid var(--faint); }
+.ne-done::before { background: var(--gold); border-color: var(--gold); }
+.ne-done::after {
+  content: ''; position: absolute; left: 50%; top: 50%; width: .26em; height: .5em; box-sizing: border-box;
+  border: solid #fff; border-width: 0 1.7px 1.7px 0; transform: translate(-50%, -62%) rotate(45deg);
+}
+.ne-line-done .ne-text { color: var(--faint); text-decoration: line-through; }

@@ -74,6 +74,29 @@ async def test_refusal_reaches_the_agent(link):
     assert out == {"error": "Refused: that looks like a payment button."}
 
 
+async def test_asking_for_a_site_waits_for_the_user(link, monkeypatch):
+    """The user has minutes to answer in a window on their laptop, not the usual 90 seconds."""
+    seen = []
+    real = link.call
+
+    async def call(cmd, args=None, timeout=bh.COMMAND_TIMEOUT):
+        seen.append((cmd, timeout))
+        return await real(cmd, args, timeout)
+
+    monkeypatch.setattr(link, "call", call)
+    link.ws = FakeSocket(link, {"ok": True, "result": {"ok": True, "site": "ryanair.com", "allowed": "always"}})
+    db = await _db()
+    try:
+        out = await bh.dispatch("browser_request_site", {"site": "ryanair.com", "reason": "To look up your flight"}, db)
+        await bh.dispatch("browser_snapshot", {}, db)
+    finally:
+        await db.close()
+    assert out["site"] == "ryanair.com"
+    assert link.ws.sent[0] == {"id": link.ws.sent[0]["id"], "cmd": "request_site", "args": {"site": "ryanair.com", "reason": "To look up your flight"}}
+    assert seen == [("request_site", bh.ASK_TIMEOUT), ("snapshot", bh.COMMAND_TIMEOUT)]
+    assert bh.ASK_TIMEOUT > 120  # longer than the window waits for an answer
+
+
 async def test_screenshot_goes_to_the_model_as_an_image(link):
     png = base64.b64encode(b"\x89PNG fake").decode()
     link.ws = FakeSocket(link, {"ok": True, "result": {"screenshot": png, "mime": "image/png", "url": "https://x.ie/"}})

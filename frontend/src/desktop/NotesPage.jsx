@@ -3,6 +3,7 @@ import { useFocusRequest } from '../lib/focus.js'
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { renderMarkdown } from '../lib/markdown.js'
 import Sheet from '../components/Sheet.jsx'
+import NoteEditor from '../components/NoteEditor.jsx'
 import { useNotes } from '../context/NotesContext.jsx'
 import { useGitHub } from '../context/GitHubContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -677,19 +678,16 @@ export default function NotesPage() {
             <div ref={contentRef} style={{ flex: 1, overflow: 'auto', padding: isQuick ? '28px 36px' : (isMobile ? '14px 16px 80px' : '20px 28px 28px') }}>
               {fileLoading && <div style={{ fontSize: 13, color: 'var(--faint)' }}>Loading…</div>}
 
-              {/* Quick note — textarea, auto-saves */}
+              {/* Quick note — title + body, auto-saves */}
               {isQuick && (
-                <textarea
+                <NoteEditor
+                  key={selected.id}
                   value={body}
-                  onChange={e => handleBodyChange(e.target.value)}
-                  placeholder="Start writing…"
+                  onChange={handleBodyChange}
                   // Opening a note on a phone shouldn't throw up the keyboard;
                   // a brand-new one should, since there's nothing to read yet.
-                  autoFocus={!isMobile || justCreated.current}
-                  style={{ width: '100%', height: '100%', minHeight: 400, border: 'none', outline: 'none', resize: 'none',
-                    // 17px on phones: easier to read, and iOS zooms into inputs under 16px.
-                    fontFamily: "'Hanken Grotesk', sans-serif", fontSize: isMobile ? 17 : 15, lineHeight: 1.75,
-                    color: 'var(--ink)', background: 'transparent' }}
+                  focus={justCreated.current ? 'title' : (isMobile ? null : 'body')}
+                  isMobile={isMobile}
                 />
               )}
 

@@ -6,19 +6,26 @@
 // handed over is the user's: Atlas can't touch it again.
 
 import { chromium } from 'playwright'
-import { siteFor, sensitiveField, paymentAction, KEYS, SENSITIVE_SOURCE } from './policy.js'
+import { siteFor, requestedSite, sensitiveField, paymentAction, KEYS, SENSITIVE_SOURCE } from './policy.js'
 import { readPage, describeElement } from './snapshot.js'
 
 const SNAPSHOT_MAX = 14000
 const OFFSCREEN = ['--window-position=-2400,-2400', '--window-size=1366,900']
 const IDLE_CLOSE_MS = 10 * 60 * 1000
+// Asking the user to allow a new site: how long they have to answer, and how
+// many times Atlas may ask in one run of the helper (a page that talks the
+// model into asking again and again gets nowhere).
+const ASK_TIMEOUT_MS = 2 * 60 * 1000
+const MAX_ASKS = 8
 
 export class Refused extends Error {}
 
 export class Browser {
   /**
    * opts: { sites, profileDir, headless, visible, executablePath, channel,
-   *         allowHttpLocal (tests only), log }
+   *         allowHttpLocal (tests only), log,
+   *         ask(site, reason) -> 'once' | 'always' | 'deny' | 'timeout' (default: a window),
+   *         keep(site) saves an "always" answer }
    */
   constructor(opts) {
     this.opts = opts
@@ -28,6 +35,8 @@ export class Browser {
     this.handedOver = new WeakSet()
     this.notices = []
     this.idleTimer = null
+    this.denied = new Set()
+    this.asked = 0
     this.log = opts.log || (() => {})
   }
 
@@ -76,7 +85,7 @@ export class Browser {
       const top = frame && frame === frame.page().mainFrame()
       const page = frame?.page()
       if (req.isNavigationRequest() && top && !this.handedOver.has(page) && !this.site(req.url()) && !req.url().startsWith('about:')) {
-        this.notices.push(`Blocked a jump to ${new URL(req.url()).hostname}: not one of the allowed sites.`)
+        this.notices.push(`Blocked a jump to ${new URL(req.url()).hostname}: not one of the allowed sites. If the job really needs it, browser_request_site asks the user.`)
         return route.abort('blockedbyclient')
       }
       return route.continue()
@@ -191,7 +200,7 @@ export class Browser {
 
   async open({ url }) {
     const site = this.site(url)
-    if (!site) throw new Refused(`${url} isn't one of the allowed sites (${this.sites.join(', ')}). The user can add sites in the helper's config.`)
+    if (!site) throw new Refused(`${url} isn't one of the allowed sites (${this.sites.join(', ')}). If the job needs it, browser_request_site asks the user to allow it.`)
     await this.ensure()
     this.touch()
     let p = this.page
@@ -202,6 +211,58 @@ export class Browser {
     await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 })
     await this.settle(p)
     return this.snapshot(p)
+  }
+
+  // Atlas asks to use a site that isn't on the list. Only the user can say
+  // yes, in a window the helper opens on this laptop; the answer never passes
+  // through the server, so a compromised server or model can't grant itself.
+  async requestSite({ site, reason }) {
+    const wanted = requestedSite(site)
+    if (wanted.error) throw new Refused(`Can't ask for that: ${wanted.error}`)
+    const host = wanted.site
+    const covered = this.site(`https://${host}/`)
+    if (covered) return { ok: true, site: covered, already_allowed: true }
+    if (this.denied.has(host)) throw new Refused(`The user already said no to ${host}. Don't ask again; carry on without it or tell them what you couldn't do.`)
+    if (this.asked >= MAX_ASKS) throw new Refused('Asked too many times already. Tell the user what you need; they can add the site in the helper\'s config.')
+    const ask = this.opts.ask || (this.opts.headless ? null : (h, r) => this.askInWindow(h, r))
+    if (!ask) throw new Refused("The helper is running without a window, so the user can't be asked. They can add the site in the helper's config.")
+    this.asked++
+    const note = String(reason ?? '').replace(/\s+/g, ' ').trim().slice(0, 200)
+    this.log(`Asking the user to allow ${host}${note ? ` (${note})` : ''}`)
+    const answer = await ask(host, note)
+    this.log(`  user said: ${answer}`)
+    if (answer === 'timeout') throw new Refused(`The user didn't answer in time (they may be away from the laptop). Tell them you need ${host} and why; don't keep asking.`)
+    if (answer !== 'once' && answer !== 'always') {
+      this.denied.add(host)
+      throw new Refused(`The user said no to ${host}. Don't ask again; carry on without it or tell them what you couldn't do.`)
+    }
+    this.sites.push(host)
+    if (answer === 'always') {
+      try { this.opts.keep?.(host) } catch (e) { this.log(`  couldn't save it: ${e.message}`) }
+    }
+    return { ok: true, site: host, allowed: answer === 'always' ? 'always' : 'until the helper restarts' }
+  }
+
+  // The window the user answers in. It's a page the helper makes itself (no
+  // website runs in it), shown over everything, then put away again.
+  async askInWindow(host, reason) {
+    await this.ensure()
+    const dialog = await this.context.newPage()
+    let answer
+    const done = new Promise(resolve => { answer = resolve })
+    let bounds = null
+    try {
+      await dialog.exposeFunction('atlasAnswer', choice => answer(['once', 'always'].includes(choice) ? choice : 'deny'))
+      dialog.on('close', () => answer('deny'))
+      await dialog.setContent(DIALOG_HTML)
+      await dialog.evaluate(([h, r]) => { document.getElementById('site').textContent = h; document.getElementById('why').textContent = r || 'No reason given.' }, [host, reason])
+      bounds = await this.reveal(dialog, { restore: true })
+      const timer = setTimeout(() => answer('timeout'), ASK_TIMEOUT_MS)
+      try { return await done } finally { clearTimeout(timer) }
+    } finally {
+      await dialog.close().catch(() => {})
+      if (bounds) await this.putAway(bounds)
+    }
   }
 
   async snapshotCmd() {
@@ -342,15 +403,30 @@ export class Browser {
     }
   }
 
-  async reveal(p) {
+  // Bring the page's window on-screen. With restore, returns where the window
+  // was if it was hidden, so putAway can hide it again.
+  async reveal(p, { restore = false } = {}) {
+    let before = null
     try {
       const s = await this.context.newCDPSession(p)
-      const { windowId } = await s.send('Browser.getWindowForTarget')
+      const { windowId, bounds } = await s.send('Browser.getWindowForTarget')
+      if (restore && (bounds.left ?? 0) < -1000) before = { windowId, bounds }
       await s.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } })
       await s.send('Browser.setWindowBounds', { windowId, bounds: { left: 80, top: 60, width: 1300, height: 900 } })
       await s.detach()
     } catch (e) { this.log(`Couldn't move the window on-screen: ${e.message}`) }
     await p.bringToFront().catch(() => {})
+    return before
+  }
+
+  async putAway({ windowId, bounds }) {
+    const other = this.context?.pages()[0]
+    if (!other) return
+    try {
+      const s = await this.context.newCDPSession(other)
+      await s.send('Browser.setWindowBounds', { windowId, bounds: { left: bounds.left, top: bounds.top } })
+      await s.detach()
+    } catch (e) { this.log(`Couldn't hide the window again: ${e.message}`) }
   }
 
   async close() {
@@ -387,6 +463,7 @@ export class Browser {
       screenshot: () => this.screenshot(args),
       handoff: () => this.handoff(args),
       expect: () => this.expect(args),
+      request_site: () => this.requestSite(args),
       close: () => this.close(),
       status: async () => this.status(),
     }
@@ -465,3 +542,31 @@ function showBanner(summary) {
   bar.append(head, body, x)
   document.body.appendChild(bar)
 }
+
+
+// The approval window (runs nowhere but this helper's own page).
+const DIALOG_HTML = `<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Atlas wants to open a website</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#efeae0;color:#2b2820;font:15px/1.5 system-ui,sans-serif}
+  main{max-width:460px;margin:24px;padding:28px;border-radius:16px;background:#fffdf9;box-shadow:0 8px 30px rgba(0,0,0,.18)}
+  h1{margin:0 0 6px;font-size:18px} p{margin:8px 0;color:#6b665a}
+  #site{margin:14px 0;padding:12px 14px;border-radius:10px;background:#f6f2ea;font:600 20px/1.3 ui-monospace,monospace;color:#2b2820;word-break:break-all}
+  #why{color:#2b2820}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}
+  button{flex:1;padding:10px 14px;border-radius:10px;border:1px solid #c9c2b2;background:#fffdf9;color:#2b2820;font:inherit;cursor:pointer}
+  button.go{background:#c15f3c;border-color:#c15f3c;color:#fff} button.no{color:#6b665a}
+  small{display:block;margin-top:14px;color:#9a9488}
+</style></head><body><main>
+  <h1>Atlas wants to open a website</h1>
+  <p>It isn't on your allowed list. Allowing it covers the site and its subdomains.</p>
+  <div id="site"></div>
+  <p>Atlas says: <span id="why"></span></p>
+  <div class="row">
+    <button class="no" onclick="atlasAnswer('deny')">Don't allow</button>
+    <button onclick="atlasAnswer('once')">Allow for now</button>
+    <button class="go" onclick="atlasAnswer('always')">Always allow</button>
+  </div>
+  <small>"For now" lasts until the helper restarts. Atlas still can't pay, or enter card or login details, on any site. Only allow sites you recognise.</small>
+</main></body></html>`

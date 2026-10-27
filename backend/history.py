@@ -10,9 +10,11 @@ the data allows, and every point says which it is:
                             transactions is held flat). Balances in other
                             currencies at today's rate, like the Finances page.
   saved                     pot deposits added up by date (exact)
-  open_todos                to-dos created by then and not yet finished;
+  open_todos                to-dos created by then and not yet finished (the
+                            ones listed on the To-do page, not their sub-tasks);
                             ones ticked off before finish times were kept,
-                            or deleted, can't be counted, so it's a guess
+                            or deleted, can't be counted, so it's a guess.
+                            Today's point is always live
 
 Plus two that are always exact, straight from their dated records:
 
@@ -97,6 +99,13 @@ async def series(db, key: str, range_: str = "90d", today: date | None = None) -
     import fx
     today = today or date.today()
     recorded = await _recorded(db, key)
+    if key == "open_todos":
+        # Recordings made before sub-tasks were left out counted finished work
+        # as open: ignore them, and fall back to the estimate for those days.
+        async with db.execute("SELECT value FROM app_settings WHERE key = 'history.open_todos_from'") as c:
+            row = await c.fetchone()
+        from_day = row[0] if row else today.isoformat()
+        recorded = {d: v for d, v in recorded.items() if d >= from_day}
     accounts, per = (await _accounts_and_txns(db)) if key in ("net_worth",) or key.startswith("account:") else ([], {})
 
     if key == "net_worth" or key.startswith("account:"):
@@ -153,7 +162,7 @@ async def series(db, key: str, range_: str = "90d", today: date | None = None) -
         start_hint = min(((r["date"] or "")[:10] for r in deposits), default=None)
 
     elif key == "open_todos":
-        async with db.execute("SELECT created_at, done, completed_at FROM todos") as c:
+        async with db.execute("SELECT created_at, done, completed_at FROM todos WHERE parent_id IS NULL") as c:
             todos = [dict(r) for r in await c.fetchall()]
 
         def estimate(d):
@@ -180,6 +189,10 @@ async def series(db, key: str, range_: str = "90d", today: date | None = None) -
     else:
         start = today - timedelta(days=days_back - 1)
     points = _with_recorded(_days(start, today), recorded, estimate)
+    if key == "open_todos" and points and points[-1]["date"] == today.isoformat():
+        # Recordings are hourly; what's open right now isn't.
+        async with db.execute("SELECT COUNT(*) FROM todos WHERE done = 0 AND parent_id IS NULL") as c:
+            points[-1] = {"date": today.isoformat(), "value": (await c.fetchone())[0], "estimated": False}
     return {"key": key, **meta, "range": range_, "points": points,
             "recorded_since": min(recorded) if recorded else None}
 

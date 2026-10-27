@@ -16,6 +16,13 @@ test case. Nothing here is specific to one site.
 - **Only the sites in your config open.** The list is checked here on the
   laptop, so the server can't widen it. Pages can't navigate the browser
   anywhere else.
+- **Atlas can ask for another site, but only you can say yes.** A window opens
+  on your laptop showing the site and Atlas's reason, with *Don't allow*,
+  *Allow for now* and *Always allow*. The answer is read here and never goes
+  through the server, so neither the server nor the model can grant itself
+  access. It can ask at most 8 times per run, a "no" sticks until the helper
+  restarts, and addresses, bare endings like `co.uk` and look-alike
+  international names are never offered to you.
 - **It never pays.** It refuses to type into card, bank or password fields and
   refuses to press pay or place-order buttons. Payment forms embedded from
   other sites (Stripe and the like) are invisible to Atlas.
@@ -53,6 +60,9 @@ These rules are in `src/policy.js`, and the tests in `test/` check them.
 
 - **`sites`:** subdomains are included, so `irishrail.ie` also covers
   `booking.cf.irishrail.ie`. Restart the helper after changing the list.
+  Sites you choose *Always allow* for are saved in
+  `~/.atlas-helper/granted-sites.json`; delete a line there (and restart) to
+  take one back. *Allow for now* lasts until the helper restarts.
 - **`visible: true`:** the browser window stays on screen so you can watch
   Atlas work. With `false`, it's hidden and appears only when Atlas hands you
   a page.

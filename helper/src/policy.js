@@ -2,7 +2,8 @@
 // laptop, so they hold even if the server or the model is compromised, and
 // even if a web page talks the model into something.
 //
-// - Only the sites the user listed in the helper's config open.
+// - Only the sites the user listed in the helper's config open, plus any
+//   Atlas asks for that the user approves in a window on this laptop.
 // - Card, bank and password fields are never typed into (logins and paying
 //   are the user's).
 // - Pay / place-order buttons are never pressed.
@@ -19,6 +20,33 @@ export function siteFor(url, sites, { allowHttpLocal = false } = {}) {
     if (site && (host === site || host.endsWith('.' + site))) return site
   }
   return null
+}
+
+// Endings that cover a whole country's worth of unrelated sites. Allowing
+// "co.uk" would allow every .co.uk website, so a request for one is refused.
+const SHARED_ENDINGS = new Set([
+  'co.uk', 'org.uk', 'me.uk', 'ac.uk', 'gov.uk', 'ltd.uk', 'plc.uk', 'net.uk', 'sch.uk',
+  'com.au', 'net.au', 'org.au', 'co.nz', 'co.jp', 'co.in', 'co.za', 'com.br', 'com.cn', 'com.hk', 'com.sg', 'com.mx',
+])
+
+/**
+ * Turn what Atlas asked for ("https://www.ryanair.com/ie/en", "ryanair.com")
+ * into the site to allow, or say why not. Only plain registered names are
+ * accepted: no addresses, no bare endings like "com", no look-alike
+ * international characters (a safe-looking name made of other alphabets).
+ */
+export function requestedSite(input) {
+  const raw = String(input ?? '').trim().toLowerCase()
+  if (!raw || raw.length > 253) return { error: 'Name the website, like ryanair.com.' }
+  let host
+  try { host = new URL(/^[a-z]+:\/\//.test(raw) ? raw : `https://${raw}`).hostname } catch { return { error: `"${raw.slice(0, 60)}" isn't a website name.` } }
+  host = host.replace(/\.$/, '').replace(/^www\./, '')
+  if (/^[\d.]+$/.test(host) || host.includes(':') || host === 'localhost') return { error: 'Only website names are accepted, not addresses.' }
+  if (host.split('.').some(l => l.startsWith('xn--')) || !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host)) {
+    return { error: 'That name has unusual characters, so it can only be added by the user in the helper\'s config.' }
+  }
+  if (SHARED_ENDINGS.has(host)) return { error: `"${host}" is a whole group of unrelated sites. Name the specific one.` }
+  return { site: host }
 }
 
 // Words in a field's name, label or hints that mean card, bank or login details.

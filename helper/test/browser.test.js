@@ -182,3 +182,89 @@ test('a target that appears a moment later is waited for', async () => {
   await assert.rejects(browser.run('click', { target: { role: 'button', name: 'Dublin Connolly' }, wait: 0 }), /Not found/)
   assert.ok(Date.now() - t0 < 1000, 'wait: 0 fails straight away')
 })
+
+// ── Asking the user to allow another site ───────────────────────────────
+
+const askingBrowser = (answer, extra = {}) => {
+  const asked = []
+  const kept = []
+  const b = new Browser({
+    sites: ['127.0.0.1'], allowHttpLocal: true, headless: true,
+    profileDir: fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-helper-ask-')),
+    executablePath: process.env.CHROMIUM_PATH || undefined,
+    ask: async (site, reason) => { asked.push([site, reason]); return typeof answer === 'function' ? answer(site) : answer },
+    keep: site => kept.push(site),
+    ...extra,
+  })
+  return { b, asked, kept }
+}
+
+test('asking for a site: allowed once, then it opens; "always" is saved', async () => {
+  const { b, asked, kept } = askingBrowser(site => (site === 'ryanair.com' ? 'once' : 'always'))
+  assert.deepEqual(await b.run('request_site', { site: 'https://www.ryanair.com/ie/en', reason: 'To look up your flight' }),
+    { ok: true, site: 'ryanair.com', allowed: 'until the helper restarts' })
+  assert.deepEqual(asked, [['ryanair.com', 'To look up your flight']])
+  assert.deepEqual(kept, [])
+  assert.equal(b.site('https://book.ryanair.com/x'), 'ryanair.com')
+
+  assert.equal((await b.run('request_site', { site: 'aerlingus.com', reason: '' })).allowed, 'always')
+  assert.deepEqual(kept, ['aerlingus.com'])
+  // Already allowed (a subdomain of one that is): no second question.
+  assert.deepEqual(await b.run('request_site', { site: 'booking.aerlingus.com', reason: 'x' }), { ok: true, site: 'aerlingus.com', already_allowed: true })
+  assert.equal(asked.length, 2)
+})
+
+test('a "no" sticks, a timeout does not, and bad names never reach the user', async () => {
+  const { b, asked } = askingBrowser(site => (site === 'slow.example.com' ? 'timeout' : 'deny'))
+  await assert.rejects(b.run('request_site', { site: 'evil.example', reason: 'trust me' }), /said no to evil\.example/)
+  assert.equal(b.site('https://evil.example/'), null)
+  await assert.rejects(b.run('request_site', { site: 'evil.example', reason: 'please' }), /already said no/)
+  await assert.rejects(b.run('request_site', { site: 'slow.example.com', reason: 'x' }), /didn't answer/)
+  await assert.rejects(b.run('request_site', { site: 'slow.example.com', reason: 'x' }), /didn't answer/)  // may ask again
+  for (const bad of ['co.uk', '192.168.0.1', 'bücher.de']) {
+    await assert.rejects(b.run('request_site', { site: bad, reason: 'x' }), /Can't ask/)
+  }
+  assert.deepEqual(asked.map(a => a[0]), ['evil.example', 'slow.example.com', 'slow.example.com'])
+})
+
+test('Atlas can only ask so many times', async () => {
+  const { b, asked } = askingBrowser('deny')
+  for (let i = 0; i < 8; i++) await assert.rejects(b.run('request_site', { site: `site${i}.example`, reason: 'x' }), /said no/)
+  await assert.rejects(b.run('request_site', { site: 'one-more.example', reason: 'x' }), /too many times/)
+  assert.equal(asked.length, 8)
+})
+
+test('with no window to ask in, Atlas is told straight away', async () => {
+  const b = new Browser({ sites: ['127.0.0.1'], allowHttpLocal: true, headless: true, profileDir: os.tmpdir() })
+  await assert.rejects(b.run('request_site', { site: 'ryanair.com', reason: 'x' }), /without a window/)
+})
+
+// The approval window, once it has opened (it's a page the helper made, not a site).
+async function approvalWindow() {
+  for (let i = 0; i < 100; i++) {
+    for (const p of browser.context?.pages() ?? []) {
+      if (await p.locator('#site').count().catch(() => 0)) return p
+    }
+    await new Promise(r => setTimeout(r, 100))
+  }
+  assert.fail('the approval window never opened')
+}
+
+test('the approval window shows the site and takes the answer', async () => {
+  for (const [button, expected] of [['Always allow', 'always'], ['Allow for now', 'once'], ["Don't allow", 'deny']]) {
+    const answer = browser.askInWindow('ryanair.com', 'To look up your flight')
+    const dialog = await approvalWindow()
+    assert.equal(await dialog.locator('#site').textContent(), 'ryanair.com')
+    assert.match(await dialog.locator('#why').textContent(), /look up your flight/)
+    await dialog.getByRole('button', { name: button }).click()
+    assert.equal(await answer, expected)
+  }
+})
+
+test('a reason that looks like HTML is shown as plain text', async () => {
+  const answer = browser.askInWindow('ryanair.com', '<img src=x onerror="window.atlasAnswer(\'always\')">')
+  const dialog = await approvalWindow()
+  assert.equal(await dialog.locator('#why img').count(), 0)
+  await dialog.getByRole('button', { name: "Don't allow" }).click()
+  assert.equal(await answer, 'deny')
+})

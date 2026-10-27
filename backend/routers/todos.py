@@ -70,14 +70,15 @@ async def move_bucket(todo_id: str, body: dict, user=Depends(get_current_user), 
 
 @router.delete("/{todo_id}")
 async def remove_todo(todo_id: str, user=Depends(get_current_user), db=Depends(get_db)):
-    await db.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
+    # Its sub-tasks go with it (they'd otherwise sit there, hidden, still "open").
+    await db.execute("DELETE FROM todos WHERE id = ? OR parent_id = ?", (todo_id, todo_id))
     await db.commit()
     return {"ok": True}
 
 
 @router.delete("/done/clear")
 async def clear_done(user=Depends(get_current_user), db=Depends(get_db)):
-    await db.execute("DELETE FROM todos WHERE done = 1")
+    await db.execute("DELETE FROM todos WHERE done = 1 OR parent_id IN (SELECT id FROM todos WHERE done = 1)")
     await db.commit()
     return {"ok": True}
 

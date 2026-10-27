@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { siteFor, sensitiveField, paymentAction } from '../src/policy.js'
+import { siteFor, requestedSite, sensitiveField, paymentAction } from '../src/policy.js'
 
 const SITES = ['irishrail.ie', 'thetrainline.com', 'www.lner.co.uk']
 
@@ -51,4 +51,14 @@ test('pay buttons are caught; booking steps are not', () => {
     assert.equal(paymentAction({ text }), false, text)
   assert.ok(paymentAction({ text: '', aria: 'Pay securely' }))
   assert.ok(paymentAction({ text: '', value: 'Submit payment' }))
+})
+
+test('requestedSite: plain site names only', () => {
+  assert.deepEqual(requestedSite('https://www.Ryanair.com/ie/en/trip'), { site: 'ryanair.com' })
+  assert.deepEqual(requestedSite('booking.aerlingus.com'), { site: 'booking.aerlingus.com' })
+  // Where the link really goes is what counts, not what comes before an @.
+  assert.deepEqual(requestedSite('https://irishrail.ie@evil.example/'), { site: 'evil.example' })
+  for (const bad of ['', 'com', 'co.uk', 'localhost', '127.0.0.1', '10.0.0.1:8080', 'bücher.de', 'xn--bcher-kva.de', 'a b.com', 'http://[::1]/']) {
+    assert.ok(requestedSite(bad).error, `should refuse ${JSON.stringify(bad)}`)
+  }
 })

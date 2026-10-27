@@ -88,6 +88,61 @@ class TestBalances:
         assert todos[d(10)] == 0 and todos[d(8)] == 2 and todos[d(4)] == 1
 
 
+class TestOpenTodos:
+    async def _add(self, db, id, created, done=0, completed=None, parent=None):
+        await db.execute("INSERT INTO todos (id, text, created_at, done, completed_at, parent_id) VALUES (?,?,?,?,?,?)",
+                         (id, id, created, done, completed, parent))
+
+    async def test_sub_tasks_are_not_counted(self):
+        """A finished to-do's leftover sub-tasks, and ones whose parent was deleted, aren't open work."""
+        db = await _db()
+        try:
+            await self._add(db, "open", d(5))
+            await self._add(db, "kid-of-open", d(5), parent="open")
+            await self._add(db, "finished", d(5), done=1, completed=d(2))
+            await self._add(db, "kid-of-finished", d(5), parent="finished")   # never ticked
+            await self._add(db, "orphan", d(5), parent="deleted-long-ago")
+            await db.commit()
+            points = (await history.series(db, "open_todos", "30d", TODAY))["points"]
+        finally:
+            await db.close()
+        by_day = {p["date"]: p["value"] for p in points}
+        assert by_day[d(4)] == 2 and by_day[d(0)] == 1   # "open" and "finished" until it was done
+
+    async def test_today_is_live_and_old_recordings_are_not_trusted(self):
+        db = await _db()
+        try:
+            await self._add(db, "a", d(10))
+            await self._add(db, "b", d(10), done=1, completed=d(0))
+            # Recorded by the old count (sub-tasks and all), and an hour ago before "b" was ticked.
+            for day, n in ((d(3), 9), (d(0), 2)):
+                await db.execute("INSERT INTO daily_snapshots (date, key, value) VALUES (?, 'open_todos', ?)", (day, n))
+            await db.commit()
+            out = await history.series(db, "open_todos", "30d", TODAY)
+        finally:
+            await db.close()
+        by_day = {p["date"]: p for p in out["points"]}
+        assert by_day[d(3)]["value"] == 2 and by_day[d(3)]["estimated"]      # not the 9 recorded then
+        assert by_day[d(0)]["value"] == 1 and not by_day[d(0)]["estimated"]  # live, not the stale 2
+
+    async def test_recordings_from_the_new_count_are_kept(self):
+        import snapshots
+        db = await _db()
+        try:
+            await self._add(db, "a", d(10))
+            await self._add(db, "kid", d(10), parent="a")
+            await db.execute("INSERT INTO daily_snapshots (date, key, value) VALUES (?, 'open_todos', 7)", (d(8),))
+            await db.commit()
+            assert (await snapshots.take(db, TODAY - timedelta(days=5)))["open_todos"] == 1
+            out = await history.series(db, "open_todos", "30d", TODAY)
+        finally:
+            await db.close()
+        by_day = {p["date"]: p for p in out["points"]}
+        assert by_day[d(8)]["estimated"] and by_day[d(8)]["value"] == 1
+        assert not by_day[d(5)]["estimated"] and by_day[d(5)]["value"] == 1
+        assert out["recorded_since"] == d(5)
+
+
 class TestCashflowAndHabits:
     async def test_cashflow_by_month(self):
         db = await _db()

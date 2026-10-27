@@ -85,6 +85,7 @@ const TOOL_LABELS = {
   browser_screenshot: 'Looking at the page',
   browser_handoff: 'Handing the page to you',
   browser_close: 'Closing the page',
+  browser_request_site: 'Asking you to allow a website',
   save_site_notes: 'Saving notes on the site',
   browser_expect: 'Checking the page',
   list_workflows: 'Checking saved workflows',

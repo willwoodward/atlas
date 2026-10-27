@@ -7,12 +7,29 @@ import path from 'node:path'
 
 export const DIR = process.env.ATLAS_HELPER_DIR || path.join(os.homedir(), '.atlas-helper')
 export const CONFIG_PATH = path.join(DIR, 'config.json')
+// Sites the user approved when Atlas asked ("always allow"). Kept apart from
+// config.json so the helper never rewrites the file the user edits.
+export const GRANTED_PATH = path.join(DIR, 'granted-sites.json')
+
+function readGranted() {
+  try {
+    const list = JSON.parse(fs.readFileSync(GRANTED_PATH, 'utf8')).sites
+    return Array.isArray(list) ? list.filter(s => typeof s === 'string') : []
+  } catch { return [] }
+}
+
+export function grantSite(site) {
+  const sites = [...new Set([...readGranted(), site])].sort()
+  fs.mkdirSync(DIR, { recursive: true, mode: 0o700 })
+  fs.writeFileSync(GRANTED_PATH, JSON.stringify({ sites }, null, 2) + '\n', { mode: 0o600 })
+}
 
 const TEMPLATE = {
   server: 'https://willwoodward-clan-manager.duckdns.org',
   key: 'paste BROWSER_HELPER_KEY from the server .env.production here',
-  // The only sites Atlas can open. Subdomains are included
-  // (irishrail.ie covers booking.cf.irishrail.ie).
+  // The sites Atlas can open without asking. Subdomains are included
+  // (irishrail.ie covers booking.cf.irishrail.ie). For any other site Atlas
+  // asks, and a window on this laptop lets you say no, yes for now, or always.
   sites: ['irishrail.ie', 'thetrainline.com', 'lner.co.uk'],
   browser: {
     // Leave both empty to use Playwright's own Chromium (npx playwright install chromium).
@@ -34,7 +51,8 @@ export function loadConfig() {
   const cfg = {
     server: (env.ATLAS_URL || file.server || '').replace(/\/+$/, ''),
     key: env.ATLAS_HELPER_KEY || file.key || '',
-    sites: (env.ATLAS_HELPER_SITES ? env.ATLAS_HELPER_SITES.split(',') : file.sites || []).map(s => s.trim()).filter(Boolean),
+    sites: [...new Set([...(env.ATLAS_HELPER_SITES ? env.ATLAS_HELPER_SITES.split(',') : file.sites || []), ...readGranted()]
+      .map(s => s.trim()).filter(Boolean))],
     browser: { ...TEMPLATE.browser, ...(file.browser || {}) },
     profileDir: path.join(DIR, 'profile'),
   }
