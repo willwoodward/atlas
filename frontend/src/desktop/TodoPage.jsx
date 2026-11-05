@@ -4,6 +4,7 @@ import { useFocusRequest, flash } from '../lib/focus.js'
 import { useState, useRef, useCallback, useEffect } from 'react'
 import CheckMark from '../components/CheckMark.jsx'
 import { useTodos } from '../context/TodosContext.jsx'
+import { useWeeklyReview } from '../context/WeeklyReviewContext.jsx'
 import { useGoals } from '../context/GoalsContext.jsx'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 import { useQuickAdd } from '../context/QuickAddContext.jsx'
@@ -280,6 +281,7 @@ const navBtn = { width: 26, height: 26, display: 'flex', alignItems: 'center', j
 // that week's journal: how it went, with the outcomes kept above for reference.
 function WeeklyOutcomes() {
   const { outcomesByWeek, outcomesHistory, loadOutcomes, setOutcomes, reviews } = useTodos()
+  const openReview = useWeeklyReview()?.open
   const current = weekKey()
   const [week, setWeek] = useState(current)
   const [reviewing, setReviewing] = useState(false)
@@ -388,7 +390,7 @@ function WeeklyOutcomes() {
 
       {isSunday && week === current && !showHistory && !reviewing && (
         <div style={{ display: 'flex', gap: 14, marginTop: 4 }}>
-          <button onClick={toggleReview} style={sundayLink}>Review this week</button>
+          <button onClick={() => (openReview ? openReview(week) : toggleReview())} style={sundayLink}>Review this week</button>
           <button onClick={() => go(1)} style={sundayLink}>Plan next week →</button>
         </div>
       )}

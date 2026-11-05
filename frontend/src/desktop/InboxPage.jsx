@@ -380,6 +380,7 @@ export default function InboxPage() {
   const [selected, setSelected] = useState(null)
   const [routinesOpen, setRoutinesOpen] = useState(false)
   const [routineCount, setRoutineCount] = useState(null)
+  const [routinesOn, setRoutinesOn] = useState(null)   // how many of them are switched on
   const [err, setErr] = useState(null)
 
   const load = useCallback(async (v = view) => {
@@ -398,7 +399,7 @@ export default function InboxPage() {
     return () => clearInterval(t)
   }, [items, load])
   useEffect(() => {
-    inboxFetch(token, '/routines').then(r => setRoutineCount(r.routines.length)).catch(() => {})
+    inboxFetch(token, '/routines').then(r => { setRoutineCount(r.routines.length); setRoutinesOn(r.routines.filter(x => x.enabled).length) }).catch(() => {})
   }, [token, routinesOpen])
   // Desktop opens the newest item; a phone shows the list first.
   useEffect(() => {
@@ -462,7 +463,7 @@ export default function InboxPage() {
 
   const routinesButton = (
     <Button variant="ghost" size="sm" onClick={() => setRoutinesOpen(true)}>
-      Routines{routineCount ? ` · ${routineCount}` : ''}
+      Routines{routineCount ? ` · ${routinesOn !== null && routinesOn < routineCount ? `${routinesOn}/` : ''}${routineCount}` : ''}
     </Button>
   )
 

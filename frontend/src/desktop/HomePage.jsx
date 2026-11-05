@@ -15,6 +15,7 @@ import { useIsMobile } from '../hooks/useIsMobile.js'
 import { useCalendarEvents } from '../hooks/useCalendarEvents.js'
 import { currentWeekTodos, staysInBucket } from '../lib/week.js'
 import { goalTime, goalWeeks, fmtHours } from '../lib/goalTime.js'
+import WeeklyReviewCard from '../components/WeeklyReviewCard.jsx'
 
 
 function getCurrentPeriod() {
@@ -423,6 +424,8 @@ export default function HomePage() {
         <h1 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: isMobile ? 28 : 38, fontWeight: 500, letterSpacing: '-.01em' }}>{greeting}{name}.</h1>
         <p style={{ margin: '8px 0 0', fontSize: isMobile ? 13.5 : 15, color: 'var(--mid)' }}>Your day is ready when you are.</p>
       </div>
+
+      <WeeklyReviewCard />
 
       {/* Stats strip */}
       <div style={{ display: 'flex', marginBottom: openStat ? 0 : 38, borderTop: '1px solid var(--bd-md)', borderBottom: '1px solid var(--bd-md)' }}>

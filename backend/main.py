@@ -16,6 +16,7 @@ from routers.mcp_auth import router as mcp_auth_router
 from routers import inbox as inbox_router
 from routers import agents as agents_router
 from routers import history as history_router
+from routers import weekly_review as weekly_review_router
 from routers import wake as wake_router
 import browser_helper
 import browser_workflows
@@ -87,6 +88,7 @@ app.include_router(assistant.router)
 app.include_router(inbox_router.router)
 app.include_router(agents_router.router)
 app.include_router(history_router.router)
+app.include_router(weekly_review_router.router)
 app.include_router(wake_router.router)
 app.include_router(github_drafts_router)
 app.include_router(mcp_auth_router)

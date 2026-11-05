@@ -467,7 +467,7 @@ const SOURCES = [
   { id: 'wise_csv',     label: 'Wise (CSV)' },
 ]
 
-function ImportModal({ onClose }) {
+export function ImportModal({ onClose }) {
   const { accounts, previewImport, commitImport, classifier } = useFinances()
   const [source, setSource]     = useState(SOURCES[0].id)
   const [accountId, setAccount] = useState(accounts[0]?.id || '')

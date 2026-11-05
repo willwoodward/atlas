@@ -30,9 +30,10 @@ export async function fetchEvents(token, timeMin, timeMax) {
   return res.json()
 }
 
-// colorId: Google's colour (null = the calendar's own). atlasColor: the colour
-// Atlas draws it in, kept privately on the event so Google ignores it.
-export async function insertGcalEvent(token, { title, date, startH, endH, notes = '', colorId, atlasColor }) {
+// What Google is sent for a new event. colorId: Google's colour (null = the
+// calendar's own). atlasColor: the colour Atlas draws it in, kept privately on
+// the event so Google ignores it.
+export function gcalEventBody({ title, date, startH, endH, notes = '', colorId, atlasColor }) {
   const pad = n => String(Math.floor(n)).padStart(2, '0')
   const toTime = h => `${pad(h)}:${pad((h % 1) * 60)}:00`
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -44,10 +45,14 @@ export async function insertGcalEvent(token, { title, date, startH, endH, notes 
   }
   if (colorId) body.colorId = colorId
   if (atlasColor) body.extendedProperties = { private: { atlasColor } }
+  return body
+}
+
+export async function insertGcalEvent(token, event) {
   const res = await fetch(`${CAL_BASE}/calendars/primary/events`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(gcalEventBody(event)),
   })
   if (!res.ok) throw new Error(`GCal insert ${res.status}`)
   return res.json()

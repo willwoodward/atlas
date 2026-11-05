@@ -24,21 +24,33 @@ export function LocalCalendarProvider({ children }) {
     )
   }, [token, tick])
 
+  // Each change shows at once; if the server refuses it, it's put back.
+  const send = useCallback(async (path, opts, undo) => {
+    let ok = false
+    try { ok = (await call(path, opts)).ok } catch { /* offline */ }
+    if (!ok) { undo(); throw new Error('Could not save the event') }
+  }, [call])
+
   const addEvent = useCallback(async ({ title, date, startH, endH, color, notes = '' }) => {
     const id = crypto.randomUUID()
     setEvents(prev => [...prev, { id, title, date, startH, endH, color, notes }])
-    await call('/api/calendar', { method: 'POST', body: JSON.stringify({ id, title, date, start_h: startH, end_h: endH, color, notes }) })
-  }, [call])
+    await send('/api/calendar', { method: 'POST', body: JSON.stringify({ id, title, date, start_h: startH, end_h: endH, color, notes }) },
+      () => setEvents(prev => prev.filter(e => e.id !== id)))
+  }, [send])
 
   const removeEvent = useCallback(async (id) => {
+    const gone = events.find(e => e.id === id)
     setEvents(prev => prev.filter(e => e.id !== id))
-    await call(`/api/calendar/${id}`, { method: 'DELETE' })
-  }, [call])
+    await send(`/api/calendar/${id}`, { method: 'DELETE' },
+      () => gone && setEvents(prev => prev.some(e => e.id === id) ? prev : [...prev, gone]))
+  }, [send, events])
 
   const moveEvent = useCallback(async (id, { date, startH, endH }) => {
+    const was = events.find(e => e.id === id)
     setEvents(prev => prev.map(e => e.id === id ? { ...e, date, startH, endH } : e))
-    await call(`/api/calendar/${id}`, { method: 'PATCH', body: JSON.stringify({ date, start_h: startH, end_h: endH }) })
-  }, [call])
+    await send(`/api/calendar/${id}`, { method: 'PATCH', body: JSON.stringify({ date, start_h: startH, end_h: endH }) },
+      () => was && setEvents(prev => prev.map(e => e.id === id ? was : e)))
+  }, [send, events])
 
   return <Ctx.Provider value={{ events, addEvent, removeEvent, moveEvent }}>{children}</Ctx.Provider>
 }

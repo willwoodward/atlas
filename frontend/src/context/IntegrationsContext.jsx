@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { localDateStr, parseLocalDate, addDays } from '../lib/week.js'
-import { buildAuthUrl, fetchEvents, toCalendarEvents, insertGcalEvent, deleteGcalEvent, shiftGcalEvent } from '../integrations/googleCalendar.js'
+import { buildAuthUrl, fetchEvents, toCalendarEvents, gcalEventBody, insertGcalEvent, deleteGcalEvent, shiftGcalEvent } from '../integrations/googleCalendar.js'
 import { gcalColorIdFor, atlasNameForHex } from '../lib/calendarColors.js'
 import { useAuth } from './AuthContext.jsx'
 import { useRefresh } from './RefreshContext.jsx'
@@ -15,6 +15,14 @@ export function IntegrationsProvider({ children }) {
   // Events cached per fetched week ({ [mondayStr]: events }). Refetches update
   // a week in place, so nothing already on screen flashes a loading state.
   const [gcalWeeks, setGcalWeeks] = useState({})
+  // Events you've just made or moved that Google hasn't confirmed back to us
+  // yet: shown at once, then replaced by Google's own copy when it loads.
+  const [gcalPending, setGcalPending] = useState([])
+  const weeksRef = useRef(gcalWeeks)
+  const pendingRef = useRef(gcalPending)
+  useEffect(() => { weeksRef.current = gcalWeeks }, [gcalWeeks])
+  useEffect(() => { pendingRef.current = gcalPending }, [gcalPending])
+  const cancelledRef = useRef(new Set())   // events deleted while Google was still creating them
   const [gcalLoading, setGcalLoading] = useState(false)
   const [gcalError, setGcalError] = useState(null)
   const [gcalMutatedAt, setGcalMutatedAt] = useState(0)
@@ -57,6 +65,7 @@ export function IntegrationsProvider({ children }) {
   const disconnectGoogle = useCallback(() => {
     setGcalConnected(false)
     setGcalWeeks({})
+    setGcalPending([])
     // Revoke + clear on backend
     fetch(`${API}/auth/gcal`, { method: 'DELETE', headers: authHeaders() }).catch(() => {})
     // Also clear legacy stored token if any
@@ -98,28 +107,72 @@ export function IntegrationsProvider({ children }) {
     setColorRules(rulesRef.current)
   }, [authHeaders])
 
+  // Everything below changes the screen first and tells Google after, so the
+  // calendar never waits on the network. If Google says no, the change is put
+  // back. (mutatedAt tells the calendar to reload Google's own copy.)
+  const mapWeeks = fn => setGcalWeeks(prev => Object.fromEntries(Object.entries(prev).map(([k, evs]) => [k, fn(evs)])))
+  // Put back the events `matches` picked out of an earlier snapshot of the weeks / pending list.
+  const restore = (beforeWeeks, beforePending, matches) => {
+    setGcalWeeks(prev => Object.fromEntries(Object.entries(prev).map(([k, evs]) => {
+      const orig = (beforeWeeks[k] || []).filter(matches)
+      if (!orig.length) return [k, evs]
+      const ids = new Set(orig.map(e => e.id))
+      return [k, [...evs.filter(e => !ids.has(e.id)), ...orig]]
+    })))
+    const origPending = beforePending.filter(matches)
+    if (origPending.length) setGcalPending(prev => [...prev.filter(e => !origPending.some(o => o.id === e.id)), ...origPending])
+  }
+
   // Google's colour comes from the title rules; the Atlas colour (picked, or
   // from a local event being moved over) is kept on the event for Atlas only.
   const createGcalEvent = useCallback(async (eventData) => {
     if (!gcalConnected) throw new Error('Not connected')
-    const accessToken = await getAccessToken()
-    const rules = rulesRef.current ?? await loadColorRules().catch(() => null)
-    const result = await insertGcalEvent(accessToken, {
-      ...eventData,
-      colorId: rules ? gcalColorIdFor(eventData.title, rules) : null,
-      atlasColor: eventData.atlasColor ?? atlasNameForHex(eventData.color),
-    })
-    setGcalMutatedAt(Date.now())
-    return result
+    const tempId = `pending-${crypto.randomUUID()}`
+    const atlasColor = eventData.atlasColor ?? atlasNameForHex(eventData.color)
+    const guess = rulesRef.current
+    const draft = toCalendarEvents([{ id: tempId, ...gcalEventBody({ ...eventData, atlasColor, colorId: guess ? gcalColorIdFor(eventData.title, guess) : null }) }])
+    setGcalPending(prev => [...prev, ...draft.map(e => ({ ...e, pendingKey: tempId }))])
+    const dropDraft = () => setGcalPending(prev => prev.filter(e => e.pendingKey !== tempId))
+    try {
+      const accessToken = await getAccessToken()
+      const rules = rulesRef.current ?? await loadColorRules().catch(() => null)
+      const result = await insertGcalEvent(accessToken, {
+        ...eventData, atlasColor,
+        colorId: rules ? gcalColorIdFor(eventData.title, rules) : null,
+      })
+      if (cancelledRef.current.delete(tempId)) {   // deleted while it was being made
+        dropDraft()
+        await deleteGcalEvent(accessToken, result.id)
+        return result
+      }
+      // Swap the draft for Google's own copy; it drops out once a reload brings it in.
+      setGcalPending(prev => [...prev.filter(e => e.pendingKey !== tempId), ...toCalendarEvents([result]).map(e => ({ ...e, confirmed: true }))])
+      setGcalMutatedAt(Date.now())
+      return result
+    } catch (err) {
+      cancelledRef.current.delete(tempId)
+      dropDraft()
+      throw err
+    }
   }, [gcalConnected, getAccessToken, loadColorRules])
 
   const removeGcalEvent = useCallback(async (eventId) => {
     if (!gcalConnected) throw new Error('Not connected')
-    const accessToken = await getAccessToken()
-    await deleteGcalEvent(accessToken, eventId)
     // Sleep events also emit a derived `<id>_wakeup` entry
-    const keep = e => e.id !== eventId && e.id !== `${eventId}_wakeup`
-    setGcalWeeks(prev => Object.fromEntries(Object.entries(prev).map(([k, evs]) => [k, evs.filter(keep)])))
+    const gone = e => e.id === eventId || e.id === `${eventId}_wakeup`
+    const beforeWeeks = weeksRef.current, beforePending = pendingRef.current
+    mapWeeks(evs => evs.filter(e => !gone(e)))
+    setGcalPending(prev => prev.filter(e => !gone(e)))
+    if (eventId.startsWith('pending-')) {   // Google is still creating it: delete it as soon as it exists
+      cancelledRef.current.add(eventId)
+      return
+    }
+    try {
+      await deleteGcalEvent(await getAccessToken(), eventId)
+    } catch (err) {
+      restore(beforeWeeks, beforePending, gone)
+      throw err
+    }
     setGcalMutatedAt(Date.now())
   }, [gcalConnected, getAccessToken])
 
@@ -129,22 +182,27 @@ export function IntegrationsProvider({ children }) {
   const shiftGcalEvents = useCallback(async (ids, shift) => {
     const { days = 0, startHours = 0, endHours = 0 } = shift
     if (!gcalConnected) throw new Error('Not connected')
-    const accessToken = await getAccessToken()
+    if (ids.some(id => id.startsWith('pending-'))) throw new Error('Still saving that event')
     const moving = new Set(ids.flatMap(id => [id, `${id}_wakeup`]))
+    const isMoving = e => moving.has(e.id)
     const shiftDay = date => localDateStr(addDays(parseLocalDate(date), days))
-    setGcalWeeks(prev => Object.fromEntries(Object.entries(prev).map(([k, evs]) => [k, evs.map(e => moving.has(e.id)
+    const nudge = e => isMoving(e)
       ? (e.isAllDay ? { ...e, date: shiftDay(e.date) }
         : { ...e, date: shiftDay(e.date), start: e.start + startHours, dur: Math.max(e.dur + endHours - startHours, 0.25) })
-      : e)])))
+      : e
+    const beforeWeeks = weeksRef.current, beforePending = pendingRef.current
+    mapWeeks(evs => evs.map(nudge))
+    setGcalPending(prev => prev.map(nudge))
     try {
+      const accessToken = await getAccessToken()
       await Promise.all(ids.map(id => shiftGcalEvent(accessToken, id, shift)))
+    } catch (err) {
+      restore(beforeWeeks, beforePending, isMoving)
+      throw err
     } finally {
       setGcalMutatedAt(Date.now())
     }
   }, [gcalConnected, getAccessToken])
-
-  const weeksRef = useRef(gcalWeeks)
-  useEffect(() => { weeksRef.current = gcalWeeks }, [gcalWeeks])
 
   const refetchEvents = useCallback(async (weekStart, weekEnd) => {
     if (!gcalConnected) return
@@ -214,17 +272,26 @@ export function IntegrationsProvider({ children }) {
     return () => { cancelled = true }
   }, [tick]) // eslint-disable-line
 
+  // Once a reload has brought Google's copy of a just-made event in, drop ours.
+  useEffect(() => {
+    const have = new Set(Object.values(gcalWeeks).flat().map(e => `${e.id}|${e.date}`))
+    setGcalPending(prev => {
+      const next = prev.filter(e => !(e.confirmed && have.has(`${e.id}|${e.date}`)))
+      return next.length === prev.length ? prev : next
+    })
+  }, [gcalWeeks])
+
   // Every consumer filters by date, so the union of cached weeks works as-is.
   // A sleep event's wake-up hint can land in the next week's cache too — dedupe.
   const gcalEvents = useMemo(() => {
     const seen = new Set()
-    return Object.values(gcalWeeks).flat().filter(e => {
+    return [...Object.values(gcalWeeks).flat(), ...gcalPending].filter(e => {
       const k = `${e.id}|${e.date}`
       if (seen.has(k)) return false
       seen.add(k)
       return true
     })
-  }, [gcalWeeks])
+  }, [gcalWeeks, gcalPending])
 
   return (
     <Ctx.Provider value={{

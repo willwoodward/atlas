@@ -18,6 +18,7 @@ import { GitHubProvider }        from './context/GitHubContext.jsx'
 import { GoalsProvider }         from './context/GoalsContext.jsx'
 import { TodosProvider }         from './context/TodosContext.jsx'
 import { KeybindsProvider }      from './context/KeybindsContext.jsx'
+import { WeeklyReviewProvider }  from './context/WeeklyReviewContext.jsx'
 import { useIntegrations }       from './context/IntegrationsContext.jsx'
 import { useLocalCalendar }      from './context/LocalCalendarContext.jsx'
 import DesktopLayout from './desktop/DesktopLayout.jsx'
@@ -84,9 +85,11 @@ function Dashboard() {
                      <InboxProvider>
                       <KeybindsProvider>
                       <QuickAddProvider>
+                      <WeeklyReviewProvider>
                       <SyncManager />
                       <WakeWord />
                       {layout === 'desktop' ? <DesktopLayout /> : layout === 'tablet' ? <TabletLayout /> : <MobileLayout />}
+                      </WeeklyReviewProvider>
                       </QuickAddProvider>
                       </KeybindsProvider>
                      </InboxProvider>

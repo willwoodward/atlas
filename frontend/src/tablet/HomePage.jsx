@@ -1,5 +1,6 @@
 import CheckMark from '../components/CheckMark.jsx'
 import { stats, schedule, goals, todos, user } from '../data.js'
+import WeeklyReviewCard from '../components/WeeklyReviewCard.jsx'
 
 function Tag({ color, tint, children }) {
   return <div style={{ marginTop: 3, display: 'inline-flex', fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 6, background: tint, color }}>{children}</div>
@@ -11,6 +12,8 @@ export default function TabletHomePage() {
     <div style={{ padding: '14px 44px 30px' }}>
       <h1 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 32, fontWeight: 500 }}>Good morning{name}.</h1>
       <p style={{ margin: '7px 0 20px', fontSize: 15, color: '#6b665a' }}>Your day is ready when you are.</p>
+
+      <WeeklyReviewCard />
 
       {/* Stats 4-col */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 26 }}>
