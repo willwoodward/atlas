@@ -71,7 +71,27 @@ export function niceTicks(lo, hi, count = 3, integer = false) {
  * Lines over time. series: [{ label, color?, points: [{ date, value, estimated? }] }]
  * (value null = a gap). x is time, so thinned weekly points sit where they belong.
  */
-export function LineChart({ series, height = 180, format = v => String(v), yFrom, yTo, integer = false, emptyText = '—' }) {
+// A smooth path through points that never overshoots between them (monotone
+// cubic), so a curve through 0–100% stays inside 0–100%.
+export function curvePath(pts) {
+  const n = pts.length
+  if (n < 3) return pts.map((p, i) => `${i ? 'L' : 'M'}${p[0]},${p[1]}`).join('')
+  const dx = [], m = []
+  for (let i = 0; i < n - 1; i++) { dx.push(pts[i + 1][0] - pts[i][0]); m.push((pts[i + 1][1] - pts[i][1]) / (dx[i] || 1)) }
+  const k = [m[0]]
+  for (let i = 1; i < n - 1; i++) k.push(m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2)
+  k.push(m[n - 2])
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { k[i] = 0; k[i + 1] = 0; continue }
+    const a = k[i] / m[i], b = k[i + 1] / m[i], h = Math.hypot(a, b)
+    if (h > 3) { k[i] = 3 * a / h * m[i]; k[i + 1] = 3 * b / h * m[i] }
+  }
+  let d = `M${pts[0][0]},${pts[0][1]}`
+  for (let i = 0; i < n - 1; i++) d += `C${pts[i][0] + dx[i] / 3},${pts[i][1] + k[i] * dx[i] / 3} ${pts[i + 1][0] - dx[i] / 3},${pts[i + 1][1] - k[i + 1] * dx[i] / 3} ${pts[i + 1][0]},${pts[i + 1][1]}`
+  return d
+}
+
+export function LineChart({ series, height = 180, format = v => String(v), yFrom, yTo, integer = false, smooth = false, emptyText = '—' }) {
   const [ref, w] = useWidth()
   const [hover, setHover] = useState(null)   // a date
   const L = 4, R = 4, T = 10, B = 22
@@ -121,7 +141,15 @@ export function LineChart({ series, height = 180, format = v => String(v), yFrom
               <text x={L} y={y(v) - 4} fontSize="10.5" fill="var(--faint)">{format(v)}</text>
             </g>
           ))}
-          {series.map((s, si) => segs(s).map((g, i) => (
+          {smooth && series.map((s, si) => {
+            // One curve per unbroken run of points.
+            const runs = []
+            for (const p of s.points) { if (p.value == null) { runs.push([]); continue } if (!runs.length) runs.push([]); runs[runs.length - 1].push([x(p.date), y(p.value)]) }
+            return runs.filter(r => r.length > 1).map((r, i) => (
+              <path key={`${si}-${i}`} d={curvePath(r)} fill="none" stroke={s.color || SERIES_COLORS[si % SERIES_COLORS.length]} strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
+            ))
+          })}
+          {!smooth && series.map((s, si) => segs(s).map((g, i) => (
             <line key={`${si}-${i}`} x1={x(g.a.date)} y1={y(g.a.value)} x2={x(g.b.date)} y2={y(g.b.value)}
               stroke={s.color || SERIES_COLORS[si % SERIES_COLORS.length]} strokeWidth="2" strokeLinecap="round"
               strokeDasharray={g.dashed ? '4 4' : undefined} opacity={g.dashed ? 0.7 : 1} />
@@ -306,27 +334,27 @@ export function HabitConsistency({ style }) {
   const api = useHistoryApi()
   const [weeks, setWeeks] = useState('12')
   const [data, setData] = useState(null)
-  const [only, setOnly] = useState(null)   // a habit id, to see one on its own
-  useEffect(() => { api(`/habits?weeks=${weeks}`).then(setData).catch(() => setData({ weeks: [], habits: [] })) }, [weeks]) // eslint-disable-line
-  const habits = (data?.habits || []).filter(h => !only || h.id === only)
-  const series = habits.map(h => ({ label: h.name, color: h.color, points: data.weeks.map((w, i) => ({ date: w, value: h.values[i] })) }))
+  const [only, setOnly] = useState(null)   // a time of day, to see it on its own
+  useEffect(() => { api(`/habits?weeks=${weeks}`).then(setData).catch(() => setData({ weeks: [], groups: [] })) }, [weeks]) // eslint-disable-line
+  const groups = (data?.groups || []).filter(g => !only || g.id === only)
+  const series = groups.map(g => ({ label: g.name, color: g.color, points: data.weeks.map((w, i) => ({ date: w, value: g.values[i] })) }))
   return (
     <Section style={style} title="Consistency" right={<RangeTabs value={weeks} onChange={setWeeks} options={[['8', '8 weeks'], ['12', '12 weeks'], ['26', '6 months'], ['52', '1 year']]} />}>
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: -6, marginBottom: 10 }}>Share of days each habit was done, week by week.</div>
-      {data ? <LineChart series={series} format={v => `${Math.round(v)}%`} yFrom={0} yTo={100} emptyText="No habits yet." /> : <div style={{ height: 180 }} />}
-      {data?.habits?.length > 0 && (
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: -6, marginBottom: 10 }}>Share of days done across your morning, daytime and evening habits, week by week.</div>
+      {data ? <LineChart series={series} smooth format={v => `${Math.round(v)}%`} yFrom={0} yTo={100} emptyText="No habits yet." /> : <div style={{ height: 180 }} />}
+      {data?.groups?.length > 0 && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12 }}>
-          {data.habits.map(h => {
-            const avg = h.values.filter(v => v != null)
+          {data.groups.map(g => {
+            const avg = g.values.filter(v => v != null)
             const mean = avg.length ? Math.round(avg.reduce((a, b) => a + b, 0) / avg.length) : null
-            const on = !only || only === h.id
+            const on = !only || only === g.id
             return (
-              <button key={h.id} type="button" aria-pressed={only === h.id} onClick={() => setOnly(o => (o === h.id ? null : h.id))}
-                title={only === h.id ? 'Show all habits' : 'Show just this one'}
+              <button key={g.id} type="button" aria-pressed={only === g.id} onClick={() => setOnly(o => (o === g.id ? null : g.id))}
+                title={only === g.id ? 'Show all' : `Show just ${g.name.toLowerCase()}`}
                 style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 99, fontSize: 12, fontFamily: 'inherit', cursor: 'pointer',
-                         border: '1px solid var(--bd)', background: only === h.id ? 'var(--surface-2)' : 'transparent', color: on ? 'var(--ink)' : 'var(--faint)' }}>
-                <span style={{ width: 10, height: 3, borderRadius: 2, background: on ? h.color : 'var(--bd-xl)' }} />
-                {h.name}<span style={{ color: 'var(--muted)' }}>{mean != null ? ` · ${mean}%` : ''}</span>
+                         border: '1px solid var(--bd)', background: only === g.id ? 'var(--surface-2)' : 'transparent', color: on ? 'var(--ink)' : 'var(--faint)' }}>
+                <span style={{ width: 10, height: 3, borderRadius: 2, background: on ? g.color : 'var(--bd-xl)' }} />
+                {g.name}<span style={{ color: 'var(--muted)' }}>{` · ${g.habits} habit${g.habits === 1 ? '' : 's'}${mean != null ? ` · ${mean}%` : ''}`}</span>
               </button>
             )
           })}
@@ -364,8 +392,8 @@ export function HistoryCardBody({ card }) {
     return <><CashflowBars months={rows} format={format} height={130} /><Legend items={[{ label: 'Income', color: 'var(--sage)' }, { label: 'Spending', color: 'var(--accent)' }]} /></>
   }
   if (card.chart === 'habits') {
-    const series = card.habits.map(h => ({ label: h.name, color: h.color, points: card.weeks.map((w, i) => ({ date: w, value: h.values[i] })) }))
-    return <><LineChart series={series} height={150} format={v => `${Math.round(v)}%`} yFrom={0} yTo={100} /><div style={{ marginTop: 8 }}><Legend items={series.map(s => ({ label: s.label, color: s.color }))} /></div></>
+    const series = card.groups.map(g => ({ label: g.name, color: g.color, points: card.weeks.map((w, i) => ({ date: w, value: g.values[i] })) }))
+    return <><LineChart series={series} smooth height={150} format={v => `${Math.round(v)}%`} yFrom={0} yTo={100} /><div style={{ marginTop: 8 }}><Legend items={series.map(s => ({ label: s.label, color: s.color }))} /></div></>
   }
   const money = card.series.every(s => s.unit === 'money')
   const series = card.series.map((s, i) => ({ ...s, color: SERIES_COLORS[i % SERIES_COLORS.length],

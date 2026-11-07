@@ -54,10 +54,20 @@ async def _recorded(db, key: str) -> dict[str, float]:
         return {r[0]: r[1] for r in await c.fetchall()}
 
 
-def _with_recorded(days: list[date], recorded: dict[str, float], estimate) -> list[dict]:
+def _with_recorded(days: list[date], recorded: dict[str, float], estimate, anchored: bool = False) -> list[dict]:
     """A value per day: the recorded one if there is one for that day (or the
-    last before it, once recording has started), else the estimate."""
+    last before it, once recording has started), else the estimate.
+
+    `anchored`: the estimate walks back from today's balance, which drifts from
+    the recordings wherever the imported transactions are incomplete, leaving a
+    jump where they begin. Anchored, it walks back from the first recording
+    instead: the same day-to-day movement, joined to the real value."""
     first = min(recorded) if recorded else None
+    shift = 0.0
+    if anchored and first:
+        at_first = estimate(date.fromisoformat(first))
+        if at_first is not None:
+            shift = recorded[first] - at_first
     out, last = [], None
     ordered = sorted(recorded)
     i = 0
@@ -71,7 +81,7 @@ def _with_recorded(days: list[date], recorded: dict[str, float], estimate) -> li
         else:
             v = estimate(d)
             if v is not None:
-                out.append({"date": s, "value": round(v, 2), "estimated": True})
+                out.append({"date": s, "value": round(v + shift, 2), "estimated": True})
     return out
 
 
@@ -188,7 +198,13 @@ async def series(db, key: str, range_: str = "90d", today: date | None = None) -
         start = min(date.fromisoformat(first), today)
     else:
         start = today - timedelta(days=days_back - 1)
-    points = _with_recorded(_days(start, today), recorded, estimate)
+    points = _with_recorded(_days(start, today), recorded, estimate, anchored=key == "net_worth" or key.startswith("account:"))
+    if (key == "net_worth" or key == "saved" or key.startswith("account:")) and points and points[-1]["date"] == today.isoformat():
+        # Recordings are hourly, so today's would lag behind a balance changed since
+        # (an import, an edit): today's point is what the balances are right now.
+        live = estimate(today)
+        if live is not None:
+            points[-1] = {"date": today.isoformat(), "value": round(live, 2), "estimated": False}
     if key == "open_todos" and points and points[-1]["date"] == today.isoformat():
         # Recordings are hourly; what's open right now isn't.
         async with db.execute("SELECT COUNT(*) FROM todos WHERE done = 0 AND parent_id IS NULL") as c:
@@ -233,8 +249,13 @@ async def cashflow(db, months: int = 12, today: date | None = None) -> dict:
     return {"currency": "EUR", "months": out}
 
 
+# A habit's time of day is its colour (see HABIT_PERIODS in the app).
+HABIT_PERIODS = [("morning", "Morning", "#6f8168"), ("daytime", "Daytime", "#b08a3e"), ("evening", "Evening", "#9a6d84")]
+
+
 async def habits(db, weeks: int = 12, today: date | None = None) -> dict:
-    """Each habit's share of days done, per week (Monday to Sunday; this week so far)."""
+    """Share of habit-days done per week, for Morning, Daytime and Evening habits
+    (Monday to Sunday; this week so far). A habit counts from the day it was made."""
     today = today or date.today()
     weeks = max(2, min(weeks, 52))
     monday = today - timedelta(days=today.weekday())
@@ -246,16 +267,30 @@ async def habits(db, weeks: int = 12, today: date | None = None) -> dict:
         for r in await c.fetchall():
             done[r["habit_id"]].add(r["date"])
     labels = [(first + timedelta(weeks=i)) for i in range(weeks)]
-    out = []
+    by_colour = {c.lower(): (i, n, c) for i, n, c in HABIT_PERIODS}
+    members = defaultdict(list)
+    other = []
     for h in hs:
-        created = (h.get("created_at") or "")[:10]
+        slot = by_colour.get((h["color"] or "").lower())
+        (members[slot[0]] if slot else other).append(h)
+    groups = [(i, n, c, members[i]) for i, n, c in HABIT_PERIODS]
+    if other:
+        groups.append(("other", "Other", "#9a9488", other))
+    out = []
+    for gid, name, colour, mine in groups:
+        if not mine:
+            continue
         pts = []
         for wk in labels:
-            days = [wk + timedelta(days=i) for i in range(7) if wk + timedelta(days=i) <= today]
-            days = [d for d in days if not created or d.isoformat() >= created]
-            if not days:
-                pts.append(None)   # didn't exist yet
-                continue
-            pts.append(round(sum(d.isoformat() in done[h["id"]] for d in days) / len(days) * 100))
-        out.append({"id": h["id"], "name": h["name"], "color": h["color"], "values": pts})
-    return {"weeks": [w.isoformat() for w in labels], "habits": out}
+            possible = ticked = 0
+            for h in mine:
+                created = (h.get("created_at") or "")[:10]
+                for i in range(7):
+                    d = wk + timedelta(days=i)
+                    if d > today or (created and d.isoformat() < created):
+                        continue
+                    possible += 1
+                    ticked += d.isoformat() in done[h["id"]]
+            pts.append(round(ticked / possible * 100) if possible else None)   # None: none of them existed yet
+        out.append({"id": gid, "name": name, "color": colour, "habits": len(mine), "values": pts})
+    return {"weeks": [w.isoformat() for w in labels], "groups": out}

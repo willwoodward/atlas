@@ -63,17 +63,27 @@ export function colorMap(transactions, type, value) {
   return map
 }
 
-// Slices for the donut: categories with a colour of their own, then
-// Uncategorised, then everything else folded into Other.
+// Slices for the donut: the biggest categories *in this period* get a slice of
+// their own (a category that is small overall but large this month must show),
+// then Uncategorised, then everything else folded into Other. A category keeps
+// the colour from `colors` (all-time) when it can; one that has none takes a
+// colour nobody on screen is using.
 export function slices(totals, colors) {
   const named = [], rest = []
   let none = null
   for (const r of totals) {
     if (r.category === UNCATEGORISED) none = { ...r, color: NONE_COLOR }
-    else if (colors.has(r.category)) named.push({ ...r, color: colors.get(r.category) })
+    else if (named.length < MAX_SLICES) named.push(r)
     else rest.push(r)
   }
-  const out = [...named]
+  const taken = new Set()
+  const keep = named.map(r => {
+    const c = colors.get(r.category)
+    if (c && !taken.has(c) && SLOT_COLORS.includes(c)) { taken.add(c); return c }
+    return null
+  })
+  const free = SLOT_COLORS.filter(c => !taken.has(c))
+  const out = named.map((r, i) => ({ ...r, color: keep[i] ?? free.shift() }))
   if (none) out.push(none)
   if (rest.length) out.push({ category: OTHER, total: rest.reduce((s, r) => s + r.total, 0), color: OTHER_COLOR, members: rest.map(r => r.category) })
   return out

@@ -49,6 +49,32 @@ describe('colours and slices', () => {
   })
 })
 
+describe('a category that is big this period but small overall', () => {
+  // Giving is tiny all-time (not in the top five) but the biggest thing this month.
+  const history = ['A', 'B', 'C', 'D', 'E'].map((c, i) => t(c, 1000 - i * 100, '2026-01-10'))
+  const all = [...history, t('Giving', 40, '2026-02-01'), t('Giving', 300, '2026-10-05'), t('A', 20, '2026-10-06'), t('B', 10, '2026-10-07')]
+  const colors = colorMap(all, 'expense', value)
+  it('has no colour of its own overall', () => {
+    expect(colors.has('Giving')).toBe(false)
+  })
+  it('still gets its own slice, not a place in Other', () => {
+    const s = slices(categoryTotals(all, 'expense', value, periodRange('month', new Date(2026, 9, 11))), colors)
+    expect(s.map(x => x.category)).toEqual(['Giving', 'A', 'B'])
+    expect(s.find(x => x.category === OTHER)).toBeUndefined()
+  })
+  it('keeps the colours of the others and never reuses one on screen', () => {
+    const s = slices(categoryTotals(all, 'expense', value, periodRange('month', new Date(2026, 9, 11))), colors)
+    expect(s.find(x => x.category === 'A').color).toBe(colors.get('A'))
+    expect(s.find(x => x.category === 'B').color).toBe(colors.get('B'))
+    expect(new Set(s.map(x => x.color)).size).toBe(3)
+  })
+  it('in a period with more than five categories, the smallest fold into Other', () => {
+    const s = slices(categoryTotals(all, 'expense', value), colors)
+    expect(s.length).toBe(6)
+    expect(s.at(-1)).toMatchObject({ category: OTHER, members: ['Giving'] })
+  })
+})
+
 describe('suggested patterns', () => {
   it('uses the first distinctive word', () => {
     expect(suggestPattern('Tesco Stores Plc BEGGARS BUSH')).toBe('tesco')

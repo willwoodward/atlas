@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { niceTicks } from '../../components/HistoryCharts.jsx'
+import { curvePath, niceTicks } from '../../components/HistoryCharts.jsx'
 
 describe('chart gridlines', () => {
   it('lands on round values', () => {
@@ -14,5 +14,23 @@ describe('chart gridlines', () => {
   })
   it('copes with a flat line', () => {
     expect(niceTicks(5, 5)).toEqual([5])
+  })
+})
+
+describe('smooth lines', () => {
+  const ys = (d) => [...d.matchAll(/C[^,]+,([\d.-]+) [^,]+,([\d.-]+) /g)].flatMap(m => [Number(m[1]), Number(m[2])])
+  it('passes through every point', () => {
+    const d = curvePath([[0, 50], [10, 20], [20, 80]])
+    expect(d.startsWith('M0,50')).toBe(true)
+    expect(d).toContain(' 10,20')
+    expect(d.endsWith('20,80')).toBe(true)
+  })
+  it('does not swing past its highest or lowest point', () => {
+    // A sharp peak between flat neighbours would overshoot with a plain spline.
+    const d = curvePath([[0, 100], [10, 100], [20, 0], [30, 0]])
+    ys(d).forEach(y => { expect(y).toBeGreaterThanOrEqual(0); expect(y).toBeLessThanOrEqual(100) })
+  })
+  it('falls back to a straight line for two points', () => {
+    expect(curvePath([[0, 1], [5, 2]])).toBe('M0,1L5,2')
   })
 })

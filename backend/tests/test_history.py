@@ -39,13 +39,28 @@ class TestBalances:
             await db.close()
         pts = {p["date"]: p for p in s["points"]}
         assert len(s["points"]) == 30 and s["recorded_since"] == d(1)
-        # Today: 1000 in the current account, 200 owed on the card.
-        # Six days ago: before the £500 came in and the £100 went out, before the £50 on the card.
-        assert pts[d(6)] == {"date": d(6), "value": 1000 - 500 + 100 - (200 - 50), "estimated": True}
-        assert pts[d(3)]["value"] == 1000 + 100 - 150 and pts[d(3)]["estimated"]
-        # From the first recording on, recorded values (carried forward to today).
+        # The balances imply 800 on the day of the recording, but it says 777. The
+        # estimate keeps its day-to-day movement and is joined to the recording, so
+        # there is no jump where recording begins (-23 all the way back).
+        # Six days ago: before the 500 came in and the 100 went out, before the 50 on the card.
+        assert pts[d(6)] == {"date": d(6), "value": 1000 - 500 + 100 - (200 - 50) - 23, "estimated": True}
+        assert pts[d(3)]["value"] == 1000 + 100 - 150 - 23 and pts[d(3)]["estimated"]
         assert pts[d(1)] == {"date": d(1), "value": 777, "estimated": False}
-        assert pts[d(0)] == {"date": d(0), "value": 777, "estimated": False}
+        # Today is what the balances say right now (1000 in the account, 200 owed),
+        # not the last hourly recording.
+        assert pts[d(0)] == {"date": d(0), "value": 800, "estimated": False}
+
+    async def test_today_follows_a_balance_changed_since_the_last_recording(self):
+        db = await _db()
+        try:
+            await _accounts(db)
+            await db.execute("INSERT INTO daily_snapshots (date, key, value) VALUES (?, 'net_worth', 800)", (d(0),))
+            await db.execute("UPDATE finances_accounts SET balance = 2000 WHERE id = 'a1'")
+            await db.commit()
+            s = await history.series(db, "net_worth", "30d", TODAY)
+        finally:
+            await db.close()
+        assert s["points"][-1] == {"date": d(0), "value": 1800, "estimated": False}
 
     async def test_one_account_by_id_or_name(self):
         db = await _db()
@@ -154,22 +169,25 @@ class TestCashflowAndHabits:
         assert [m["month"] for m in out["months"]] == ["2026-08", "2026-09", "2026-10"]
         assert out["months"][-1] == {"month": "2026-10", "label": "Oct", "income": 500, "spending": 150, "current": True}
 
-    async def test_habit_consistency_by_week(self):
+    async def test_habit_consistency_by_time_of_day(self):
         db = await _db()
         try:
-            await db.execute("INSERT INTO habits (id, name, color, created_at) VALUES ('h1','Read','#000',?)", (d(30),))
-            await db.execute("INSERT INTO habits (id, name, color, created_at) VALUES ('h2','New','#000',?)", (d(1),))
+            # Two morning habits (sage) and one evening (mauve); the evening one is new.
+            await db.execute("INSERT INTO habits (id, name, color, created_at) VALUES ('m1','Read','#6f8168',?)", (d(30),))
+            await db.execute("INSERT INTO habits (id, name, color, created_at) VALUES ('m2','Stretch','#6f8168',?)", (d(30),))
+            await db.execute("INSERT INTO habits (id, name, color, created_at) VALUES ('e1','Journal','#9a6d84',?)", (d(1),))
             monday = TODAY - timedelta(days=TODAY.weekday())
             last_week = [monday - timedelta(days=7 - i) for i in range(7)]
-            for day in last_week[:5]:
-                await db.execute("INSERT INTO habit_completions (habit_id, date) VALUES ('h1', ?)", (day.isoformat(),))
+            for day in last_week:                                   # Read every day last week; Stretch never
+                await db.execute("INSERT INTO habit_completions (habit_id, date) VALUES ('m1', ?)", (day.isoformat(),))
             await db.commit()
             out = await history.habits(db, 3, TODAY)
         finally:
             await db.close()
-        read, new = out["habits"]
-        assert read["values"][1] == round(5 / 7 * 100)
-        assert new["values"][:2] == [None, None]   # didn't exist yet
+        assert [g["id"] for g in out["groups"]] == ["morning", "evening"]      # no daytime habits, so no line
+        morning, evening = out["groups"]
+        assert morning["habits"] == 2 and morning["values"][1] == 50           # 7 of 14 habit-days
+        assert evening["values"][:2] == [None, None]                           # didn't exist yet
 
 
 class TestApi:

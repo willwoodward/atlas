@@ -93,7 +93,7 @@ TOOLS = [
     Tool(name="history_chart",
          description="Chart how something has changed over time: net worth, savings in pots, an account's balance, open to-dos "
                      "(daily values Atlas records, estimated before recording began and marked so), income vs spending by month, "
-                     "or habit consistency week by week. Prefer this over net_worth_trend for anything over time.",
+                     "or habit consistency week by week (morning, daytime and evening habits). Prefer this over net_worth_trend for anything over time.",
          inputSchema={"type": "object", "properties": {
              "chart": {"type": "string", "enum": ["balances", "cashflow", "habits"],
                        "description": "balances: one or more series as lines; cashflow: income vs spending per month; habits: weekly consistency"},
@@ -216,8 +216,9 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
         import snapshots
         points, recorded = [], 0
         for end in reversed(ends):
-            # A recorded value (snapshots.py) from that month beats an estimate.
-            kept = await snapshots.value_on_or_before(db, "net_worth", end.isoformat(), end.replace(day=1).isoformat())
+            # A recorded value (snapshots.py) from that month beats an estimate; today
+            # is never read from a recording (hourly, so it can lag a changed balance).
+            kept = None if end == today else await snapshots.value_on_or_before(db, "net_worth", end.isoformat(), end.replace(day=1).isoformat())
             if kept is not None:
                 recorded += 1
                 points.append({"label": "Now" if end == today else end.strftime("%b"), "value": round(kept, 2),
@@ -254,10 +255,10 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
             return {**data, "card": {"type": "history", "chart": "cashflow", "title": "Income and spending", **data}, "show": show}
         if chart == "habits":
             data = await history.habits(db, int(args.get("weeks") or 8))
-            if not data["habits"]:
+            if not data["groups"]:
                 return {"error": "No habits yet."}
-            return {"weeks": data["weeks"], "habits": [{"name": h["name"], "values": h["values"]} for h in data["habits"]],
-                    "card": {"type": "history", "chart": "habits", "title": "Habit consistency · by week", **data},
+            return {"weeks": data["weeks"], "groups": [{"name": g["name"], "habits": g["habits"], "values": g["values"]} for g in data["groups"]],
+                    "card": {"type": "history", "chart": "habits", "title": "Habit consistency · morning, daytime, evening", **data},
                     "show": {"kind": "page", "page": "habits"}}
         keys = [k for k in (args.get("series") or ["net_worth"]) if isinstance(k, str)][:6]
         rng = args.get("range") if args.get("range") in history.RANGES else "90d"
