@@ -11,21 +11,31 @@ import { AtlasNote, Block, Observations, StepHeading } from './shared.jsx'
 // let go. The list is taken once when you arrive and kept, so a to-do you've
 // dealt with stays put (with an undo) instead of jumping out from under you.
 
-const daysSince = (stamp) => {
+// Stored stamps are a bare date (written by the assistant), an ISO instant, or
+// SQLite's "2026-11-04 22:46:58" (UTC, no zone). All are read as the local day.
+const toDay = (stamp) => {
   if (!stamp) return null
-  // A bare date (added by the assistant) is already a local day; a full
-  // timestamp is UTC and needs converting.
-  const d = stamp.length <= 10 ? parseLocalDate(stamp) : new Date(stamp)
+  const d = stamp.length <= 10 ? parseLocalDate(stamp) : new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(stamp) ? stamp : `${stamp.replace(' ', 'T')}Z`)
   if (Number.isNaN(d.getTime())) return null
   const [y, m, day] = localDateStr(d).split('-').map(Number)
-  const now = new Date()
-  return Math.max(0, Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(y, m - 1, day)) / 86400000))
+  return new Date(y, m - 1, day)
 }
+const daysBetween = (from, to = new Date()) => Math.max(0, Math.round((new Date(to.getFullYear(), to.getMonth(), to.getDate()) - from) / 86400000))
 
-export const openTodos = (todos) =>
-  todos.filter(t => !t.parentId && !t.done && (t.bucket === 'today' || t.bucket === 'week'))
-    .map(t => ({ id: t.id, text: t.text, bucket: t.bucket, goalId: t.goalId, age: daysSince(t.createdAt) }))
+// How long since anything happened to a to-do or its sub-tasks, so one whose
+// sub-tasks are being ticked off isn't called old.
+export const openTodos = (todos) => {
+  const kids = (id) => todos.filter(c => c.parentId === id)
+  return todos.filter(t => !t.parentId && !t.done && (t.bucket === 'today' || t.bucket === 'week'))
+    .map(t => {
+      const subs = kids(t.id)
+      const days = [t.createdAt, ...subs.flatMap(c => [c.createdAt, c.completedAt])].map(toDay).filter(Boolean)
+      const touched = days.length ? new Date(Math.max(...days)) : null
+      return { id: t.id, text: t.text, bucket: t.bucket, goalId: t.goalId, age: touched ? daysBetween(touched) : null,
+               subs: { total: subs.length, done: subs.filter(c => c.done).length } }
+    })
     .sort((a, b) => (b.age ?? -1) - (a.age ?? -1))
+}
 
 const VERB = { done: 'Marked done', keep: 'Kept for next week', someday: 'Moved to someday', drop: 'Dropped' }
 
@@ -46,11 +56,12 @@ function Row({ item, goal, decision, apply, undo, wide }) {
       <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
         <div style={{ fontSize: 15, lineHeight: 1.4, color: 'var(--ink)' }}>{item.text}</div>
         <div style={{ marginTop: 4, display: 'flex', gap: 10, alignItems: 'center', fontSize: 12, color: 'var(--muted)', flexWrap: 'wrap' }}>
-          {item.age != null && <span style={{ color: old ? 'var(--accent)' : 'var(--muted)', fontWeight: old ? 600 : 400 }}>open {ageLabel(item.age)}</span>}
+          {item.age != null && <span style={{ color: old ? 'var(--accent)' : 'var(--muted)', fontWeight: old ? 600 : 400 }}>{item.age < 1 ? 'touched today' : `untouched ${ageLabel(item.age)}`}</span>}
           <span>{item.bucket === 'today' ? 'Today' : 'This week'}</span>
+          {item.subs.total > 0 && <span>{item.subs.done}/{item.subs.total} sub-task{item.subs.total === 1 ? '' : 's'}</span>}
           {goal && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: goal.color }} />{goal.title}</span>}
         </div>
-        {old && <div style={{ marginTop: 5, fontSize: 13, color: 'var(--accent)' }}>Been here a while. Do it this week, break it down, or let it go.</div>}
+        {old && <div style={{ marginTop: 5, fontSize: 13, color: 'var(--accent)' }}>{item.age >= 56 ? 'This has sat for months. Put a time on it, or let it go.' : 'Been here a while. Do it this week, break it down, or let it go.'}</div>}
       </div>
       <div style={{ display: 'flex', gap: 6, flex: 'none', flexWrap: 'wrap' }}>
         <Button size="sm" variant="secondary" onClick={() => apply('done')} style={{ color: 'var(--sage)', fontWeight: 600 }}>Done</Button>
@@ -120,7 +131,7 @@ export default function TodosStep({ recap, narrative, memo, setMemo }) {
         <Block title="Finished this week" aside={`${finished.length}`}>
           {shownFinished.map(t => (
             <div key={t.id} style={{ padding: '9px 0', borderBottom: '1px solid var(--bd-xs)', fontSize: 14, color: 'var(--mid)' }}>
-              <span style={{ color: 'var(--sage)', marginRight: 9 }}>✓</span>{t.text}
+              <span style={{ color: 'var(--sage)', marginRight: 9 }}>✓</span>{t.text}{t.parent && <span style={{ color: 'var(--faint)' }}> · {t.parent}</span>}
             </div>
           ))}
           {finished.length > 5 && (

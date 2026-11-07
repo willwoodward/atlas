@@ -57,8 +57,8 @@ export default function OverviewStep({ week, recap, narrative, goalHours }) {
 
       <div style={{ height: 18 }} />
       <p className="wr-rise" style={{ '--d': `${0.5 + tiles.length * 0.18}s`, margin: '8px 0 0', fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6 }}>
-        Next: your goals, then money, habits and to-dos, so what you decide about
-        each can shape the plan for next week.
+        Next: money, then goals, habits and to-dos, so what you see in each can
+        shape the plan for next week.
       </p>
     </div>
   )

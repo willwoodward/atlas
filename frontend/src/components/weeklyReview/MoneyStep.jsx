@@ -16,6 +16,7 @@ const DEFAULT_CATEGORIES = ['Groceries', 'Eating out', 'Coffee', 'Transport', 'T
 function ImportPanel({ recap, onOpen }) {
   const m = recap.money
   const behind = m.stale
+  const gap = m.last_transaction ? Math.round((Date.now() - new Date(`${m.last_transaction.slice(0, 10)}T12:00:00`)) / 86400000) : 0
   return (
     <div className="wr-rise" style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', padding: '16px 18px', marginBottom: 26, borderRadius: 'var(--radius-lg)',
                                       background: behind ? 'var(--accent-soft)' : 'var(--surface)', border: `1px solid ${behind ? 'var(--accent-line)' : 'var(--bd)'}` }}>
@@ -23,7 +24,7 @@ function ImportPanel({ recap, onOpen }) {
         <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{behind ? 'Bring your statements up to date' : 'Your statements look current'}</div>
         <div style={{ marginTop: 3, fontSize: 13.5, lineHeight: 1.5, color: 'var(--mid)' }}>
           {m.last_transaction
-            ? <>Latest transaction: {fmtDay(m.last_transaction)}. {behind ? 'Download a CSV from your bank and import it to see the whole week.' : 'Import another account if you have one.'}</>
+            ? <>Latest transaction: {fmtDay(m.last_transaction)}{gap >= 14 ? ` (${Math.floor(gap / 7)} weeks ago)` : ''}. {behind ? 'Download a CSV from your bank and import it to see the whole week.' : 'Import another account if you have one.'}</>
             : 'Download a CSV from your bank and import it to see how the week went.'}
         </div>
       </div>

@@ -1,12 +1,13 @@
 // The weekly review: which week it is about, and the small pure pieces the
 // screens are built from.
 
-import { shiftWeek, weekKey, parseLocalDate, mondayOf } from './week.js'
+import { addDays, shiftWeek, weekKey, parseLocalDate, mondayOf } from './week.js'
+import { goalTime } from './goalTime.js'
 
 export const STEPS = [
   { id: 'week',   label: 'Your week' },
-  { id: 'goals',  label: 'Goals' },
   { id: 'money',  label: 'Money' },
+  { id: 'goals',  label: 'Goals' },
   { id: 'habits', label: 'Habits' },
   { id: 'todos',  label: 'To-dos' },
   { id: 'plan',   label: 'Reflect & plan' },
@@ -118,4 +119,34 @@ export function reflectionPrompts(recap) {
     if (out.length < 6) out.push(p)
   }
   return out
+}
+
+// ─── Calendar time on goals ───────────────────────────────────────────────────
+
+const round1 = (n) => Math.round(n * 10) / 10
+
+/**
+ * Hours on each goal in a week, with the average of the weeks before as its
+ * "usual". Matched from the calendar by each goal's tags, so goals without tags
+ * show zero. [{ id, goal, hours, usual }]
+ */
+export function goalHoursFor(events, goals, week, weeksBack = 4) {
+  const monday = parseLocalDate(week)
+  // A whole week at a time: `now` is its Sunday, so nothing is "still to come".
+  const at = (m) => goalTime(events, goals, addDays(m, 6), m)
+  const current = at(monday)
+  const before = Array.from({ length: weeksBack }, (_, i) => at(addDays(monday, -7 * (i + 1))))
+  return current.perGoal.map((r, i) => ({
+    id: r.goal.id, goal: r.goal.title, hours: round1(r.planned),
+    usual: round1(before.reduce((s, w) => s + w.perGoal[i].planned, 0) / weeksBack),
+  }))
+}
+
+/** One line on how a goal's calendar time compares with usual, or null if unremarkable. */
+export function goalHourNote({ goal, hours, usual }) {
+  if (hours === 0 && usual === 0) return { kind: 'warn', text: `Nothing on the calendar for “${goal}” in over a month.` }
+  if (usual >= 1 && hours === 0) return { kind: 'warn', text: `No calendar time on “${goal}” this week. You usually give it about ${fmtHours(usual)}.` }
+  if (usual >= 1 && hours < usual * 0.5) return { kind: 'warn', text: `Only ${fmtHours(hours)} on “${goal}”, about half its usual ${fmtHours(usual)}.` }
+  if (usual > 0 && hours >= 1 && hours >= usual * 1.5) return { kind: 'good', text: `${fmtHours(hours)} on “${goal}”, well above its usual ${fmtHours(usual)}.` }
+  return null
 }

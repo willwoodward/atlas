@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ageLabel, headlines, overviewTiles, reflectionPrompts, reviewTarget, weeksAgo } from '../weeklyReview.js'
+import { ageLabel, goalHourNote, goalHoursFor, headlines, overviewTiles, reflectionPrompts, reviewTarget, STEPS, weeksAgo } from '../weeklyReview.js'
 
 // Nov 2026: Mon 2, Thu 5, Sun 1 and 8.
 const at = (d, h = 10) => new Date(2026, 10, d, h)
@@ -90,5 +90,39 @@ describe('ageLabel', () => {
   it('is days, then weeks', () => {
     expect([0, 3, 13, 14, 30].map(ageLabel)).toEqual(['today', '3d', '13d', '2w', '4w'])
     expect(ageLabel(null)).toBe('')
+  })
+})
+
+describe('step order', () => {
+  it('looks at money before goals, then habits, to-dos and the plan', () => {
+    expect(STEPS.map(s => s.id)).toEqual(['week', 'money', 'goals', 'habits', 'todos', 'plan'])
+  })
+})
+
+describe('goalHoursFor', () => {
+  const goals = [{ id: 'g1', title: 'Fitness', color: '#6f8168', tags: 'gym' }, { id: 'g2', title: 'Spanish', color: '#c15f3c', tags: '' }]
+  // Review of Mon 2 – Sun 8 Nov 2026; the four weeks before it are 5 Oct – 1 Nov.
+  const ev = (date, dur) => ({ date, title: 'Gym', start: 9, dur })
+  const events = [ev('2026-11-03', 2), ev('2026-10-27', 4), ev('2026-10-20', 4), ev('2026-10-13', 4), ev('2026-10-06', 4)]
+  it('is the hours this week and the average of the four before', () => {
+    expect(goalHoursFor(events, goals, '2026-11-02')).toEqual([
+      { id: 'g1', goal: 'Fitness', hours: 2, usual: 4 },
+      { id: 'g2', goal: 'Spanish', hours: 0, usual: 0 },
+    ])
+  })
+})
+
+describe('goalHourNote', () => {
+  const g = (hours, usual) => goalHourNote({ goal: 'Fitness', hours, usual })
+  it('flags a goal that got nothing, or half, of what it usually gets', () => {
+    expect(g(0, 4)).toMatchObject({ kind: 'warn', text: expect.stringContaining('usually give it about 4h') })
+    expect(g(1, 4)).toMatchObject({ kind: 'warn', text: expect.stringContaining('half its usual 4h') })
+  })
+  it('says so when a goal has had nothing for over a month', () => {
+    expect(g(0, 0)).toMatchObject({ kind: 'warn', text: expect.stringContaining('over a month') })
+  })
+  it('praises a goal well above its usual, and leaves ordinary weeks alone', () => {
+    expect(g(7, 4)).toMatchObject({ kind: 'good' })
+    expect(g(3.5, 4)).toBeNull()
   })
 })

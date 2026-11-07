@@ -4,9 +4,8 @@ import { useIntegrations } from '../../context/IntegrationsContext.jsx'
 import { useCalendarEvents } from '../../hooks/useCalendarEvents.js'
 import { useIsMobile } from '../../hooks/useIsMobile.js'
 import { getWeekRange } from '../../integrations/googleCalendar.js'
-import { goalTime } from '../../lib/goalTime.js'
-import { addDays, formatWeekRange, parseLocalDate } from '../../lib/week.js'
-import { STEPS, weeksAgo } from '../../lib/weeklyReview.js'
+import { formatWeekRange } from '../../lib/week.js'
+import { STEPS, goalHoursFor, weeksAgo } from '../../lib/weeklyReview.js'
 import { Button, IconButton, eyebrow } from '../ui.jsx'
 import GoalsStep from './GoalsStep.jsx'
 import HabitsStep from './HabitsStep.jsx'
@@ -49,26 +48,26 @@ export default function WeeklyReview({ week, onClose, onComplete }) {
   useEffect(() => {
     if (!gcal.connected) { setCalendarReady(true); return }
     let live = true
-    loadWeeks([getWeekRange(-weeksAgo(week))]).finally(() => live && setCalendarReady(true))
+    loadWeeks(Array.from({ length: 5 }, (_, i) => getWeekRange(-weeksAgo(week) - i))).finally(() => live && setCalendarReady(true))
     return () => { live = false }
   }, [gcal.connected, week]) // eslint-disable-line react-hooks/exhaustive-deps
-  const goalHours = useMemo(() => {
-    const monday = parseLocalDate(week)
-    const t = goalTime(events, goals, addDays(monday, 6), monday)
-    return t.perGoal.map(r => ({ id: r.goal.id, goal: r.goal.title, hours: Math.round((t.hasTags ? r.planned : 0) * 10) / 10 }))
-  }, [events, goals, week])
+  // Only when the calendar is connected and goals have tags; otherwise there is
+  // nothing to say, and zero hours would read as a finding.
+  const goalHours = useMemo(
+    () => (gcal.connected && goals.some(g => (g.tags || '').trim()) ? goalHoursFor(events, goals, week) : []),
+    [events, goals, week, gcal.connected])
 
   // The commentary is written once the recap and calendar are in.
   const narrated = useRef(false)
   useEffect(() => {
     if (!recap || !calendarReady || narrated.current) return
     narrated.current = true
-    narrate(goalHours.filter(g => g.hours > 0))
+    narrate(goalHours)
   }, [recap, calendarReady]) // eslint-disable-line react-hooks/exhaustive-deps
   // After an import the figures changed, so the commentary is written again.
   const reloadAndRenarrate = useCallback(async () => {
     const fresh = await reload()
-    if (fresh) narrate(goalHours.filter(g => g.hours > 0), true)
+    if (fresh) narrate(goalHours, true)
   }, [reload, narrate, goalHours])
 
   const last = step === STEPS.length - 1

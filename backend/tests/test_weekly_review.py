@@ -58,6 +58,25 @@ async def test_a_habit_that_never_stuck_is_not_blamed(client, auth):
     assert [i for i in out["insights"] if i["kind"] == "warn"] == []
 
 
+async def test_habits_that_stop_together_are_one_observation(client, auth):
+    before = [d for k in range(1, 5) for d in _days(MONDAY - timedelta(weeks=k), 3)]          # three a week, never this week
+    stopped = before
+    await _habit(client, auth, "a", "Pray", stopped)
+    await _habit(client, auth, "b", "Read Bible", stopped)
+    await _habit(client, auth, "c", "Walk", before + _days(MONDAY, 3))                          # still going
+    out = (await _recap())["habits"]
+    quiet = [i for i in out["insights"] if "been ticked since" in i["text"]]
+    assert len(quiet) == 1
+    assert "“Pray” and “Read Bible” haven't been ticked since 21 Oct" in quiet[0]["text"] and "Walk" not in quiet[0]["text"]
+
+
+async def test_a_habit_not_ticked_for_a_month_is_asked_about(client, auth):
+    await _habit(client, auth, "h1", "Retainer", [])
+    out = (await _recap())["habits"]
+    note = [i for i in out["insights"] if i["ref"] == {"type": "habit", "id": "h1"}]
+    assert len(note) == 1 and note[0]["kind"] == "note" and "retire" in note[0]["text"]
+
+
 async def test_a_habit_made_mid_week_is_judged_only_from_then(client, auth):
     await _habit(client, auth, "h1", "Stretch", _days(MONDAY + timedelta(days=4), 3), created="2026-10-30")
     h = (await _recap())["habits"]["habits"][0]
@@ -99,6 +118,18 @@ async def test_old_open_todo_is_flagged_with_its_age(client, auth):
     assert out["open"][0]["id"] == "t1" and out["stale_count"] == 1       # oldest first
 
 
+async def test_todos_that_have_sat_for_months_are_grouped_and_told_to_be_scheduled_or_dropped(client, auth):
+    for i, name in enumerate(["Plan meals", "Plan finances", "Back up photos"]):
+        await _todo(f"o{i}", name, created="2026-07-16T09:00:00.000Z")
+    await _todo("r", "Change address", created="2026-09-19T09:00:00.000Z")
+    out = (await _recap())["todos"]
+    group = [i for i in out["insights"] if i["kind"] == "warn" and i["ref"] is None]
+    assert len(group) == 1 and "have each sat for" in group[0]["text"] and "let them go" in group[0]["text"]
+    assert all(n in group[0]["text"] for n in ("Plan meals", "Plan finances", "Back up photos"))
+    single = [i for i in out["insights"] if i["ref"] == {"type": "todo", "id": "r"}]
+    assert "Do it this week" in single[0]["text"]                  # a six-week-old one is still doable
+
+
 async def test_finished_todos_are_counted_in_the_week_they_were_done(client, auth):
     await _todo("a", "Done Tue", done=1, completed="2026-10-27T10:00:00.000Z")
     await _todo("b", "Done last week", done=1, completed="2026-10-21T10:00:00.000Z")
@@ -106,10 +137,28 @@ async def test_finished_todos_are_counted_in_the_week_they_were_done(client, aut
     await _todo("d", "Someday thing", bucket="someday")
     await _todo("e", "A sub-task", done=1, completed="2026-10-28T10:00:00.000Z", parent="a")
     out = (await _recap())["todos"]
-    assert sorted(t["id"] for t in out["finished"]) == ["a", "c"]
+    assert sorted(t["id"] for t in out["finished"]) == ["a", "c", "e"]          # sub-tasks are work done too
+    assert next(t for t in out["finished"] if t["id"] == "e")["parent"] == "Done Tue"
     assert out["prev_finished_count"] == 1
     assert out["someday_count"] == 1 and out["open_count"] == 0
     assert any("up from 1" in i["text"] for i in out["insights"])
+
+
+async def test_a_todo_whose_subtasks_are_moving_is_not_stale(client, auth):
+    await _todo("p", "Book travel", created="2026-10-01T09:00:00.000Z")                          # a month old…
+    await _todo("s1", "Book flight", done=1, created="2026-10-02", completed="2026-10-30 22:46:58", parent="p")   # …but worked on Friday
+    await _todo("s2", "Book train", created="2026-10-30", parent="p")
+    await _todo("q", "Plan holiday", created="2026-09-01T09:00:00.000Z")
+    out = (await _recap())["todos"]
+    travel = next(t for t in out["open"] if t["id"] == "p")
+    assert travel["age_days"] == 2 and (travel["subs_done"], travel["subs_total"]) == (1, 2)
+    assert [i["ref"]["id"] for i in out["insights"] if i["kind"] == "warn"] == ["q"]
+
+
+async def test_a_subtask_with_no_parent_is_ignored(client, auth):
+    await _todo("o", "Orphan", parent="gone", done=1, completed="2026-10-28T10:00:00.000Z")
+    out = (await _recap())["todos"]
+    assert out["finished_count"] == 0 and out["open_count"] == 0
 
 
 # ── Goals ─────────────────────────────────────────────────────────────────────
@@ -126,6 +175,14 @@ async def test_goal_with_waiting_todos_but_no_progress_is_a_warning(client, auth
     kinds = {i["ref"]["id"]: i["kind"] for i in out["insights"]}
     assert kinds == {"g1": "warn", "g2": "good"}
     assert out["insights"][0]["ref"]["id"] == "g1"                       # warnings first
+
+
+async def test_goals_say_nothing_about_todos_when_none_are_linked(client, auth):
+    await client.post("/api/goals", json={"id": "g1", "title": "Healthy Body", "color": "#6f8168", "created_at": "2026-01-01"}, headers=auth)
+    await _todo("t1", "Gym", done=1, completed="2026-10-28T08:00:00.000Z")          # not linked to any goal
+    out = (await _recap())["goals"]
+    assert out["linked_any"] is False
+    assert len(out["insights"]) == 1 and out["insights"][0]["ref"] is None and "not linked" not in out["insights"][0]["text"]
 
 
 # ── Money ─────────────────────────────────────────────────────────────────────
@@ -207,6 +264,22 @@ async def test_narrative_is_kept_until_the_figures_change(client, auth, monkeypa
     assert len(calls) == 2
     await client.post(url, json={"refresh": True}, headers=auth)
     assert len(calls) == 3
+
+
+async def test_the_model_is_told_when_the_data_is_thin(client, auth, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    seen = []
+
+    async def fake(facts):
+        seen.append(facts)
+        return {"headline": "", "goals": "", "money": "", "habits": "", "todos": "", "plan": ""}
+
+    monkeypatch.setattr(wr, "_call_model", fake)
+    await client.post("/api/goals", json={"id": "g1", "title": "Healthy Body", "color": "#6f8168", "created_at": "2026-01-01"}, headers=auth)
+    await _txn(client, auth, "old", "Tesco", 40, MONDAY - timedelta(days=20), "Groceries")
+    await client.post(f"/api/weekly-review/{WEEK}/narrate", json={}, headers=auth)
+    notes = " ".join(seen[0]["data_notes"])
+    assert "last imported up to 2026-10-06" in notes and "No to-dos are linked to goals" in notes and "Calendar time" in notes
 
 
 async def test_the_model_is_never_told_merchant_names(client, auth, monkeypatch):

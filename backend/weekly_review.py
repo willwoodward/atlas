@@ -30,6 +30,7 @@ log = logging.getLogger("atlas.weekly_review")
 
 HISTORY_WEEKS = 4        # how many earlier weeks make up "usual"
 STALE_DAYS = 14          # an open to-do this old is worth a second look
+LONG_STALE_DAYS = 56     # this old, "do it this week" is the wrong advice
 STREAK_MARKS = (7, 14, 21, 30, 50, 100, 200, 365)
 SYMBOLS = {"EUR": "€", "GBP": "£", "USD": "$"}
 DONE_PREFIX = "weekly_review:done:"
@@ -135,8 +136,12 @@ async def habits_recap(db, monday: date, today: date) -> dict:
         while cursor.isoformat() in mine and (not created or cursor.isoformat() >= created):
             streak += 1
             cursor -= timedelta(days=1)
+        ticked = [d for d in mine if d <= last.isoformat()]
+        last_done = max(ticked) if ticked else None
+        prior = sum(1 for d in mine if (monday - timedelta(days=28)).isoformat() <= d < monday.isoformat())
         rows.append({
             "id": h["id"], "name": h["name"], "color": h["color"], "days": flags,
+            "last_done": last_done, "prior_ticks": prior,
             "done": n_done, "possible": len(possible),
             "usual_days": round(usual * 7, 1) if usual is not None else None,
             "streak": streak,
@@ -155,6 +160,26 @@ async def habits_recap(db, monday: date, today: date) -> dict:
             insights.append(insight("good", f"“{r['name']}”: every day this week.", {"type": "habit", "id": r["id"]}))
         if r["streak"] in STREAK_MARKS:
             insights.append(insight("good", f"“{r['name']}” is on a {r['streak']}-day streak.", {"type": "habit", "id": r["id"]}))
+    # A habit that was alive and has gone quiet. Habits that stop on the same day
+    # are one story (a trip, an illness), so they're reported together.
+    slipped_ids = {r["id"] for _, r in slipped}
+    quiet: dict[str, list] = {}
+    for r in rows:
+        if (r["id"] not in slipped_ids and r["last_done"] and r["done"] == 0 and r["prior_ticks"] >= 3
+                and (last - date.fromisoformat(r["last_done"])).days >= 5):
+            quiet.setdefault(r["last_done"], []).append(r)
+    for since, group in sorted(quiet.items()):
+        gap = (last - date.fromisoformat(since)).days
+        when = date.fromisoformat(since).strftime("%-d %b")
+        names = [f"“{r['name']}”" for r in group]
+        who = names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" and {names[-1]}"
+        verb = "hasn't" if len(names) == 1 else "haven't"
+        insights.append(insight("warn", f"{who} {verb} been ticked since {when} ({gap} days).", {"type": "habit", "id": group[0]["id"]}))
+    # Never ticked in the weeks before or this one: still wanted, or ready to go?
+    for r in rows:
+        if r["done"] == 0 and r["usual_days"] == 0 and r["possible"] >= 3:
+            insights.append(insight("note", f"“{r['name']}” hasn't been ticked in over a month. Still want it, or time to retire it?",
+                                    {"type": "habit", "id": r["id"]}))
     for _, r in sorted(slipped, key=lambda s: -s[0])[:4]:
         if r["done"] == 0:
             text = f"You didn't do “{r['name']}” at all; you usually manage about {round(r['usual_days'])} days a week."
@@ -165,7 +190,7 @@ async def habits_recap(db, monday: date, today: date) -> dict:
 
     if tot_possible and prev_possible:
         now_pct, then_pct = round(tot_done / tot_possible * 100), round(prev_done / prev_possible * 100)
-        if abs(now_pct - then_pct) >= 5:
+        if abs(now_pct - then_pct) >= 10:
             word = "up" if now_pct > then_pct else "down"
             insights.append(insight("good" if now_pct > then_pct else "note",
                                     f"{now_pct}% of your habit check-ins done, {word} from {then_pct}% the week before."))
@@ -181,35 +206,72 @@ async def habits_recap(db, monday: date, today: date) -> dict:
 
 async def todos_recap(db, monday: date, today: date) -> dict:
     sunday = monday + timedelta(days=6)
-    async with db.execute(
-        "SELECT id, text, bucket, goal_id, done, created_at, completed_at FROM todos WHERE parent_id IS NULL OR parent_id = ''"
-    ) as c:
-        rows = [dict(r) for r in await c.fetchall()]
+    async with db.execute("SELECT id, text, bucket, goal_id, done, created_at, completed_at, parent_id FROM todos") as c:
+        everything = [dict(r) for r in await c.fetchall()]
+    by_id = {r["id"]: r for r in everything}
+    top = [r for r in everything if not r["parent_id"]]
+    children: dict[str, list] = {}
+    for r in everything:
+        if r["parent_id"] in by_id:      # a sub-task whose parent is gone belongs to nothing
+            children.setdefault(r["parent_id"], []).append(r)
 
     def completed_between(r, start, end):
         d = local_day(r["completed_at"]) if r["done"] else None
         return d is not None and start <= d <= end
 
-    finished = [r for r in rows if completed_between(r, monday, sunday)]
-    prev_finished = [r for r in rows if completed_between(r, monday - timedelta(days=7), monday - timedelta(days=1))]
+    # Sub-tasks are where much of the real work happens, so they count as
+    # finished work too, named with the to-do they belong to.
+    finished = [r for r in everything if r["parent_id"] in by_id or not r["parent_id"]
+                if completed_between(r, monday, sunday)]
+    prev_finished = [r for r in everything if (r["parent_id"] in by_id or not r["parent_id"])
+                     if completed_between(r, monday - timedelta(days=7), monday - timedelta(days=1))]
+
+    def last_touched(r):
+        """The latest day anything happened to a to-do or its sub-tasks. A to-do
+        whose sub-tasks are being ticked off isn't stale, however old it is."""
+        days = [local_day(r["created_at"])]
+        for ch in children.get(r["id"], []):
+            days += [local_day(ch["created_at"]), local_day(ch["completed_at"])]
+        days = [d for d in days if d]
+        return max(days) if days else None
+
     open_rows = []
-    for r in rows:
+    for r in top:
         if r["done"] or r["bucket"] not in ("today", "week"):
             continue
-        made = local_day(r["created_at"])
-        age = max((today - made).days, 0) if made else None
-        open_rows.append({"id": r["id"], "text": r["text"], "bucket": r["bucket"], "goal_id": r["goal_id"], "age_days": age})
+        touched = last_touched(r)
+        kids = children.get(r["id"], [])
+        open_rows.append({
+            "id": r["id"], "text": r["text"], "bucket": r["bucket"], "goal_id": r["goal_id"],
+            "age_days": max((today - touched).days, 0) if touched else None,
+            "subs_total": len(kids), "subs_done": sum(1 for k in kids if k["done"]),
+        })
     open_rows.sort(key=lambda r: -(r["age_days"] or 0))
-    someday = sum(1 for r in rows if not r["done"] and r["bucket"] == "someday")
+    someday = sum(1 for r in top if not r["done"] and r["bucket"] == "someday")
 
     insights = []
     stale = [r for r in open_rows if r["age_days"] is not None and r["age_days"] >= STALE_DAYS]
-    for r in stale[:3]:
+    long_stale = [r for r in stale if r["age_days"] >= LONG_STALE_DAYS]
+    recent_stale = [r for r in stale if r["age_days"] < LONG_STALE_DAYS]
+    if len(long_stale) >= 2:
+        names = [f"“{r['text']}”" for r in long_stale[:3]]
+        who = ", ".join(names[:-1]) + f" and {names[-1]}" if len(names) > 1 else names[0]
+        lo, hi = long_stale[-1]["age_days"] // 7, long_stale[0]["age_days"] // 7
+        span = f"{hi} weeks" if lo == hi else f"{lo}–{hi} weeks"
+        more = f", with {len(long_stale) - 3} more as old" if len(long_stale) > 3 else ""
+        insights.append(insight("warn", f"{who} have each sat for {span}{more}. If they mattered they'd have happened: "
+                                        "put a time on them or let them go."))
+    elif long_stale:
+        r = long_stale[0]
+        insights.append(insight("warn", f"“{r['text']}” hasn't moved for {how_long(r['age_days'])}. Put a time on it, or let it go.",
+                                {"type": "todo", "id": r["id"]}))
+    for r in recent_stale[:2]:
         insights.append(insight(
-            "warn", f"“{r['text']}” has been open for {how_long(r['age_days'])}. Do it this week, break it down, or let it go.",
+            "warn", f"“{r['text']}” hasn't moved for {how_long(r['age_days'])}. Do it this week, break it down, or let it go.",
             {"type": "todo", "id": r["id"]}))
-    if len(stale) > 3:
-        insights.append(insight("note", f"{len(stale) - 3} more to-dos are over {STALE_DAYS // 7} weeks old."))
+    if len(recent_stale) > 2:
+        left = len(recent_stale) - 2
+        insights.append(insight("note", f"{left} more {'to-do hasn' if left == 1 else 'to-dos haven'}'t moved in over {STALE_DAYS // 7} weeks."))
     n, before = len(finished), len(prev_finished)
     if n and before and n != before:
         insights.append(insight("good" if n > before else "note",
@@ -221,7 +283,8 @@ async def todos_recap(db, monday: date, today: date) -> dict:
     if len(open_rows) > 12:
         insights.append(insight("note", f"{len(open_rows)} to-dos are still open. That's a lot to carry into the week."))
     return {
-        "finished": [{"id": r["id"], "text": r["text"], "goal_id": r["goal_id"]} for r in finished],
+        "finished": [{"id": r["id"], "text": r["text"], "goal_id": r["goal_id"],
+                      "parent": by_id[r["parent_id"]]["text"] if r["parent_id"] in by_id else None} for r in finished],
         "finished_count": n, "prev_finished_count": before,
         "open": open_rows, "open_count": len(open_rows), "stale_count": len(stale), "someday_count": someday,
         "insights": insights,
@@ -242,6 +305,7 @@ async def goals_recap(db, monday: date, todos: dict) -> dict:
             finished_by_goal.setdefault(t["goal_id"], []).append(t["text"])
 
     rows, insights = [], []
+    linked_any = bool(linked)
     for g in goals:
         mine = [t for t in linked if t["goal_id"] == g["id"]]
         open_week = sum(1 for t in mine if not t["done"] and t["bucket"] in ("today", "week"))
@@ -253,6 +317,8 @@ async def goals_recap(db, monday: date, todos: dict) -> dict:
             "open_this_week": open_week, "open_count": open_all,
         })
         ref = {"type": "goal", "id": g["id"]}
+        if not linked_any:
+            continue          # nothing is linked to any goal, so to-dos can't say which one moved
         if finished:
             insights.append(insight("good", f"{plural(len(finished), 'to-do')} done towards “{g['title']}”.", ref))
         elif open_week:
@@ -264,7 +330,10 @@ async def goals_recap(db, monday: date, todos: dict) -> dict:
     # Warnings first: they're the reason to look.
     order = {"warn": 0, "note": 1, "good": 2}
     insights.sort(key=lambda i: order[i["kind"]])
-    return {"goals": rows, "quarter": quarter.upper(), "insights": insights[:6]}
+    if goals and not linked_any:
+        insights.insert(0, insight("note", "None of your to-dos are linked to a goal, so they can't show which goal moved. "
+                                           "Calendar time is the guide here."))
+    return {"goals": rows, "quarter": quarter.upper(), "linked_any": linked_any, "insights": insights[:6]}
 
 
 # ── Money ─────────────────────────────────────────────────────────────────────
@@ -438,19 +507,31 @@ async def set_completed(db, week: str, done: bool) -> None:
 
 SECTIONS = ("goals", "money", "habits", "todos")
 
-INSTRUCTIONS = """You write the short commentary for one person's weekly review of their own life: goals, \
-money, habits and to-dos. You are Atlas, their assistant, speaking to them directly in the second person, \
-like a thoughtful friend who has read the numbers: warm, specific, never gushing, never scolding.
+INSTRUCTIONS = """You write the short commentary on one person's weekly review of their own life: money, goals, \
+habits and to-dos. You are Atlas, their assistant, talking to them directly in the second person, like a \
+thoughtful friend who has read the numbers: warm, plain, specific, never gushing, never scolding.
 
-You are given the week's figures and a list of observations already worked out. Use only those; never \
-invent a number, a habit, a to-do or a reason. Quote figures exactly as given, with the currency symbol \
-as written. Each field is one or two short sentences. Lead with what matters most: a habit that slipped \
-or a to-do that has sat for weeks matters more than a streak. Name the specific habit or to-do. If a \
-section has nothing worth saying, return an empty string for it. If the week was quiet or the data is \
-thin, say so plainly instead of padding.
+You get the week's figures and a list of observations already worked out. Use only those. Never invent a \
+number, a habit, a to-do, or a reason. Quote figures exactly as given, with the currency symbol as written.
 
-headline: one line, under 90 characters, that sums up the week.
-plan: one sentence nudging what to focus on next week, drawn from what was observed."""
+What makes this useful rather than a restatement:
+- Say what the observations mean together, not each one in turn. If several habits stopped on the same day, \
+that is one thing to notice, not four. If a to-do has sat for months, say it plainly and name it.
+- Pick the one or two things that matter most in each section and leave the rest out. The person can see the \
+full list on screen; do not read it back to them. Do not repeat an observation's wording word for word.
+- Where something stands out, you may end with a short question to think about ("What changed on 27 Oct?") \
+instead of an explanation. Never guess at causes, and never assume a reason for a slip.
+- Habits, goals and to-dos are the person's own business, whatever they are. Treat them all the same: no \
+moralising, no "should", no comment on whether a habit is a good one. Missing one is information, not failure.
+- If the data is thin or out of date, say so briefly and do not draw conclusions from it. The `data_notes` \
+list tells you when that is the case (old bank statements, goals with no linked to-dos, no calendar). A \
+section with nothing worth saying gets an empty string, not filler.
+- A good week deserves a plain, genuine sentence about it. Do not hunt for problems or pad a quiet week.
+
+Each field is one or two short sentences, under 45 words in all.
+headline: one line, under 90 characters, naming the week's main story rather than listing figures.
+plan: one concrete suggestion for next week drawn from what was observed (for example, deciding about one \
+old to-do, or protecting a habit that dropped), not general advice."""
 
 SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -467,12 +548,28 @@ def configured() -> bool:
     return bool(os.getenv("OPENAI_API_KEY"))
 
 
+def data_notes(data: dict, goal_hours: list[dict]) -> list[str]:
+    """Where the figures can't be trusted to say much, so the model says so too."""
+    notes = []
+    m = data["money"]
+    if m["stale"]:
+        notes.append(f"Bank statements were last imported up to {m['last_transaction']}; this week's spending is incomplete."
+                     if m["last_transaction"] else "No bank transactions have been imported.")
+    if data["goals"]["goals"] and not data["goals"]["linked_any"]:
+        notes.append("No to-dos are linked to goals, so to-dos say nothing about goal progress.")
+    if data["goals"]["goals"] and not goal_hours:
+        notes.append("Calendar time per goal is unavailable.")
+    if not data["habits"]["habits"]:
+        notes.append("No habits were being tracked.")
+    return notes
+
+
 def facts_for(data: dict, goal_hours: list[dict]) -> dict:
     """What the model is told. Aggregates and the user's own habit, goal and
     to-do wording; no merchant names, and no account details."""
     g, m, h, t = data["goals"], data["money"], data["habits"], data["todos"]
     return {
-        "week_starting": data["week"], "week_is_unfinished": data["partial"],
+        "week_starting": data["week"], "week_is_unfinished": data["partial"], "data_notes": data_notes(data, goal_hours),
         "goals": {"quarter": g["quarter"], "observations": [i["text"] for i in g["insights"]],
                   "hours_on_goals": goal_hours,
                   "per_goal": [{"title": r["title"], "todos_done": r["finished_count"], "todos_waiting": r["open_this_week"]} for r in g["goals"]]},
@@ -481,7 +578,8 @@ def facts_for(data: dict, goal_hours: list[dict]) -> dict:
                   "budgets_over": [b["name"] for b in m["budgets"] if b["over"]], "uncategorised": m["uncategorised_count"],
                   "net_worth_change": m["net_worth"]["change"] if m["net_worth"] else None, "observations": [i["text"] for i in m["insights"]]},
         "habits": {"checkins_done": h["done"], "checkins_possible": h["possible"], "previous_week_rate": h["prev_rate"],
-                   "per_habit": [{"name": r["name"], "days_done": r["done"], "days_possible": r["possible"], "usual_days_per_week": r["usual_days"], "streak": r["streak"]} for r in h["habits"]],
+                   "per_habit": [{"name": r["name"], "days_done": r["done"], "days_possible": r["possible"], "usual_days_per_week": r["usual_days"],
+                                 "streak": r["streak"], "last_ticked": r["last_done"]} for r in h["habits"]],
                    "observations": [i["text"] for i in h["insights"]]},
         "todos": {"finished": t["finished_count"], "finished_previous_week": t["prev_finished_count"], "still_open": t["open_count"],
                   "open_over_two_weeks": t["stale_count"], "finished_examples": [x["text"] for x in t["finished"][:6]],

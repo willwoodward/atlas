@@ -33,7 +33,8 @@ beforeEach(async () => {
   todoApi.todos = [
     { id: 'old', text: 'File taxes', bucket: 'week', goalId: 'g1', done: false, parentId: null, createdAt: daysAgo(30) },
     { id: 'new', text: 'Buy milk', bucket: 'today', goalId: null, done: false, parentId: null, createdAt: daysAgo(1) },
-    { id: 'sub', text: 'A sub-task', bucket: 'week', done: false, parentId: 'old', createdAt: daysAgo(1) },
+    { id: 'sub', text: 'A sub-task', bucket: 'week', done: false, parentId: 'old', createdAt: daysAgo(40) },
+    { id: 'sub2', text: 'Done sub-task', bucket: 'week', done: true, parentId: 'old', createdAt: daysAgo(40), completedAt: daysAgo(35) },
     { id: 'fin', text: 'Already done', bucket: 'week', done: true, parentId: null, createdAt: daysAgo(3) },
     { id: 'sd', text: 'Someday thing', bucket: 'someday', done: false, parentId: null, createdAt: daysAgo(90) },
   ]
@@ -44,12 +45,23 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove() })
 
 describe('TodosStep', () => {
+  it('does not call a to-do old when its sub-tasks are moving', async () => {
+    await act(async () => root.unmount())
+    todoApi.todos = todoApi.todos.map(t => t.id === 'sub2' ? { ...t, completedAt: '2026-11-04 22:46:58'.replace(/^.{10}/, new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10)) } : t)
+    root = createRoot(container)
+    await act(async () => { root.render(<Harness />) })
+    const row = [...container.querySelectorAll('div')].find(d => d.textContent.startsWith('File taxes'))
+    expect(row.textContent).toContain('untouched 2d')
+    expect(row.textContent).not.toContain('Been here a while')
+  })
+
   it('lists open to-dos in today and this week, oldest first, without sub-tasks or someday', () => {
     const t = text()
     expect(t.indexOf('File taxes')).toBeLessThan(t.indexOf('Buy milk'))
     expect(t).not.toContain('A sub-task')
     expect(t).not.toContain('Someday thing')
-    expect(t).toContain('open 4w')
+    expect(t).toContain('untouched 4w')
+    expect(t).toContain('1/2 sub-tasks')
     expect(t).toContain('Been here a while')
     expect(t).toContain('Fitness')
     expect(t).toContain('Sent invoice')

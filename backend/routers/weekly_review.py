@@ -39,7 +39,8 @@ class NarrateIn(BaseModel):
 async def narrate(week: str, body: NarrateIn, user=Depends(get_current_user), db=Depends(get_db)):
     _monday(week)
     data = await weekly_review.recap(db, week, body.currency)
-    hours = [{"goal": str(h.get("goal", ""))[:80], "hours": round(float(h.get("hours") or 0), 1)} for h in body.goal_hours]
+    hours = [{"goal": str(h.get("goal", ""))[:80], "hours": round(float(h.get("hours") or 0), 1),
+              "usual_hours": round(float(h.get("usual") or 0), 1)} for h in body.goal_hours]
     return await weekly_review.narrate(db, data, hours, body.refresh)
 
 
