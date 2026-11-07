@@ -483,6 +483,8 @@ async def init_db():
 
         # Migrations — add columns that may not exist in older DBs
         for stmt in [
+            # An Atlas-only event that lasts the whole day (start_h/end_h unused).
+            "ALTER TABLE local_events ADD COLUMN all_day INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE agent_runs ADD COLUMN session_id TEXT",
             "ALTER TABLE agent_runs ADD COLUMN user_message TEXT",
             "ALTER TABLE agent_runs ADD COLUMN reply TEXT",

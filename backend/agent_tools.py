@@ -588,8 +588,9 @@ async def _all_events(db, start: date, end: date, gcal_events) -> list[dict]:
     start_h, end_h, all_day, color, source."""
     async with db.execute("SELECT * FROM local_events WHERE date >= ? AND date <= ? ORDER BY date, start_h",
                           (start.isoformat(), end.isoformat())) as c:
-        out = [{"id": r["id"], "title": r["title"], "date": r["date"], "start_h": r["start_h"], "end_h": r["end_h"],
-                "all_day": False, "color": r["color"], "notes": r["notes"], "source": "local"} for r in await c.fetchall()]
+        out = [{"id": r["id"], "title": r["title"], "date": r["date"],
+                "start_h": None if r["all_day"] else r["start_h"], "end_h": None if r["all_day"] else r["end_h"],
+                "all_day": bool(r["all_day"]), "color": r["color"], "notes": r["notes"], "source": "local"} for r in await c.fetchall()]
     for e in (await gcal_events(db, start, end)) if gcal_events else []:
         def hours(stamp):
             if not stamp or len(stamp) <= 10:

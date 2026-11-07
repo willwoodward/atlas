@@ -242,6 +242,25 @@ async def series(db, key: str, range_: str = "90d", today: date | None = None) -
 TOP = 5
 
 
+def _paired_transfers(rows: list[dict]) -> set:
+    """Ids of transfers that are the two legs of one move between accounts: an
+    outgoing and an incoming of about the same size, a few days apart, in
+    different accounts. Those cancel out in net worth."""
+    out = [r for r in rows if r["category"].lower() == "transfer" and r["amount"] < 0]
+    inn = [r for r in rows if r["category"].lower() == "transfer" and r["amount"] > 0]
+    used, pairs = set(), set()
+    for o in out:
+        for i in inn:
+            if i["id"] in used or i["account_id"] == o["account_id"]:
+                continue
+            close = abs(i["amount"] + o["amount"]) <= max(1.0, abs(o["amount"]) * 0.02)
+            days = abs((date.fromisoformat(i["date"][:10]) - date.fromisoformat(o["date"][:10])).days)
+            if close and days <= 3:
+                used.add(i["id"]); pairs |= {i["id"], o["id"]}
+                break
+    return pairs
+
+
 async def explain(db, key: str, start: str, end: str, range_: str = "90d", today: date | None = None) -> dict | None:
     """Why a balance line moved between two of its points: the biggest things that
     came in and went out in between, by category, and how much of the change
@@ -275,7 +294,7 @@ async def explain(db, key: str, start: str, end: str, range_: str = "90d", today
     async with db.execute(f"SELECT MAX(date) FROM finances_transactions WHERE account_id IN ({','.join('?' * len(ids))})", ids) as c:
         last_txn = (await c.fetchone())[0] if ids else None
 
-    rows, explained = [], 0.0
+    rows, explained, per_account = [], 0.0, defaultdict(float)
     for t in txns:
         a = by_id[t["account_id"]]
         amount = float(t["amount"] or 0)
@@ -289,10 +308,14 @@ async def explain(db, key: str, start: str, end: str, range_: str = "90d", today
             effect = -effect
         explained += effect
         rows.append({"id": t["id"], "merchant": t["merchant"], "category": (t["category"] or "").strip() or "Uncategorised",
-                     "date": t["date"], "amount": round(effect, 2), "account": a["name"]})
+                     "date": t["date"], "amount": round(effect, 2), "account": a["name"], "account_id": a["id"]})
+        per_account[a["id"]] += effect
     # Money moved between your own accounts is a push and a pull that cancel out
-    # in net worth; listing both would bury what actually changed it.
-    shown = [r for r in rows if not (key == "net_worth" and r["category"].lower() == "transfer")]
+    # in net worth; listing both would bury what actually changed it. A transfer
+    # with no other leg (to someone else, or to an account Atlas doesn't have)
+    # is real money leaving, so it stays.
+    matched = _paired_transfers(rows) if key == "net_worth" else set()
+    shown = [r for r in rows if r["id"] not in matched]
     ups = sorted((r for r in shown if r["amount"] > 0), key=lambda r: -r["amount"])
     downs = sorted((r for r in shown if r["amount"] < 0), key=lambda r: r["amount"])
     cats: dict[str, dict] = {}
@@ -303,12 +326,29 @@ async def explain(db, key: str, start: str, end: str, range_: str = "90d", today
     categories = sorted(({**c, "amount": round(c["amount"], 2)} for c in cats.values()), key=lambda c: -abs(c["amount"]))[:TOP + 1]
     start_value, end_value = pts[start]["value"], pts[end]["value"]
     change = end_value - start_value
+    listed = ups[:TOP] + downs[:TOP]
+    rest = {"count": len(rows) - len(listed), "amount": round(explained - sum(r["amount"] for r in listed), 2)}
+    # Which accounts moved by more than their own transactions account for.
+    unexplained = []
+    if key == "net_worth" and table is not None:
+        from_d, to_d = date.fromisoformat(start), date.fromisoformat(end)
+        for a in scope:
+            _, value_on, _ = await balance_line(db, f"account:{a['id']}", today)
+            try:
+                moved = table.convert(value_on(to_d) - value_on(from_d), (a["currency"] or "EUR").upper(), "EUR")
+            except fx.NoRate:
+                continue
+            moved = -moved if a["type"] == "credit" else moved
+            left = moved - per_account[a["id"]]
+            if abs(left) >= 1:
+                unexplained.append({"account": a["name"], "amount": round(left, 2)})
+        unexplained.sort(key=lambda u: -abs(u["amount"]))
     return {"key": line["key"], "label": line["label"], "currency": line["currency"], "start": start, "end": end,
             "start_value": start_value, "end_value": end_value, "change": round(change, 2),
             "estimated": bool(pts[start]["estimated"] or pts[end]["estimated"]),
             "explained": round(explained, 2), "other": round(change - explained, 2),
-            "up": ups[:TOP], "down": downs[:TOP], "categories": categories,
-            "count": len(rows), "last_transaction": last_txn}
+            "up": ups[:TOP], "down": downs[:TOP], "categories": categories, "rest": rest,
+            "other_accounts": unexplained, "count": len(rows), "last_transaction": last_txn}
 
 
 async def available(db) -> list[dict]:

@@ -249,6 +249,49 @@ class TestExplain:
         assert all(r["category"] != "Transfer" for r in out["up"] + out["down"] + [{"category": c["category"]} for c in out["categories"]])
         assert out["explained"] == 350 and out["count"] == 5      # the two legs cancel
 
+    async def test_a_transfer_with_no_other_leg_is_real_money_out_and_is_listed(self):
+        db = await _db()
+        try:
+            await self._line(db)
+            await db.execute("INSERT INTO finances_transactions (id, merchant, category, amount, date, type, currency, account_id) "
+                             "VALUES ('x1', 'Sent money to family', 'Transfer', 300, ?, 'expense', 'EUR', 'a1')", (d(3),))
+            await db.commit()
+            out = await history.explain(db, "net_worth", d(6), d(0), "30d", TODAY)
+        finally:
+            await db.close()
+        assert [r["merchant"] for r in out["down"]][0] == "Sent money to family"
+        assert {"category": "Transfer", "amount": -300.0, "count": 1} in out["categories"]
+
+    async def test_what_is_listed_plus_the_smaller_ones_adds_up_to_the_change(self):
+        db = await _db()
+        try:
+            await self._line(db)
+            for i in range(8):
+                await db.execute("INSERT INTO finances_transactions (id, merchant, category, amount, date, type, currency, account_id) "
+                                 "VALUES (?, 'Coffee', 'Eating out', ?, ?, 'expense', 'EUR', 'a1')", (f"s{i}", 1 + i, d(4)))
+            await db.commit()
+            out = await history.explain(db, "net_worth", d(6), d(0), "30d", TODAY)
+        finally:
+            await db.close()
+        listed = sum(r["amount"] for r in out["up"] + out["down"])
+        assert out["rest"]["count"] == out["count"] - len(out["up"] + out["down"]) > 0
+        assert round(listed + out["rest"]["amount"], 2) == out["explained"]
+        assert out["change"] == round(out["explained"] + out["other"], 2)
+
+    async def test_names_the_account_that_moved_with_no_transaction(self):
+        db = await _db()
+        try:
+            await self._line(db)
+            await db.execute("INSERT INTO finances_accounts (id, name, type, balance, currency) VALUES ('s1','Savings','savings',900,'EUR')")
+            for n, v in [(6, 1700), (5, 1700), (4, 1700), (3, 1700), (2, 1700), (1, 1700)]:
+                await db.execute("INSERT INTO daily_snapshots (date, key, value) VALUES (?, 'account:s1', ?)", (d(n), v))
+            await db.commit()
+            out = await history.explain(db, "net_worth", d(6), d(0), "30d", TODAY)
+        finally:
+            await db.close()
+        assert out["other_accounts"] == [{"account": "Savings", "amount": -800.0}]
+        assert out["other"] == -800
+
     async def test_a_credit_card_line_rises_when_you_spend(self):
         db = await _db()
         try:

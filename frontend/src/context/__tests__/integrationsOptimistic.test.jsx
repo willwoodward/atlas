@@ -75,6 +75,17 @@ describe('Google Calendar changes', () => {
     expect(titles()).toEqual(['Dentist', 'Gym'])          // not shown twice once Google's copy arrives
   })
 
+  it('shows a new all-day event at once, dated and without times', async () => {
+    let done
+    await act(async () => { done = ctx.createGcalEvent({ title: 'Holiday', date: '2026-11-04', startH: 9, endH: 10, color: '#5f7591', allDay: true }) })
+    expect(ctx.gcal.events.find(e => e.title === 'Holiday')).toMatchObject({ isAllDay: true, date: '2026-11-04', timeDisplay: 'All day' })
+    await google.release(); await flush()
+    const post = google.fetch.mock.calls.find(([, o]) => o?.method === 'POST')
+    expect(JSON.parse(post[1].body)).toMatchObject({ start: { date: '2026-11-04' }, end: { date: '2026-11-05' } })
+    await google.release(); await flush()
+    await act(async () => { await done })
+  })
+
   it('takes a new event off again if Google refuses it', async () => {
     google.fail = true
     let done

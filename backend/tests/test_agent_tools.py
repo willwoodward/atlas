@@ -271,6 +271,13 @@ class TestCalendar:
         await undo(client, auth, e)
         assert events == {}
 
+    async def test_agent_sees_a_local_all_day_event_without_hours(self, db):
+        import agent_tools
+        await db.execute("INSERT INTO local_events (id, title, date, start_h, end_h, all_day) VALUES ('a1','Holiday','2026-10-20',0,0,1)")
+        await db.commit()
+        [e] = await agent_tools._all_events(db, date(2026, 10, 20), date(2026, 10, 20), None)
+        assert (e["all_day"], e["start_h"], e["end_h"]) == (True, None, None)
+
     async def test_free_time_around_local_events(self, db):
         day = (date.today() + timedelta(days=3)).isoformat()
         await db.execute("INSERT INTO local_events (id,title,date,start_h,end_h) VALUES ('l1','Work',?,9,17)", (day,))

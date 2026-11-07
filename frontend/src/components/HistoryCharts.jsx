@@ -354,6 +354,11 @@ export function ChangeExplainer({ selection, lines, range, convert, format, onCl
                 <MoverList title="Biggest deductions" rows={data.down} convert={convert} format={format} currency={data.currency} tone="var(--accent)" />
               </div>
             )}
+          {data.rest?.count > 0 && (
+            <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--mid)' }}>
+              Plus {data.rest.count} smaller transaction{data.rest.count === 1 ? '' : 's'}: <b style={{ fontWeight: 600 }}>{fmtSigned(data.rest.amount)}</b>
+            </div>
+          )}
           {data.categories.length > 0 && (
             <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--mid)', lineHeight: 1.7 }}>
               By category: {data.categories.map((c, i) => (
@@ -363,7 +368,9 @@ export function ChangeExplainer({ selection, lines, range, convert, format, onCl
           )}
           {Math.abs(data.other) >= Math.max(1, Math.abs(data.change) * 0.03) && (
             <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 }}>
-              {fmtSigned(data.other)} isn't explained by any transaction: usually exchange rates, an investment's value, a balance you edited, or statements not imported yet.
+              {fmtSigned(data.other)} isn't explained by any transaction
+              {data.other_accounts?.length > 0 && <> ({data.other_accounts.map((u, i) => <span key={u.account}>{i ? ', ' : ''}{u.account} {fmtSigned(u.amount)}</span>)})</>}
+              : usually exchange rates, an investment's value, a balance you edited, or statements not imported yet.
             </div>
           )}
           {lateBy > 3 && (

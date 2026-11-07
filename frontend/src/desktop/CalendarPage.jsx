@@ -104,7 +104,7 @@ export function EventDetailModal({ event, onClose, onDelete }) {
 function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00', defaultEndTime = '10:00' }) {
   const [form, setForm] = useState({
     title: '', date: defaultDate, startTime: defaultStartTime, endTime: defaultEndTime,
-    atlasColor: '', notes: '',
+    atlasColor: '', notes: '', allDay: false,
   })
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -114,7 +114,7 @@ function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00'
     const [eh, em] = form.endTime.split(':').map(Number)
     // atlasColor '' = Auto: drawn in the colour its Google colour maps to. A
     // local event (no Google) needs a colour of its own, so Auto is blue there.
-    onAdd({ title: form.title.trim(), date: form.date, startH: sh + sm/60, endH: eh + em/60, atlasColor: form.atlasColor, color: atlasHex(form.atlasColor) ?? ATLAS_COLORS[0].hex, notes: form.notes })
+    onAdd({ title: form.title.trim(), date: form.date, startH: sh + sm/60, endH: eh + em/60, allDay: form.allDay, atlasColor: form.atlasColor, color: atlasHex(form.atlasColor) ?? ATLAS_COLORS[0].hex, notes: form.notes })
     onClose()
   }
 
@@ -129,7 +129,11 @@ function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00'
               <label style={labelStyle}>Date</label>
               <input type="date" style={inputStyle} value={form.date} onChange={e => set('date', e.target.value)} />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, color: 'var(--ink)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={form.allDay} onChange={e => set('allDay', e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
+              All day
+            </label>
+            {!form.allDay && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
                 <label style={labelStyle}>Start</label>
                 <input type="time" style={inputStyle} value={form.startTime} onChange={e => set('startTime', e.target.value)} />
@@ -138,7 +142,7 @@ function AddEventModal({ onClose, onAdd, defaultDate, defaultStartTime = '09:00'
                 <label style={labelStyle}>End</label>
                 <input type="time" style={inputStyle} value={form.endTime} onChange={e => set('endTime', e.target.value)} />
               </div>
-            </div>
+            </div>}
             <div>
               <label style={labelStyle}>Colour</label>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>

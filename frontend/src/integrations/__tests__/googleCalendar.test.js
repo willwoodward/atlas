@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { shiftDateTime, insertGcalEvent, shiftGcalEvent, toCalendarEvents } from '../googleCalendar.js'
+import { gcalEventBody, shiftDateTime, insertGcalEvent, shiftGcalEvent, toCalendarEvents } from '../googleCalendar.js'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -65,5 +65,22 @@ describe('shiftGcalEvent', () => {
     const calls = stubFetch({ start: { date: '2026-10-20' }, end: { date: '2026-10-21' } })
     await shiftGcalEvent('t', 'e1', { days: 2, startHours: 3, endHours: 3 })
     expect(calls[1].body).toEqual({ start: { date: '2026-10-22' }, end: { date: '2026-10-23' } })
+  })
+})
+
+describe('gcalEventBody', () => {
+  it('sends a timed event with times', () => {
+    const b = gcalEventBody({ title: 'Gym', date: '2026-11-04', startH: 9, endH: 10.5 })
+    expect(b.start.dateTime).toBe('2026-11-04T09:00:00')
+    expect(b.end.dateTime).toBe('2026-11-04T10:30:00')
+  })
+  it('sends an all-day event as dates, ending the day after', () => {
+    const b = gcalEventBody({ title: 'Holiday', date: '2026-11-30', startH: 9, endH: 10, allDay: true })
+    expect(b.start).toEqual({ date: '2026-11-30' })
+    expect(b.end).toEqual({ date: '2026-12-01' })
+  })
+  it('comes back from Google as an all-day event on that day', () => {
+    const [e] = toCalendarEvents([{ id: 'h', ...gcalEventBody({ title: 'Holiday', date: '2026-11-30', allDay: true }) }])
+    expect(e).toMatchObject({ isAllDay: true, date: '2026-11-30', title: 'Holiday' })
   })
 })

@@ -20,7 +20,7 @@ export function LocalCalendarProvider({ children }) {
   useEffect(() => {
     call('/api/calendar').then(r => r.json()).then(rows =>
       // API uses snake_case; internal shape uses camelCase
-      setEvents(rows.map(r => ({ id: r.id, title: r.title, date: r.date, startH: r.start_h, endH: r.end_h, color: r.color, notes: r.notes })))
+      setEvents(rows.map(r => ({ id: r.id, title: r.title, date: r.date, startH: r.start_h, endH: r.end_h, color: r.color, notes: r.notes, allDay: !!r.all_day })))
     )
   }, [token, tick])
 
@@ -31,10 +31,10 @@ export function LocalCalendarProvider({ children }) {
     if (!ok) { undo(); throw new Error('Could not save the event') }
   }, [call])
 
-  const addEvent = useCallback(async ({ title, date, startH, endH, color, notes = '' }) => {
+  const addEvent = useCallback(async ({ title, date, startH, endH, color, notes = '', allDay = false }) => {
     const id = crypto.randomUUID()
-    setEvents(prev => [...prev, { id, title, date, startH, endH, color, notes }])
-    await send('/api/calendar', { method: 'POST', body: JSON.stringify({ id, title, date, start_h: startH, end_h: endH, color, notes }) },
+    setEvents(prev => [...prev, { id, title, date, startH, endH, color, notes, allDay }])
+    await send('/api/calendar', { method: 'POST', body: JSON.stringify({ id, title, date, start_h: startH, end_h: endH, color, notes, all_day: allDay }) },
       () => setEvents(prev => prev.filter(e => e.id !== id)))
   }, [send])
 

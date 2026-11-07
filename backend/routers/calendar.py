@@ -15,6 +15,7 @@ class EventIn(BaseModel):
     end_h: float = 10.0
     color: str = "#5f7591"
     notes: str = ""
+    all_day: bool = False
 
 
 @router.get("")
@@ -26,8 +27,8 @@ async def list_events(user=Depends(get_current_user), db=Depends(get_db)):
 @router.post("")
 async def add_event(body: EventIn, user=Depends(get_current_user), db=Depends(get_db)):
     await db.execute(
-        "INSERT INTO local_events (id, title, date, start_h, end_h, color, notes) VALUES (?,?,?,?,?,?,?)",
-        (body.id, body.title, body.date, body.start_h, body.end_h, body.color, body.notes),
+        "INSERT INTO local_events (id, title, date, start_h, end_h, color, notes, all_day) VALUES (?,?,?,?,?,?,?,?)",
+        (body.id, body.title, body.date, body.start_h, body.end_h, body.color, body.notes, int(body.all_day)),
     )
     await db.commit()
     return {"ok": True}

@@ -21,6 +21,13 @@ export function useCalendarEvents() {
   return useMemo(() => [
     ...gcal.events,
     ...localEvents.map(e => {
+      if (e.allDay) {
+        return {
+          id: e.id, title: e.title, start: -1, dur: 0, time: 'All day', timeDisplay: 'All day', endTimeDisplay: '', durDisplay: '',
+          color: e.color, tint: hexTint(e.color), date: e.date, isLocal: true, isAllDay: true, notes: e.notes,
+          description: '', location: '',
+        }
+      }
       const dur = Math.max(e.endH - e.startH, 0.25)
       return {
         id: e.id, title: e.title, start: e.startH, dur,

@@ -33,15 +33,16 @@ export async function fetchEvents(token, timeMin, timeMax) {
 // What Google is sent for a new event. colorId: Google's colour (null = the
 // calendar's own). atlasColor: the colour Atlas draws it in, kept privately on
 // the event so Google ignores it.
-export function gcalEventBody({ title, date, startH, endH, notes = '', colorId, atlasColor }) {
+export function gcalEventBody({ title, date, startH, endH, notes = '', colorId, atlasColor, allDay = false }) {
   const pad = n => String(Math.floor(n)).padStart(2, '0')
   const toTime = h => `${pad(h)}:${pad((h % 1) * 60)}:00`
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
   const body = {
     summary: title,
     description: notes,
-    start: { dateTime: `${date}T${toTime(startH)}`, timeZone: tz },
-    end:   { dateTime: `${date}T${toTime(endH)}`,   timeZone: tz },
+    // An all-day event is dated, and Google's end date is the day after.
+    start: allDay ? { date } : { dateTime: `${date}T${toTime(startH)}`, timeZone: tz },
+    end:   allDay ? { date: shiftDate(date, 1) } : { dateTime: `${date}T${toTime(endH)}`, timeZone: tz },
   }
   if (colorId) body.colorId = colorId
   if (atlasColor) body.extendedProperties = { private: { atlasColor } }
