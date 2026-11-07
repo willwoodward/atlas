@@ -54,20 +54,10 @@ async def _recorded(db, key: str) -> dict[str, float]:
         return {r[0]: r[1] for r in await c.fetchall()}
 
 
-def _with_recorded(days: list[date], recorded: dict[str, float], estimate, anchored: bool = False) -> list[dict]:
+def _with_recorded(days: list[date], recorded: dict[str, float], estimate) -> list[dict]:
     """A value per day: the recorded one if there is one for that day (or the
-    last before it, once recording has started), else the estimate.
-
-    `anchored`: the estimate walks back from today's balance, which drifts from
-    the recordings wherever the imported transactions are incomplete, leaving a
-    jump where they begin. Anchored, it walks back from the first recording
-    instead: the same day-to-day movement, joined to the real value."""
+    last before it, once recording has started), else the estimate."""
     first = min(recorded) if recorded else None
-    shift = 0.0
-    if anchored and first:
-        at_first = estimate(date.fromisoformat(first))
-        if at_first is not None:
-            shift = recorded[first] - at_first
     out, last = [], None
     ordered = sorted(recorded)
     i = 0
@@ -81,7 +71,7 @@ def _with_recorded(days: list[date], recorded: dict[str, float], estimate, ancho
         else:
             v = estimate(d)
             if v is not None:
-                out.append({"date": s, "value": round(v + shift, 2), "estimated": True})
+                out.append({"date": s, "value": round(v, 2), "estimated": True})
     return out
 
 
@@ -105,6 +95,63 @@ def _balance_on(account: dict, txns: list[dict], d: date) -> float:
     return bal - after if account["type"] != "credit" else bal + after
 
 
+async def balance_line(db, key: str, today: date | None = None):
+    """Net worth, or one account, as a function of the day: (meta, value_on(d), oldest).
+
+    Walked back from today's balances through the transactions by *their own
+    dates*. The hourly recordings are deliberately not used for an account that
+    has transactions: its balance only changes when a statement is imported, so
+    a recording would show the whole of an import landing on the day it was
+    uploaded, flat before it. An account with no transactions has nothing to
+    walk back through, so it follows its recordings (or its balance, held flat).
+    `oldest` is the earliest transaction: before it, balances are a guess."""
+    import fx
+    from bisect import bisect_right
+    today = today or date.today()
+    accounts, per = await _accounts_and_txns(db)
+    if key.startswith("account:"):
+        want = key[8:].strip().lower()
+        # By id, or by name ("account:Wise"), so Atlas can ask by name.
+        accounts = ([a for a in accounts if a["id"] == key[8:]]
+                    or [a for a in accounts if (a["name"] or "").strip().lower() == want])
+    if not accounts:
+        return None
+    table = await fx.ensure(db, {(a["currency"] or "EUR").upper() for a in accounts})
+    recs = {}
+    for a in accounts:
+        if not per.get(a["id"]):
+            rec = await _recorded(db, f"account:{a['id']}")
+            recs[a["id"]] = (sorted(rec), rec)
+
+    def at(a, d):
+        if per.get(a["id"]):
+            return _balance_on(a, per[a["id"]], d)
+        days, rec = recs[a["id"]]
+        i = bisect_right(days, d.isoformat()) if d < today else 0      # today is what the balance is now
+
+        return rec[days[i - 1]] if i else float(a["balance"] or 0)
+
+    def value_on(d):
+        if key.startswith("account:"):
+            return at(accounts[0], d)
+        total = 0.0
+        for a in accounts:
+            try:
+                v = table.convert(at(a, d), (a["currency"] or "EUR").upper(), "EUR")
+            except fx.NoRate:
+                continue
+            total += -v if a["type"] == "credit" else v
+        return total
+
+    if key.startswith("account:"):
+        a = accounts[0]
+        meta = {"key": f"account:{a['id']}", "label": a["name"], "unit": "money", "currency": (a["currency"] or "EUR").upper()}
+    else:
+        meta = {"key": "net_worth", "label": "Net worth", "unit": "money", "currency": "EUR"}
+    oldest = min((t["date"] for a in accounts for t in per.get(a["id"], [])), default=None)
+    return meta, value_on, oldest
+
+
 async def series(db, key: str, range_: str = "90d", today: date | None = None) -> dict | None:
     import fx
     today = today or date.today()
@@ -116,41 +163,17 @@ async def series(db, key: str, range_: str = "90d", today: date | None = None) -
             row = await c.fetchone()
         from_day = row[0] if row else today.isoformat()
         recorded = {d: v for d, v in recorded.items() if d >= from_day}
-    accounts, per = (await _accounts_and_txns(db)) if key in ("net_worth",) or key.startswith("account:") else ([], {})
-
+    balance = None
     if key == "net_worth" or key.startswith("account:"):
-        if key.startswith("account:"):
-            want = key[8:].strip().lower()
-            # By id, or by name ("account:Wise"), so Atlas can ask by name.
-            accounts = ([a for a in accounts if a["id"] == key[8:]]
-                        or [a for a in accounts if (a["name"] or "").strip().lower() == want])
-            if not accounts:
-                return None
-        table = await fx.ensure(db, {(a["currency"] or "EUR").upper() for a in accounts}) if accounts else None
-        oldest = min((t["date"] for a in accounts for t in per.get(a["id"], [])), default=None)
-
-        def estimate(d):
-            if not accounts:
-                return None
-            if key.startswith("account:"):
-                a = accounts[0]
-                return _balance_on(a, per.get(a["id"], []), d)
-            total = 0.0
-            for a in accounts:
-                v = _balance_on(a, per.get(a["id"], []), d)
-                try:
-                    v = table.convert(v, (a["currency"] or "EUR").upper(), "EUR")
-                except fx.NoRate:
-                    continue
-                total += -v if a["type"] == "credit" else v
-            return total
-        if key == "net_worth":
-            meta = {"label": "Net worth", "unit": "money", "currency": "EUR"}
-        else:
-            a = accounts[0]
-            key = f"account:{a['id']}"
-            recorded = await _recorded(db, key)
-            meta = {"label": a["name"], "unit": "money", "currency": (a["currency"] or "EUR").upper()}
+        balance = await balance_line(db, key, today)
+        if balance is None:
+            # No accounts yet: nothing to draw, but not a missing line.
+            return None if key != "net_worth" else {"key": key, "label": "Net worth", "unit": "money", "currency": "EUR",
+                                                    "range": range_, "points": [], "recorded_since": None}
+        meta, estimate, oldest = balance
+        meta = {k: v for k, v in meta.items() if k != "key"}
+        key = balance[0]["key"]
+        recorded = {}
         start_hint = oldest
 
     elif key == "saved":
@@ -198,19 +221,94 @@ async def series(db, key: str, range_: str = "90d", today: date | None = None) -
         start = min(date.fromisoformat(first), today)
     else:
         start = today - timedelta(days=days_back - 1)
-    points = _with_recorded(_days(start, today), recorded, estimate, anchored=key == "net_worth" or key.startswith("account:"))
-    if (key == "net_worth" or key == "saved" or key.startswith("account:")) and points and points[-1]["date"] == today.isoformat():
-        # Recordings are hourly, so today's would lag behind a balance changed since
-        # (an import, an edit): today's point is what the balances are right now.
-        live = estimate(today)
-        if live is not None:
-            points[-1] = {"date": today.isoformat(), "value": round(live, 2), "estimated": False}
+    if balance:
+        oldest = balance[2]
+        # Dashed only before the first transaction, where nothing says what the balance was.
+        points = [{"date": d.isoformat(), "value": round(estimate(d), 2), "estimated": oldest is None or d.isoformat() < oldest}
+                  for d in _days(start, today)]
+    else:
+        points = _with_recorded(_days(start, today), recorded, estimate)
+    if key == "saved" and points and points[-1]["date"] == today.isoformat():
+        # Recordings are hourly; what's in the pots right now isn't.
+        points[-1] = {"date": today.isoformat(), "value": round(estimate(today), 2), "estimated": False}
     if key == "open_todos" and points and points[-1]["date"] == today.isoformat():
         # Recordings are hourly; what's open right now isn't.
         async with db.execute("SELECT COUNT(*) FROM todos WHERE done = 0 AND parent_id IS NULL") as c:
             points[-1] = {"date": today.isoformat(), "value": (await c.fetchone())[0], "estimated": False}
     return {"key": key, **meta, "range": range_, "points": points,
             "recorded_since": min(recorded) if recorded else None}
+
+
+TOP = 5
+
+
+async def explain(db, key: str, start: str, end: str, range_: str = "90d", today: date | None = None) -> dict | None:
+    """Why a balance line moved between two of its points: the biggest things that
+    came in and went out in between, by category, and how much of the change
+    isn't explained by any transaction (exchange rates, investments, edits to a
+    balance, or statements not imported yet).
+
+    `start` and `end` are points the chart shows (same `range_`); the change is
+    from the end of `start` to the end of `end`. Only net worth and single
+    accounts: they are the lines transactions move."""
+    import fx
+    if not (key == "net_worth" or key.startswith("account:")):
+        raise ValueError("Only net worth or an account can be explained")
+    line = await series(db, key, range_, today)
+    if not line:
+        return None
+    pts = {p["date"]: p for p in line["points"]}
+    if start not in pts or end not in pts or start >= end:
+        raise ValueError("Pick two dates on the chart, start before end")
+    accounts, _ = await _accounts_and_txns(db)
+    if key == "net_worth":
+        scope = accounts
+    else:
+        scope = [a for a in accounts if a["id"] == line["key"][8:]]
+    by_id = {a["id"]: a for a in scope}
+    owed = len(scope) == 1 and scope[0]["type"] == "credit"      # a card's line is what's owed: spending raises it
+    table = await fx.ensure(db, {(a["currency"] or "EUR").upper() for a in scope}) if scope else None
+    async with db.execute("SELECT id, account_id, type, amount, date, merchant, category FROM finances_transactions "
+                          "WHERE account_id IS NOT NULL AND date > ? AND date <= ? ORDER BY date", (start, end)) as c:
+        txns = [dict(r) for r in await c.fetchall() if r["account_id"] in by_id]
+    ids = list(by_id)
+    async with db.execute(f"SELECT MAX(date) FROM finances_transactions WHERE account_id IN ({','.join('?' * len(ids))})", ids) as c:
+        last_txn = (await c.fetchone())[0] if ids else None
+
+    rows, explained = [], 0.0
+    for t in txns:
+        a = by_id[t["account_id"]]
+        amount = float(t["amount"] or 0)
+        if key == "net_worth":
+            try:
+                amount = table.convert(amount, (a["currency"] or "EUR").upper(), "EUR")
+            except fx.NoRate:
+                continue
+        effect = amount if t["type"] == "income" else -amount
+        if owed:
+            effect = -effect
+        explained += effect
+        rows.append({"id": t["id"], "merchant": t["merchant"], "category": (t["category"] or "").strip() or "Uncategorised",
+                     "date": t["date"], "amount": round(effect, 2), "account": a["name"]})
+    # Money moved between your own accounts is a push and a pull that cancel out
+    # in net worth; listing both would bury what actually changed it.
+    shown = [r for r in rows if not (key == "net_worth" and r["category"].lower() == "transfer")]
+    ups = sorted((r for r in shown if r["amount"] > 0), key=lambda r: -r["amount"])
+    downs = sorted((r for r in shown if r["amount"] < 0), key=lambda r: r["amount"])
+    cats: dict[str, dict] = {}
+    for r in shown:
+        c = cats.setdefault(r["category"], {"category": r["category"], "amount": 0.0, "count": 0})
+        c["amount"] += r["amount"]
+        c["count"] += 1
+    categories = sorted(({**c, "amount": round(c["amount"], 2)} for c in cats.values()), key=lambda c: -abs(c["amount"]))[:TOP + 1]
+    start_value, end_value = pts[start]["value"], pts[end]["value"]
+    change = end_value - start_value
+    return {"key": line["key"], "label": line["label"], "currency": line["currency"], "start": start, "end": end,
+            "start_value": start_value, "end_value": end_value, "change": round(change, 2),
+            "estimated": bool(pts[start]["estimated"] or pts[end]["estimated"]),
+            "explained": round(explained, 2), "other": round(change - explained, 2),
+            "up": ups[:TOP], "down": downs[:TOP], "categories": categories,
+            "count": len(rows), "last_transaction": last_txn}
 
 
 async def available(db) -> list[dict]:

@@ -91,9 +91,10 @@ export function curvePath(pts) {
   return d
 }
 
-export function LineChart({ series, height = 180, format = v => String(v), yFrom, yTo, integer = false, smooth = false, emptyText = '—' }) {
+export function LineChart({ series, height = 180, format = v => String(v), yFrom, yTo, integer = false, smooth = false, emptyText = '—', onSelect, selection }) {
   const [ref, w] = useWidth()
   const [hover, setHover] = useState(null)   // a date
+  const [drag, setDrag] = useState(null)     // { a, b } while dragging across the chart, to select a stretch
   const L = 4, R = 4, T = 10, B = 22
   const all = series.flatMap(s => s.points.filter(p => p.value != null))
   const dates = useMemo(() => [...new Set(series.flatMap(s => s.points.map(p => p.date)))].sort(), [series])
@@ -120,19 +121,34 @@ export function LineChart({ series, height = 180, format = v => String(v), yFrom
   }
   const ticks = niceTicks(lo, hi, 3, integer)
   const xTicks = dates.length > 2 ? [dates[0], dates[Math.floor(dates.length / 2)], dates[dates.length - 1]] : dates
-  const pick = e => {
+  const nearest = e => {
     const r = e.currentTarget.getBoundingClientRect()
     const px = (e.clientX - r.left)
     let best = dates[0], bd = Infinity
     for (const d of dates) { const dd = Math.abs(x(d) - px); if (dd < bd) { bd = dd; best = d } }
-    setHover(best)
+    return best
   }
+  const pick = e => { const d = nearest(e); setHover(d); if (drag) setDrag(g => g && { ...g, b: d }) }
+  const down = e => {
+    const d = nearest(e)
+    setHover(d)
+    if (!onSelect) return
+    try { e.currentTarget.setPointerCapture?.(e.pointerId) } catch { /* not capturable */ }
+    setDrag({ a: d, b: d })
+  }
+  const up = () => {
+    if (!drag) return
+    const [from, to] = [drag.a, drag.b].sort()
+    setDrag(null)
+    onSelect(from === to ? null : { from, to })   // a plain click clears it
+  }
+  const shown = drag ? { from: [drag.a, drag.b].sort()[0], to: [drag.a, drag.b].sort()[1] } : selection
   const at = hover && series.map(s => ({ s, p: s.points.find(p => p.date === hover) })).filter(r => r.p && r.p.value != null)
   const hx = hover ? x(hover) : 0
 
   return (
-    <div ref={ref} style={{ position: 'relative', height, touchAction: 'pan-y' }}
-      onPointerMove={pick} onPointerDown={pick} onPointerLeave={() => setHover(null)}>
+    <div ref={ref} style={{ position: 'relative', height, touchAction: 'pan-y', userSelect: onSelect ? 'none' : undefined, cursor: onSelect ? 'crosshair' : undefined }}
+      onPointerMove={pick} onPointerDown={down} onPointerUp={up} onPointerCancel={() => setDrag(null)} onPointerLeave={() => setHover(null)}>
       {w > 0 && (
         <svg width={width} height={height} style={{ display: 'block', overflow: 'visible' }} aria-hidden="true">
           {ticks.map((v, i) => (
@@ -141,6 +157,13 @@ export function LineChart({ series, height = 180, format = v => String(v), yFrom
               <text x={L} y={y(v) - 4} fontSize="10.5" fill="var(--faint)">{format(v)}</text>
             </g>
           ))}
+          {shown && x(shown.to) > x(shown.from) && (
+            <g>
+              <rect x={x(shown.from)} y={T} width={x(shown.to) - x(shown.from)} height={height - T - B} fill="var(--accent)" opacity=".1" />
+              <line x1={x(shown.from)} x2={x(shown.from)} y1={T} y2={height - B} stroke="var(--accent)" opacity=".5" />
+              <line x1={x(shown.to)} x2={x(shown.to)} y1={T} y2={height - B} stroke="var(--accent)" opacity=".5" />
+            </g>
+          )}
           {smooth && series.map((s, si) => {
             // One curve per unbroken run of points.
             const runs = []
@@ -237,7 +260,7 @@ const EstimatedNote = ({ series }) => {
   if (!any) return null
   return (
     <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 8, lineHeight: 1.45 }}>
-      Dashed: estimated from your balances and imported transactions{since ? `, before Atlas started recording on ${shortDate(since)}` : ''}.
+      {since ? `Dashed: estimated from your balances and imported transactions, before Atlas started recording on ${shortDate(since)}.` : 'Dashed: before your first imported transaction, so only a guess.'}
     </div>
   )
 }
@@ -262,6 +285,96 @@ export function useDisplayMoney() {
   return { convert, format: v => formatMoney(v, currency, 0), currency }
 }
 
+const signed = (format, v) => `${v >= 0 ? '+' : '−'}${format(Math.abs(v))}`
+
+function MoverList({ title, rows, convert, format, currency, tone }) {
+  return (
+    <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6 }}>{title}</div>
+      {rows.length === 0 && <div style={{ fontSize: 13, color: 'var(--faint)' }}>Nothing.</div>}
+      {rows.map(r => (
+        <div key={r.id} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, padding: '5px 0', borderBottom: '1px solid var(--bd-xs)' }}>
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: 'var(--ink)' }}>
+            {r.merchant}<span style={{ color: 'var(--muted)' }}> · {shortDate(r.date)} · {r.category}</span>
+          </span>
+          <span style={{ flex: 'none', fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: tone }}>{format(convert(Math.abs(r.amount), currency))}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Why the line moved between two points the person dragged across: the biggest
+ *  things that came in and went out, and what no transaction explains. */
+export function ChangeExplainer({ selection, lines, range, convert, format, onClose }) {
+  const api = useHistoryApi()
+  const [which, setWhich] = useState(lines[0]?.key)
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState(null)
+  const key = lines.some(l => l.key === which) ? which : lines[0]?.key
+  useEffect(() => {
+    let live = true
+    setData(null); setErr(null)
+    api(`/explain?key=${encodeURIComponent(key)}&start=${selection.from}&end=${selection.to}&range=${range}`)
+      .then(d => live && setData(d)).catch(e => live && setErr(e.message))
+    return () => { live = false }
+  }, [key, selection.from, selection.to, range]) // eslint-disable-line
+  const money = v => convert(v, data?.currency)
+  const fmtSigned = v => signed(format, money(v))
+  const lateBy = data?.last_transaction && data.last_transaction < data.end
+    ? Math.round((new Date(data.end) - new Date(data.last_transaction)) / 86400000) : 0
+  return (
+    <div style={{ marginTop: 14, padding: '14px 16px', borderRadius: 'var(--radius-lg, 12px)', background: 'var(--surface-2)', border: '1px solid var(--bd)' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--mid)' }}>
+          What changed, {shortDate(selection.from)} → {shortDate(selection.to)}
+          {lines.length > 1 && (
+            <select value={key} onChange={e => setWhich(e.target.value)} aria-label="Line to explain"
+              style={{ marginLeft: 8, fontSize: 12, fontFamily: 'inherit', background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--bd-xl)', borderRadius: 7, padding: '2px 6px' }}>
+              {lines.map(l => <option key={l.key} value={l.key}>{l.label}</option>)}
+            </select>
+          )}
+        </div>
+        <button type="button" onClick={onClose} aria-label="Clear the selection"
+          style={{ background: 'none', border: 'none', padding: 0, fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600, color: 'var(--accent)', cursor: 'pointer' }}>Clear</button>
+      </div>
+      {err && <div style={{ marginTop: 8, fontSize: 13, color: 'var(--accent)' }}>{err}</div>}
+      {!err && !data && <div style={{ marginTop: 8, fontSize: 13, color: 'var(--muted)' }}>Looking at what moved…</div>}
+      {data && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', margin: '6px 0 12px' }}>
+            <span style={{ fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 500, color: data.change >= 0 ? 'var(--sage)' : 'var(--accent)' }}>{fmtSigned(data.change)}</span>
+            <span style={{ fontSize: 12.5, color: 'var(--muted)' }}>from {format(money(data.start_value))} to {format(money(data.end_value))}{data.estimated ? ' · estimated' : ''}</span>
+          </div>
+          {data.count === 0
+            ? <div style={{ fontSize: 13.5, color: 'var(--mid)', lineHeight: 1.5 }}>No transactions in this stretch.</div>
+            : (
+              <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap' }}>
+                <MoverList title="Biggest additions" rows={data.up} convert={convert} format={format} currency={data.currency} tone="var(--sage)" />
+                <MoverList title="Biggest deductions" rows={data.down} convert={convert} format={format} currency={data.currency} tone="var(--accent)" />
+              </div>
+            )}
+          {data.categories.length > 0 && (
+            <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--mid)', lineHeight: 1.7 }}>
+              By category: {data.categories.map((c, i) => (
+                <span key={c.category}>{i ? ' · ' : ''}{c.category} <b style={{ color: c.amount >= 0 ? 'var(--sage)' : 'var(--accent)', fontWeight: 600 }}>{fmtSigned(c.amount)}</b></span>
+              ))}
+            </div>
+          )}
+          {Math.abs(data.other) >= Math.max(1, Math.abs(data.change) * 0.03) && (
+            <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--muted)', lineHeight: 1.5 }}>
+              {fmtSigned(data.other)} isn't explained by any transaction: usually exchange rates, an investment's value, a balance you edited, or statements not imported yet.
+            </div>
+          )}
+          {lateBy > 3 && (
+            <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--muted)' }}>The latest imported transaction is from {shortDate(data.last_transaction)}, so this stretch may be incomplete.</div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 export function BalancesHistory() {
   const api = useHistoryApi()
   const { convert, format } = useDisplayMoney()
@@ -269,6 +382,8 @@ export function BalancesHistory() {
   const [keys, setKeys] = useState(['net_worth'])
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
+  const [selection, setSelection] = useState(null)   // { from, to } dragged across the chart
+  useEffect(() => { setSelection(null) }, [range, keys.join(',')])
   useEffect(() => { try { localStorage.setItem('atlas:history-range', range) } catch { /* not kept */ } }, [range])
   useEffect(() => {
     let live = true
@@ -282,6 +397,7 @@ export function BalancesHistory() {
   }))
   const toggle = k => setKeys(ks => (ks.includes(k) ? (ks.length > 1 ? ks.filter(x => x !== k) : ks) : [...ks, k]))
   const first = series[0]?.points.find(p => p.value != null), last = series[0] && [...series[0].points].reverse().find(p => p.value != null)
+  const explainable = (data?.series || []).filter(x => x.key === 'net_worth' || x.key.startsWith('account:'))
   return (
     <Section title="Over time" right={<RangeTabs value={range} onChange={setRange} />}>
       {first && last && series.length === 1 && (
@@ -294,7 +410,13 @@ export function BalancesHistory() {
       )}
       {err ? <div style={{ fontSize: 13, color: 'var(--accent)' }}>{err}</div>
         : !data ? <div style={{ height: 180, fontSize: 13, color: 'var(--muted)' }}>Loading…</div>
-        : <LineChart series={series} format={format} />}
+        : <LineChart series={series} format={format} onSelect={explainable.length ? setSelection : undefined} selection={selection} />}
+      {data && explainable.length > 0 && !selection && (
+        <div style={{ fontSize: 11.5, color: 'var(--faint)', marginTop: 6 }}>Drag across the chart to see what changed.</div>
+      )}
+      {selection && explainable.length > 0 && (
+        <ChangeExplainer selection={selection} lines={explainable} range={range} convert={convert} format={format} onClose={() => setSelection(null)} />
+      )}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12 }}>
         {options.map(o => {
           const on = keys.includes(o.key)

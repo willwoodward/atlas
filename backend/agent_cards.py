@@ -198,49 +198,24 @@ async def dispatch(name: str, args: dict, db, gcal_events=None):
                 "show": {"kind": "finances", "category": args.get("category"), "type": want}}
 
     if name == "net_worth_trend":
-        import fx
+        import history
         months = max(2, min(int(args.get("months") or 6), 24))
-        async with db.execute("SELECT id, type, balance, currency FROM finances_accounts") as c:
-            accounts = [dict(r) for r in await c.fetchall()]
-        if not accounts:
+        line = await history.balance_line(db, "net_worth", today)
+        if line is None:
             return {"error": "No accounts yet — add them on the Finances page."}
-        async with db.execute("SELECT account_id, type, amount, date FROM finances_transactions WHERE account_id IS NOT NULL") as c:
-            txns = [dict(r) for r in await c.fetchall()]
-        table = await fx.ensure(db, {(a["currency"] or "EUR").upper() for a in accounts})
+        _, value_on, oldest = line
         # Today, then the end of each month before it.
         ends, first_of = [today], today.replace(day=1)
         for _ in range(months - 1):
             end = first_of - timedelta(days=1)
             ends.append(end)
             first_of = end.replace(day=1)
-        import snapshots
-        points, recorded = [], 0
-        for end in reversed(ends):
-            # A recorded value (snapshots.py) from that month beats an estimate; today
-            # is never read from a recording (hourly, so it can lag a changed balance).
-            kept = None if end == today else await snapshots.value_on_or_before(db, "net_worth", end.isoformat(), end.replace(day=1).isoformat())
-            if kept is not None:
-                recorded += 1
-                points.append({"label": "Now" if end == today else end.strftime("%b"), "value": round(kept, 2),
-                               "current": end == today, "recorded": True})
-                continue
-            total = 0.0
-            for a in accounts:
-                after = sum((t["amount"] if t["type"] == "income" else -t["amount"])
-                            for t in txns if t["account_id"] == a["id"] and t["date"] > end.isoformat())
-                bal = float(a["balance"] or 0)
-                at = bal - after if a["type"] != "credit" else bal + after
-                try:
-                    v = table.convert(at, (a["currency"] or "EUR").upper(), "EUR")
-                except fx.NoRate:
-                    continue
-                total += -v if a["type"] == "credit" else v
-            points.append({"label": "Now" if end == today else end.strftime("%b"), "value": round(total, 2), "current": end == today})
-        accounts_without = sum(1 for a in accounts if not any(t["account_id"] == a["id"] for t in txns))
-        note = ("Recorded" if recorded == len(points) else
-                "Estimated from your balances and imported transactions" + (f" ({recorded} month{'s' if recorded != 1 else ''} recorded)" if recorded else ""))
-        if accounts_without and recorded < len(points):
-            note += f"; {accounts_without} account{'s' if accounts_without != 1 else ''} without transactions held flat"
+        points = [{"label": "Now" if end == today else end.strftime("%b"), "value": round(value_on(end), 2), "current": end == today}
+                  for end in reversed(ends)]
+        # Each balance is walked back from today's through the transactions by their
+        # own dates, so a month before the first transaction is only a guess.
+        guessed = sum(1 for end in ends if oldest is None or end.isoformat() < oldest)
+        note = "From your balances and the dates of your imported transactions" + (f" ({guessed} month{'s' if guessed != 1 else ''} before your first transaction, so a guess)" if guessed else "")
         return {"currency": "EUR", "points": points, "note": note,
                 "card": {"type": "trend", "title": "Net worth · month end", "unit": "money", "currency": "EUR", "line": True,
                          "points": points, "note": note},

@@ -130,7 +130,7 @@ class TestNewCards:
         await seed_txns(db, [("Payroll", "Salary", 500, first.isoformat(), "income", "a1")])
         r = await call(db, "net_worth_trend", months=2)
         assert [p["value"] for p in r["card"]["points"]] == [500, 1000]
-        assert "Estimated" in r["card"]["note"]
+        assert r["card"]["note"].startswith("From your balances")
 
     async def test_goal_time_per_week(self, db):
         await db.execute("INSERT INTO goals (id, title, color, created_at, tags) VALUES ('g1','Fitness','#6f8168','2026-01-01','gym')")
@@ -187,14 +187,16 @@ class TestSnapshots:
         await snapshots.take(db)
         assert await snapshots.value_on_or_before(db, "net_worth", date.today().isoformat()) == 1300
 
-    async def test_net_worth_uses_recorded_months(self, db):
+    async def test_net_worth_follows_transaction_dates_not_recordings(self, db):
+        # The balance only changed when a statement was imported, so the recordings
+        # sit flat; the dated transactions are what say when money moved.
         await db.execute("INSERT INTO finances_accounts (id, name, type, balance, currency) VALUES ('a1','Current','checking',1000,'EUR')")
         last_month_end = date.today().replace(day=1) - timedelta(days=1)
-        await db.execute("INSERT INTO daily_snapshots (date, key, value) VALUES (?, 'net_worth', 777)", (last_month_end.replace(day=20).isoformat(),))
-        await db.commit()
+        for day in range(1, 8):
+            await db.execute("INSERT INTO daily_snapshots (date, key, value) VALUES (?, 'net_worth', 777)", ((last_month_end - timedelta(days=day)).isoformat(),))
+        await seed_txns(db, [("Payroll", "Salary", 300, last_month_end.replace(day=10).isoformat(), "income", "a1")])
         card = (await call(db, "net_worth_trend", months=2))["card"]
-        assert [p["value"] for p in card["points"]] == [777, 1000]
-        assert card["points"][0]["recorded"] and "1 month recorded" in card["note"]
+        assert [p["value"] for p in card["points"]] == [1000, 1000]        # not 777: the salary came in on the 10th
 
 
 async def test_todays_summary_draws_the_day_and_the_todos(db):

@@ -26,6 +26,29 @@ async def get_series(keys: str = Query("net_worth", max_length=500), range: str 
         await db.close()
 
 
+@router.get("/explain")
+async def get_explanation(key: str = Query(max_length=120), start: str = Query(max_length=10), end: str = Query(max_length=10),
+                          range: str = "90d", user: dict = Depends(get_current_user)):
+    """Why net worth (or an account) moved between two points on its chart."""
+    if range not in history.RANGES:
+        raise HTTPException(422, "range is 30d, 90d, 1y or all")
+    from datetime import date
+    try:
+        date.fromisoformat(start), date.fromisoformat(end)
+    except ValueError:
+        raise HTTPException(422, "start and end are dates like 2026-11-02")
+    db = await inbox.connect()
+    try:
+        out = await history.explain(db, key, start, end, range)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    finally:
+        await db.close()
+    if out is None:
+        raise HTTPException(404, "No such line")
+    return out
+
+
 @router.get("/cashflow")
 async def get_cashflow(months: int = 12, user: dict = Depends(get_current_user)):
     db = await inbox.connect()
