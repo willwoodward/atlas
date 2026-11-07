@@ -114,6 +114,16 @@ describe('Google Calendar changes', () => {
     expect(ctx.gcal.events[0]).toMatchObject({ date: '2026-11-04', start: 9 })
   })
 
+  it('updates the time text on a moved or resized event too', async () => {
+    let done
+    await act(async () => { done = ctx.shiftGcalEvents(['a'], { days: 0, startHours: 2, endHours: 3 }) })
+    const e = ctx.gcal.events[0]                              // 9–10 became 11–13
+    const t = h => new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    expect(e).toMatchObject({ time: `${t(11)}–${t(13)}`, timeDisplay: t(11), endTimeDisplay: t(13), durDisplay: '120m' })
+    await google.release(); await flush()
+    await act(async () => { await done })
+  })
+
   it('deleting an event while Google is still making it removes it from Google too', async () => {
     let created
     await act(async () => { created = ctx.createGcalEvent({ title: 'Oops', date: '2026-11-04', startH: 14, endH: 15, color: '#5f7591' }) })

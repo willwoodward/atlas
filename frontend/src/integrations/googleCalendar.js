@@ -144,6 +144,21 @@ function parsedt(dt) {
 const toH = d => d.getHours() + d.getMinutes() / 60
 const fmtT = d => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 
+// Redoes an event's time text (time, timeDisplay, endTimeDisplay, durDisplay)
+// from its start and length in hours, in the same style toCalendarEvents uses.
+// For events moved on screen before Google has confirmed, so the labels agree
+// with where the block now sits.
+const fmtHours24 = h => {
+  const mins = Math.round(h * 60) % (24 * 60)
+  return fmtT(new Date(2000, 0, 1, Math.floor(mins / 60), mins % 60))
+}
+export function relabelTimes(e) {
+  if (e.isAllDay) return e
+  if (e.isSleepWakeUp) { const t = fmtHours24(e.start); return { ...e, time: t, timeDisplay: t } }
+  const from = fmtHours24(e.start), to = fmtHours24(e.start + e.dur)
+  return { ...e, time: `${from}–${to}`, timeDisplay: from, endTimeDisplay: to, durDisplay: `${Math.round(e.dur * 60)}m` }
+}
+
 export function toCalendarEvents(items = []) {
   const result = []
 

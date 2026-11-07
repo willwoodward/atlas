@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { localDateStr, parseLocalDate, addDays } from '../lib/week.js'
-import { buildAuthUrl, fetchEvents, toCalendarEvents, gcalEventBody, insertGcalEvent, deleteGcalEvent, shiftGcalEvent } from '../integrations/googleCalendar.js'
+import { buildAuthUrl, fetchEvents, relabelTimes, toCalendarEvents, gcalEventBody, insertGcalEvent, deleteGcalEvent, shiftGcalEvent } from '../integrations/googleCalendar.js'
 import { gcalColorIdFor, atlasNameForHex } from '../lib/calendarColors.js'
 import { useAuth } from './AuthContext.jsx'
 import { useRefresh } from './RefreshContext.jsx'
@@ -177,8 +177,8 @@ export function IntegrationsProvider({ children }) {
   }, [gcalConnected, getAccessToken])
 
   // Moves or resizes events by the same amount ({ days, startHours, endHours }).
-  // The grid updates at once and the refetch that follows brings back Google's
-  // own times and labels.
+  // The grid, including each event's time text, updates at once and the refetch
+  // that follows brings back Google's own.
   const shiftGcalEvents = useCallback(async (ids, shift) => {
     const { days = 0, startHours = 0, endHours = 0 } = shift
     if (!gcalConnected) throw new Error('Not connected')
@@ -188,7 +188,7 @@ export function IntegrationsProvider({ children }) {
     const shiftDay = date => localDateStr(addDays(parseLocalDate(date), days))
     const nudge = e => isMoving(e)
       ? (e.isAllDay ? { ...e, date: shiftDay(e.date) }
-        : { ...e, date: shiftDay(e.date), start: e.start + startHours, dur: Math.max(e.dur + endHours - startHours, 0.25) })
+        : relabelTimes({ ...e, date: shiftDay(e.date), start: e.start + startHours, dur: Math.max(e.dur + endHours - startHours, 0.25) }))
       : e
     const beforeWeeks = weeksRef.current, beforePending = pendingRef.current
     mapWeeks(evs => evs.map(nudge))
